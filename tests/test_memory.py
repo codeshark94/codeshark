@@ -12,8 +12,8 @@ class MemoryStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "memory.json"
             store = MemoryStore(path)
-            first = store.add("Python 테스트는 unittest를 사용한다")
-            second = store.add("답변은 한국어로 한다")
+            first = store.add("Python tests use unittest")
+            second = store.add("Answer in English")
 
             restored = MemoryStore(path)
             self.assertEqual([item.text for item in restored.list()], [first.text, second.text])
@@ -24,9 +24,9 @@ class MemoryStoreTests(unittest.TestCase):
     def test_rejects_duplicate_memory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = MemoryStore(Path(directory) / "memory.json")
-            store.add("같은 기억")
+            store.add("same memory")
             with self.assertRaises(ValueError):
-                store.add("같은 기억")
+                store.add("same memory")
 
     def test_enforces_total_memory_capacity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -38,11 +38,11 @@ class MemoryStoreTests(unittest.TestCase):
     def test_compose_prompt_includes_approved_memory_and_current_request(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = MemoryStore(Path(directory) / "memory.json")
-            item = store.add("답변은 한국어로 한다")
-            prompt, memory_ids, skill_ids = compose_prompt("현재 요청", store.list())
-            self.assertIn("승인한 장기 메모리", prompt)
+            item = store.add("Answer in English")
+            prompt, memory_ids, skill_ids = compose_prompt("Current request", store.list())
+            self.assertIn("Long-term memories approved", prompt)
             self.assertIn(item.text, prompt)
-            self.assertTrue(prompt.endswith("현재 요청"))
+            self.assertTrue(prompt.endswith("Current request"))
             self.assertEqual(memory_ids, (item.id,))
             self.assertEqual(skill_ids, ())
 
@@ -52,7 +52,7 @@ class MemoryStoreTests(unittest.TestCase):
             store.add("a" * 20)
             second = store.add("b" * 20)
             prompt, memory_ids, skill_ids = compose_prompt(
-                "요청",
+                "request",
                 store.list(),
                 max_memory_chars=30,
             )
@@ -64,15 +64,15 @@ class MemoryStoreTests(unittest.TestCase):
     def test_compose_prompt_includes_only_selected_skill(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             skills = SkillStore(Path(directory) / "skills")
-            selected = skills.add("Python 테스트", "unittest 실행 절차")
-            skills.add("배포", "운영 서버 배포 절차")
+            selected = skills.add("Python testing", "unittest execution procedure")
+            skills.add("Deployment", "production deployment procedure")
             prompt, _, skill_ids = compose_prompt(
-                "unittest 테스트를 실행해줘",
+                "run the unittest tests",
                 [],
-                skills.select("unittest 테스트를 실행해줘"),
+                skills.select("run the unittest tests"),
             )
-            self.assertIn("unittest 실행 절차", prompt)
-            self.assertNotIn("운영 서버 배포 절차", prompt)
+            self.assertIn("unittest execution procedure", prompt)
+            self.assertNotIn("production deployment procedure", prompt)
             self.assertEqual(skill_ids, (selected.id,))
 
 
@@ -84,7 +84,7 @@ class FeedbackStoreTests(unittest.TestCase):
             store.record(
                 task_id="task-1",
                 rating="good",
-                note="정확함",
+                note="accurate",
                 thread_id="thread-1",
                 memory_ids=("m1",),
                 skill_ids=("s1",),

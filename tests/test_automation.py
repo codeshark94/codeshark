@@ -9,10 +9,10 @@ from codex_codeshark.automation import AgentStore, RiskPolicy, next_cron_time
 class RiskPolicyTests(unittest.TestCase):
     def test_requires_approval_for_external_or_destructive_actions(self) -> None:
         policy = RiskPolicy()
-        self.assertTrue(policy.requires_approval("운영 서버에 배포해줘"))
+        self.assertTrue(policy.requires_approval("deploy to production"))
         self.assertTrue(policy.requires_approval("send this email"))
         self.assertTrue(policy.requires_approval("delete the release"))
-        self.assertFalse(policy.requires_approval("코드를 설명해줘"))
+        self.assertFalse(policy.requires_approval("explain the code"))
 
 
 class AgentStoreTests(unittest.TestCase):

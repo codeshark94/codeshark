@@ -14,7 +14,7 @@ PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
 def main() -> int:
     if not (PROJECT_ROOT / "config.local.toml").is_file():
-        print("config.local.toml이 없습니다. 먼저 setup을 실행하세요.")
+        print("config.local.toml is missing. Run setup first.")
         return 1
 
     runtime = PROJECT_ROOT / "runtime"
@@ -52,7 +52,7 @@ def main() -> int:
         print(result.stderr.strip() or result.stdout.strip())
         return result.returncode
     subprocess.run(["/bin/launchctl", "kickstart", "-k", f"{domain}/{LABEL}"], check=False)
-    print(f"설치 완료: {PLIST_PATH}")
+    print(f"LaunchAgent installed: {PLIST_PATH}")
     return 0
 
 

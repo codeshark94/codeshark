@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_codeshark.app import AgentApp
+from codex_codeshark.app import HELP_TEXT, AgentApp
 from codex_codeshark.codex_runner import RunResult
 from codex_codeshark.config import Config
 
@@ -85,6 +85,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.store.pending_count(), 0)
         self.assertEqual(self.api.messages, [])
 
+    def test_help_and_status_are_english(self) -> None:
+        self.assertNotRegex(HELP_TEXT, r"[가-힣]")
+        self.assertNotRegex(self.app._status_text(), r"[가-힣]")
+
     def test_ignores_group_message(self) -> None:
         self.app._handle_update(self.update(123, "do work", chat_type="group"))
         self.assertEqual(self.app.store.pending_count(), 0)
@@ -93,17 +97,17 @@ class AgentAppAuthorizationTests(unittest.TestCase):
     def test_queues_authorized_private_message(self) -> None:
         self.app._handle_update(self.update(123, "do work"))
         self.assertEqual(self.app.store.pending_count(), 1)
-        self.assertIn("접수", self.api.messages[0][1])
+        self.assertIn("queued", self.api.messages[0][1])
 
     def test_remember_list_and_forget_commands(self) -> None:
-        self.app._handle_update(self.update(123, "/remember 답변은 한국어로 한다"))
+        self.app._handle_update(self.update(123, "/remember Answer in English"))
         self.assertIn("m1", self.api.messages[-1][1])
 
         self.app._handle_update(self.update(123, "/memories"))
-        self.assertIn("답변은 한국어로 한다", self.api.messages[-1][1])
+        self.assertIn("Answer in English", self.api.messages[-1][1])
 
         self.app._handle_update(self.update(123, "/forget m1"))
-        self.assertIn("삭제", self.api.messages[-1][1])
+        self.assertIn("Deleted", self.api.messages[-1][1])
         self.assertEqual(self.app.memory.list(), [])
 
     def test_new_deletes_current_session_before_clearing_it(self) -> None:
@@ -113,7 +117,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, "/new"))
         self.assertEqual(runner.deleted_sessions, ["thread-1"])
         self.assertIsNone(self.app.state.snapshot().codex_thread_id)
-        self.assertIn("삭제", self.api.messages[-1][1])
+        self.assertIn("deleted", self.api.messages[-1][1])
 
     def test_new_keeps_current_session_when_delete_fails(self) -> None:
         runner = FakeCodexRunner()
@@ -122,7 +126,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.state.set_codex_thread_id("thread-1")
         self.app._handle_update(self.update(123, "/new"))
         self.assertEqual(self.app.state.snapshot().codex_thread_id, "thread-1")
-        self.assertIn("삭제하지 못했습니다", self.api.messages[-1][1])
+        self.assertIn("could not be deleted", self.api.messages[-1][1])
 
     def test_new_without_current_session_starts_fresh(self) -> None:
         runner = FakeCodexRunner()
@@ -133,26 +137,26 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_feedback_requires_a_successful_completed_task(self) -> None:
         self.app._handle_update(self.update(123, "/good"))
-        self.assertIn("평가할 완료 작업", self.api.messages[-1][1])
+        self.assertIn("no completed task", self.api.messages[-1][1].lower())
 
     def test_successful_task_uses_memory_and_accepts_one_feedback(self) -> None:
-        self.app.memory.add("답변은 한국어로 한다")
+        self.app.memory.add("Answer in English")
         runner = FakeCodexRunner()
         self.app.runner = runner
         self.app._handle_update(self.update(123, "do work"))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertIn("답변은 한국어로 한다", runner.prompts[0][0])
+        self.assertIn("Answer in English", runner.prompts[0][0])
         self.assertTrue(runner.prompts[0][0].endswith("do work"))
-        self.app._handle_update(self.update(123, "/good 정확함"))
+        self.app._handle_update(self.update(123, "/good accurate"))
         feedback_path = self.app.config.state_path.parent / "feedback.jsonl"
         event = json.loads(feedback_path.read_text(encoding="utf-8"))
         self.assertEqual(event["rating"], "good")
-        self.assertEqual(event["note"], "정확함")
+        self.assertEqual(event["note"], "accurate")
 
         self.app._handle_update(self.update(123, "/good"))
-        self.assertIn("평가할 완료 작업", self.api.messages[-1][1])
+        self.assertIn("no completed task", self.api.messages[-1][1].lower())
 
     def test_unsuccessful_tasks_are_not_available_for_feedback(self) -> None:
         results = [
@@ -167,12 +171,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 task = self.app.store.claim_next_task()
                 self.app._execute_task(task)
 
-                self.app._handle_update(self.update(123, "/bad 실패함"))
-                self.assertIn("평가할 완료 작업", self.api.messages[-1][1])
+                self.app._handle_update(self.update(123, "/bad failed"))
+                self.assertIn("no completed task", self.api.messages[-1][1].lower())
                 self.assertFalse((self.app.config.state_path.parent / "feedback.jsonl").exists())
 
     def test_risky_task_waits_for_explicit_approval(self) -> None:
-        self.app._handle_update(self.update(123, "운영 서버에 배포해줘"))
+        self.app._handle_update(self.update(123, "deploy to production"))
         task = self.app.store.list_tasks()[0]
         self.assertEqual(task.status, "awaiting_approval")
         self.assertIsNone(self.app.store.claim_next_task())
@@ -184,12 +188,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         runner = FakeCodexRunner()
         self.app.runner = runner
         self.app._execute_task(approved)
-        self.assertIn("명시적으로 승인", runner.prompts[0][0])
+        self.assertIn("explicitly approved", runner.prompts[0][0])
 
     def test_schedule_commands_and_telegram_safe_aliases(self) -> None:
-        self.app._handle_update(self.update(123, "/remind 5 상태 확인"))
-        self.app._handle_update(self.update(123, "/heartbeat 10 로그 확인"))
-        self.app._handle_update(self.update(123, "/cron */15 * * * * | 지표 확인"))
+        self.app._handle_update(self.update(123, "/remind 5 check status"))
+        self.app._handle_update(self.update(123, "/heartbeat 10 check logs"))
+        self.app._handle_update(self.update(123, "/cron */15 * * * * | check metrics"))
         schedules = self.app.store.list_schedules()
         self.assertEqual(len(schedules), 3)
 
@@ -201,39 +205,39 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, f"/delete_job {job_id}"))
         self.assertIsNone(self.app.store.get_schedule(job_id))
 
-        self.app.skills.add("테스트", "테스트 절차")
+        self.app.skills.add("Testing", "Test procedure")
         skill_id = self.app.skills.list()[0].id
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
         self.assertEqual(self.app.skills.list(), [])
 
     def test_learning_candidate_requires_approval_before_memory_write(self) -> None:
-        self.app._handle_update(self.update(123, "/learn memory 사용자는 짧은 답변을 선호한다"))
+        self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
         candidate = self.app.learning.list_pending()[0]
         self.assertEqual(self.app.memory.list(), [])
 
         self.app._handle_update(self.update(123, f"/approve {candidate.id}"))
-        self.assertEqual(self.app.memory.list()[0].text, "사용자는 짧은 답변을 선호한다")
+        self.assertEqual(self.app.memory.list()[0].text, "The user prefers concise replies")
 
     def test_approved_skill_is_loaded_only_for_relevant_task(self) -> None:
         self.app._handle_update(
-            self.update(123, "/learn skill Python 테스트 | unittest로 테스트를 실행한다")
+            self.update(123, "/learn skill Python testing | Run tests with unittest")
         )
         candidate = self.app.learning.list_pending()[0]
         self.app._handle_update(self.update(123, f"/approve {candidate.id}"))
         runner = FakeCodexRunner()
         self.app.runner = runner
 
-        self.app._handle_update(self.update(123, "Python unittest 테스트를 실행해줘"))
+        self.app._handle_update(self.update(123, "Run the Python unittest tests"))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
-        self.assertIn("unittest로 테스트를 실행한다", runner.prompts[0][0])
+        self.assertIn("Run tests with unittest", runner.prompts[0][0])
 
     def test_model_learning_marker_is_hidden_and_staged(self) -> None:
         result = RunResult(
             exit_code=0,
             message=(
                 "done\n<learning_candidate>"
-                '{"kind":"memory","title":"선호","content":"사용자는 한국어를 선호한다"}'
+                '{"kind":"memory","title":"Preference","content":"The user prefers English"}'
                 "</learning_candidate>"
             ),
             thread_id="thread-new",
@@ -271,7 +275,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             exit_code=0,
             message=(
                 "<learning_candidate>"
-                '{"kind":"memory","title":"요약","content":"지속할 사실"}'
+                '{"kind":"memory","title":"Summary","content":"Durable fact"}'
                 "</learning_candidate>"
             ),
             thread_id="thread-old",
@@ -287,7 +291,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(task)
         self.assertEqual(runner.deleted_sessions, ["thread-old"])
         self.assertEqual(self.app.state.snapshot().codex_thread_id, "thread-new")
-        self.assertEqual(self.app.learning.list_pending()[0].title, "요약")
+        self.assertEqual(self.app.learning.list_pending()[0].title, "Summary")
 
 
 if __name__ == "__main__":

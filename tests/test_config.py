@@ -1,13 +1,16 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from codex_codeshark.config import (
     Config,
     ConfigError,
     validate_codex_profile,
+    validate_bot_token,
     configured_mcp_servers,
     load_config,
+    prompt_and_store_bot_token,
     validate_mcp_policy,
     write_codex_profile,
     write_local_config,
@@ -15,6 +18,31 @@ from codex_codeshark.config import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_validates_bot_token_without_echoing_invalid_value(self) -> None:
+        token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456"
+        self.assertEqual(validate_bot_token(f"  {token}\n"), token)
+        invalid = 'cd "$HOME/workspace/Codex-codeshark"'
+        with self.assertRaises(ConfigError) as caught:
+            validate_bot_token(invalid)
+        self.assertNotIn(invalid, str(caught.exception))
+
+    @patch("codex_codeshark.config.subprocess.run")
+    @patch("codex_codeshark.config.getpass.getpass")
+    def test_stores_validated_token_without_command_line_exposure(
+        self,
+        getpass_mock: Mock,
+        run_mock: Mock,
+    ) -> None:
+        token = "123456789:ABC_def-123"
+        getpass_mock.return_value = token
+        run_mock.return_value = Mock(returncode=0)
+
+        self.assertEqual(prompt_and_store_bot_token(), token)
+        command = run_mock.call_args.args[0]
+        self.assertNotIn(token, command)
+        self.assertEqual(run_mock.call_args.kwargs["input"], f"{token}\n{token}\n")
+        self.assertTrue(run_mock.call_args.kwargs["capture_output"])
+
     def test_loads_valid_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

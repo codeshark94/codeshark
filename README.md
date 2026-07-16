@@ -1,58 +1,186 @@
 # Codex-codeshark
 
-개인 Telegram 메시지를 이 Mac의 Codex CLI에 연결하는 단일 사용자용 로컬 에이전트입니다. 채널은 Telegram 하나이며, 멀티에이전트나 별도 웹 UI는 포함하지 않습니다.
+Codex-codeshark is a private, single-user Telegram gateway for the local OpenAI Codex CLI on macOS. It turns a Telegram private chat into a durable control plane for one sandboxed Codex session, scheduled checks, approved long-term memory, and reusable local skills.
+
+This project is designed for personal use. It is not a hosted bot service, a multi-user gateway, or a multi-agent framework.
+
+## Highlights
+
+- Continues one interactive Codex session across Telegram messages and restarts.
+- Persists queued work in SQLite and executes one task at a time.
+- Supports one-time reminders, heartbeat intervals, and five-field cron jobs.
+- Runs scheduled work with `codex exec --ephemeral` so it does not create session history.
+- Lets the model propose memories and skills, but never applies them without explicit approval.
+- Loads at most three relevant approved skills for each request.
+- Rotates oversized sessions after creating a reviewable durable-summary proposal.
+- Requires explicit approval for requests that may modify external state.
+- Applies a fail-closed MCP server and tool allowlist.
+- Exports portable personal data without exporting tokens or machine-specific configuration.
+- Uses only the Python standard library at runtime.
+
+## Architecture
 
 ```text
-Telegram 개인 채팅
-  -> 사용자 인증과 승인 게이트
-  -> SQLite 영속 작업 큐 / 스케줄러
-  -> Codex CLI (`codex-codeshark` profile)
-  -> workspace/ 내부 파일
+Telegram private chat
+        |
+        v
+Authenticated user + approval gate
+        |
+        v
+Persistent SQLite queue and scheduler
+        |
+        v
+CodexRunner -> local Codex CLI -> workspace/
+        |
+        +-> approved memory and relevant local skills
 ```
 
-## 구현된 기능
+Telegram is only the authenticated transport and control plane. Codex performs reasoning and tool execution. Remote file operations are confined to the server-controlled `workspace/` directory by the `workspace-write` Codex sandbox.
 
-- 현재 Codex 세션을 이어 쓰는 대화형 작업
-- 재시작 후에도 복구되는 단일-worker SQLite 작업 큐
-- 일회성 알림, heartbeat, 5-field cron 예약 실행
-- 모델이 메모리·스킬 후보를 제안하고 사용자가 승인하는 자기학습 루프
-- 관련 요청에만 최대 3개의 승인된 로컬 스킬 주입
-- 세션 turn 한도 도달 시 지속 정보 요약 후보 생성, 이전 세션 삭제, 새 세션 시작
-- 외부 변경·파괴적 요청의 명시적 `/approve` 게이트
-- Codex MCP 서버별 활성화 및 도구 allowlist
-- 작업 취소, 제한시간, Telegram 메시지 분할, 평가 기록
+## Requirements
 
-## 안전 기본값
+- macOS
+- Python 3.11 or newer
+- The Codex desktop app installed at `/Applications/Codex.app`
+- An existing Codex login (`codex login status` must succeed)
+- A Telegram bot token created with [BotFather](https://t.me/BotFather)
 
-- BotFather 토큰은 저장소가 아닌 macOS Keychain에 저장
-- 로컬에서 페어링한 Telegram 사용자 ID 하나와 개인 채팅만 허용
-- 작업 디렉터리는 서버가 정한 `workspace/`로 고정
-- Codex profile은 `workspace-write`, `approval_policy = never` 사용
-- 한 번에 한 작업만 실행하며 기본 제한시간은 30분
-- Telegram에서 임의 경로나 Codex CLI 옵션을 받지 않음
-- 위험 작업은 실행 전에 task/job ID 단위 승인이 필요함
-- 승인된 작업이 실행 중 중단되면 재시작 후 다시 승인을 요구함
-- 모든 Codex MCP 서버를 로컬 정책에 등록해야 하며, 허용 도구가 없는 서버는 꺼짐
-
-위험 요청 분류는 한국어·영어 패턴과 Codex에 주입하는 실행 정책을 함께 사용합니다. 완전한 보안 경계는 아니므로 외부 쓰기 도구는 MCP allowlist에서도 최소화해야 합니다.
-
-## 1. 초기 설정
-
-BotFather에서 봇을 만든 뒤 토큰을 복사합니다. 토큰을 채팅이나 파일에 넣지 말고 아래 명령의 비공개 입력창에만 입력하세요.
+## Quick start
 
 ```bash
-cd "$HOME/workspace/Codex-codeshark"
+git clone https://github.com/Younghegalian/codeshark.git Codex-codeshark
+cd Codex-codeshark
 PYTHONPATH=src python3 -m codex_codeshark setup
 ```
 
-설정 명령이 일회용 `/pair ...` 코드를 표시하면 Telegram에서 봇에게 그대로 전송합니다. 성공하면 다음 항목이 생성됩니다.
+Setup asks for the BotFather token using hidden input. Paste only the token, not the BotFather message or a shell command. The token is written to macOS Keychain and is never stored in the repository.
 
-- 토큰: macOS Keychain의 `codex-codeshark.bot-token`
-- 사용자 ID와 로컬 정책: git에서 제외된 `config.local.toml`
+Setup then prints a one-time message such as:
 
-`config.local.toml`은 이 설치에서만 사용하는 설정 파일입니다. 페어링된 Telegram 사용자 ID, 고정 workspace, Codex 실행 파일과 profile, timeout·대기열·세션·메모리 상한, MCP 서버·도구 허용 목록을 담습니다. BotFather 토큰과 대화 전문은 들어 있지 않지만 사용자 ID와 로컬 경로가 있으므로 Git에는 커밋하지 않습니다.
+```text
+/pair A1B2C3D4
+```
 
-설정 시점에 Codex의 `~/.codex/config.toml`과 `~/.codex/codex-codeshark.config.toml`에 있는 MCP 서버 이름은 `known_servers`로 자동 복사되고 모두 비활성 상태로 시작합니다. 나중에 Codex MCP 구성을 바꾸면 `config.local.toml`도 맞춰야 합니다. 허용하지 않을 서버도 `known_servers`에는 있어야 실행 시 명시적으로 비활성화됩니다.
+Send that exact message to the new bot in a private Telegram chat within three minutes. Pairing records exactly one allowed Telegram user ID.
+
+Validate the installation:
+
+```bash
+PYTHONPATH=src python3 -m codex_codeshark doctor
+```
+
+A healthy installation reports `PASS` for local configuration, Keychain token access, Telegram API access, Codex login, the restricted Codex profile, and the MCP policy.
+
+Run in the foreground first:
+
+```bash
+PYTHONPATH=src python3 -m codex_codeshark run
+```
+
+After verifying the bot in Telegram, stop the foreground process and install the LaunchAgent:
+
+```bash
+PYTHONPATH=src python3 scripts/install_launch_agent.py
+```
+
+Check the background service and logs:
+
+```bash
+launchctl print gui/$(id -u)/com.codeshark.agent
+tail -f runtime/agent.out.log runtime/agent.err.log
+```
+
+Remove the LaunchAgent:
+
+```bash
+python3 scripts/uninstall_launch_agent.py
+```
+
+## Local configuration
+
+`setup` creates a gitignored `config.local.toml`. It contains installation-specific values:
+
+- The paired Telegram user ID
+- The fixed workspace path
+- The Codex binary and profile
+- Polling, task timeout, and queue limits
+- Session and memory capacity limits
+- The MCP server inventory and per-server tool allowlist
+
+It does not contain the BotFather token or conversation transcripts. It is still private because it contains a user ID and local filesystem paths.
+
+See [`config.example.toml`](config.example.toml) for the complete schema.
+
+## Telegram commands
+
+| Command | Purpose |
+|---|---|
+| Plain text | Queue a task in the current interactive Codex session |
+| `/status` | Show active work, queue depth, session capacity, and stored item counts |
+| `/tasks` | List recent persistent task records |
+| `/cancel` | Cancel the active Codex process or the oldest queued task |
+| `/new` | Permanently delete the current Codex session and start fresh |
+| `/remember TEXT` | Store an explicitly approved long-term memory |
+| `/memories` | List approved long-term memories |
+| `/forget ID` | Delete a long-term memory |
+| `/learn memory TEXT` | Create a memory proposal |
+| `/learn skill NAME \| PROCEDURE` | Create a reusable skill proposal |
+| `/learning` | List pending learning proposals |
+| `/approve ID` | Approve a learning proposal, risky task, or risky scheduled job |
+| `/reject ID` | Reject a pending proposal, task, or job |
+| `/skills` | List approved local skills |
+| `/forget_skill ID` | Delete an approved skill |
+| `/good [NOTE]` | Positively rate the last successful task |
+| `/bad [REASON]` | Negatively rate the last successful task |
+| `/remind MINUTES REQUEST` | Run a request once after a delay |
+| `/heartbeat MINUTES REQUEST` | Run a periodic check |
+| `/cron EXPRESSION \| REQUEST` | Run a request on a local-time five-field cron schedule |
+| `/jobs` | List scheduled jobs |
+| `/pause ID` | Pause a scheduled job |
+| `/resume_job ID` | Resume a paused job |
+| `/delete_job ID` | Delete a scheduled job |
+| `/mcp` | Show the effective MCP server and tool policy |
+| `/help` | Show the command summary |
+
+## Learning model
+
+Codex may append a hidden structured proposal when a task reveals a durable preference, fact, or reusable procedure. The gateway removes that block from the Telegram response and stores it as pending.
+
+Nothing is learned automatically:
+
+1. The model or user proposes a memory or skill.
+2. The proposal appears under `/learning`.
+3. The user applies it with `/approve ID` or discards it with `/reject ID`.
+
+Approved memories are injected as durable context. Approved skills are selected by relevance and loaded only when needed. Approving a skill with the same name replaces the existing procedure instead of creating an unbounded series of copies.
+
+## Sessions and scheduling
+
+Interactive Telegram requests continue the current persisted Codex session. The session ID and turn count are stored in `runtime/state.json`.
+
+When the configured turn limit is reached, Codex creates a durable-summary proposal. The gateway deletes the previous Codex session only after that proposal is safely staged. If summarization or deletion fails, the existing session is kept.
+
+Scheduled jobs are always ephemeral. They do not create or continue Codex sessions. A recurring job cannot enqueue another run while its previous run is still active, preventing an unbounded backlog.
+
+## Security model
+
+Security-sensitive defaults are part of the application contract:
+
+- Exactly one Telegram user ID is allowed.
+- Group chats and unauthorized users are ignored.
+- The Telegram token is stored in macOS Keychain.
+- The token is removed from the environment before Codex starts.
+- The workspace path is server-controlled and never accepted from Telegram.
+- The Codex profile must use `sandbox_mode = "workspace-write"` and `approval_policy = "never"`.
+- Only one Codex task runs at a time, with cancellation and a configurable timeout.
+- External-state and destructive requests are held for explicit approval.
+- An approved task interrupted during execution requires approval again after restart.
+- Every configured MCP server must appear in the local policy.
+- Servers without an explicit tool allowlist are disabled for this gateway.
+
+The risk classifier and injected execution policy are defense-in-depth controls, not a substitute for a minimal MCP allowlist or operating-system isolation. Do not expose this bot to untrusted users or the public internet as a shared service.
+
+### MCP policy example
 
 ```toml
 [mcp_policy]
@@ -60,125 +188,86 @@ known_servers = ["github", "docs"]
 
 [mcp_policy.allowed_tools]
 docs = ["search", "fetch"]
-# github는 이 게이트웨이에서 비활성화
+# github is known but disabled for this gateway
 ```
 
-## 2. 점검과 실행
+At setup time, MCP server names found in the global Codex configuration and the `codex-codeshark` profile are copied into `known_servers`. No MCP tools are enabled automatically. If the Codex MCP inventory changes later, update `config.local.toml`; startup fails closed when the inventory and policy do not match.
+
+## Data retention
+
+| Store | Retention policy |
+|---|---|
+| `runtime/state.json` | Current session ID, turn count, and Telegram update offset only |
+| Interactive Codex session | Deleted and rotated at `max_session_turns` after staging a summary proposal |
+| Scheduled Codex runs | Ephemeral; no Codex session is stored |
+| Task records in `runtime/agent.db` | Raw prompts are cleared on completion, failure, cancellation, or rejection; 200 terminal records are retained |
+| Learning proposals | Up to 100 pending proposals and 200 processed records |
+| Long-term memory | 4,000 characters by default; 1,000 characters per item |
+| Approved skills | Up to 100 skills; 8,000 characters per skill |
+| Scheduled jobs | Up to 100 active jobs and 200 terminal records |
+| `runtime/feedback.jsonl` | Rotates at 1 MB and retains the current file plus one previous file |
+
+The gateway does not duplicate full conversation transcripts. It does not delete sessions created by other Codex projects or the Codex desktop app.
+
+## Personal data migration
+
+Create a versioned, checksummed personal-data archive:
 
 ```bash
-PYTHONPATH=src python3 -m codex_codeshark doctor
-PYTHONPATH=src python3 -m codex_codeshark run
-```
-
-`doctor`는 로컬 설정, Keychain 토큰, Telegram API, Codex 로그인/profile, MCP 정책 누락을 검사합니다. 등록되지 않은 MCP 서버가 하나라도 있으면 봇 실행도 실패합니다.
-
-## Telegram 명령
-
-일반 작업과 세션:
-
-- 일반 텍스트: 현재 Codex 세션에 작업 추가
-- `/status`: 실행 상태, 대기열, 세션 turn, 저장 항목 수
-- `/tasks`: 최근 영속 작업 상태
-- `/cancel`: 현재 실행 또는 가장 오래된 대기 작업 취소
-- `/new`: 현재 Codex 세션을 삭제하고 새 세션 시작
-
-학습과 평가:
-
-- `/remember 내용`, `/memories`, `/forget ID`: 장기 메모리 관리
-- `/learn memory 내용`: 메모리 후보 생성
-- `/learn skill 이름 | 절차`: 재사용 스킬 후보 생성
-- `/learning`, `/approve ID`, `/reject ID`: 학습·위험 작업 승인 관리
-- `/skills`, `/forget_skill ID`: 승인된 스킬 관리
-- `/good [메모]`, `/bad [이유]`: 직전 성공 작업 평가
-
-자동화:
-
-- `/remind 30 요청`: 30분 뒤 한 번 실행
-- `/heartbeat 10 요청`: 10분마다 실행
-- `/cron */15 * * * * | 요청`: 로컬 시간 기준 5-field cron 실행
-- `/jobs`, `/pause ID`, `/resume_job ID`, `/delete_job ID`: 예약 작업 관리
-- `/mcp`: 현재 MCP 서버·도구 정책 확인
-
-예약 작업은 `codex exec --ephemeral`로 실행되어 대화 세션을 만들거나 이어 쓰지 않습니다. 외부 변경 가능성이 있는 예약 작업은 생성 즉시 멈추고 `/approve job-ID`를 기다립니다.
-
-## 개인 데이터 마이그레이션
-
-개인 데이터 archive에는 다음 항목만 포함됩니다.
-
-- 장기 메모리와 승인된 스킬
-- `/good`, `/bad` 평가 기록
-- 학습 후보
-- 예약 작업과 완료된 작업 메타데이터
-
-BotFather 토큰, `config.local.toml`, 현재 Codex 세션, Telegram update offset, runtime 로그는 머신 종속 정보이므로 제외됩니다. Archive에는 Telegram chat ID와 메모리 등이 들어갈 수 있으므로 파일 권한은 `0600`으로 만들며 Git에 올리면 안 됩니다.
-
-원본 Mac에서 봇을 중지한 뒤 내보냅니다.
-
-```bash
-cd "$HOME/workspace/Codex-codeshark"
-python3 scripts/uninstall_launch_agent.py
 PYTHONPATH=src python3 -m codex_codeshark export-data \
   "$HOME/codeshark-personal-data.codeshark.zip"
 ```
 
-새 Mac에서는 먼저 `setup`으로 새 머신의 Keychain 토큰과 `config.local.toml`을 만든 다음 가져옵니다.
+The archive contains:
+
+- Long-term memories
+- Approved skills
+- Task ratings
+- Learning proposals
+- Scheduled jobs and terminal task metadata
+
+It excludes:
+
+- The Telegram bot token
+- `config.local.toml`
+- Codex session files
+- `runtime/state.json`
+- Runtime logs
+
+Archives are created with mode `0600` and may contain Telegram chat IDs and personal content. Keep them private and never commit them. `*.codeshark.zip` is gitignored.
+
+On a new Mac, clone the project and run `setup` first so the new machine has its own Keychain token and local paths. Then import:
 
 ```bash
-PYTHONPATH=src python3 -m codex_codeshark setup
 PYTHONPATH=src python3 -m codex_codeshark import-data \
   "$HOME/codeshark-personal-data.codeshark.zip" --force
 ```
 
-중복 실행 방지를 위해 archive의 대기 중 단발 작업은 취소 처리되고, 활성 예약 작업은 일시정지 상태로 가져옵니다. 내용을 확인한 뒤 Telegram의 `/resume_job ID`로 필요한 작업만 재개하세요. 기존 archive나 대상 개인 데이터를 교체할 때만 `--force`를 사용합니다.
+To prevent duplicate side effects, queued one-time tasks are imported as cancelled and active scheduled jobs are imported as paused. Review them with `/jobs` and resume only the jobs you still want.
 
-## 자기학습과 세션 저장
+## Troubleshooting
 
-모델은 다음 작업에도 유용한 사실이나 절차가 있을 때만 학습 후보를 제안합니다. 후보는 응답에서 숨겨져 `runtime/agent.db`의 pending 상태로 저장되며, `/approve` 전에는 메모리나 스킬에 반영되지 않습니다. 같은 이름의 승인된 스킬을 다시 승인하면 새 파일을 늘리지 않고 기존 스킬을 교체합니다.
-
-대화형 세션은 기본 30 turn에서 자동 회전합니다. 회전 직전에 지속 정보만 학습 후보로 만들고 기존 Codex 세션을 영구 삭제한 뒤 다음 요청을 새 세션에서 실행합니다. 요약이나 삭제가 실패하면 기존 세션을 유지합니다. `/new`도 삭제 성공을 확인한 뒤에만 로컬 세션 ID를 비웁니다.
-
-이 게이트웨이는 대화 전문을 별도로 복제하지 않으며, 다른 프로젝트나 Codex 앱에서 만든 세션은 정리하지 않습니다.
-
-## 저장 용량 정책
-
-| 저장소 | 보관 정책 |
-|---|---|
-| `runtime/state.json` | 현재 세션 ID, turn 수, Telegram offset만 저장 |
-| Codex 현재 세션 | `max_session_turns` 도달 시 요약 후보 생성 후 삭제·회전 |
-| 예약 실행 | ephemeral이라 Codex 세션 미저장 |
-| `runtime/agent.db` 작업 | 완료·실패·취소·거절 시 원문 prompt 삭제, 최근 terminal 기록 200개 유지 |
-| 학습 후보 | pending 최대 100개, 처리된 후보 최근 200개 유지 |
-| 장기 메모리 | 기본 총 4,000자, 항목당 1,000자 |
-| 로컬 스킬 | 최대 100개, 스킬당 8,000자 |
-| 예약 작업 | active 최대 100개, 끝난 기록 최근 200개 |
-| `runtime/feedback.jsonl` | 1 MB에서 1회 회전하여 현재 파일과 `.1`만 유지 |
-
-상한은 `config.local.toml`의 `max_session_turns`와 `memory_max_chars`로 조정할 수 있습니다. 대기·반복 중인 작업과 승인 대기 후보는 실행에 필요하므로 사용자가 처리하거나 삭제할 때까지 유지됩니다.
-
-## 3. 로그인 시 자동 실행
-
-초기 설정과 `doctor`가 성공한 다음 실행하세요.
+Start with:
 
 ```bash
-PYTHONPATH=src python3 scripts/install_launch_agent.py
+PYTHONPATH=src python3 -m codex_codeshark doctor
 ```
 
-상태와 로그:
+Common setup failures:
 
-```bash
-launchctl print gui/$(id -u)/com.codeshark.agent
-tail -f runtime/agent.out.log runtime/agent.err.log
-```
+- **Invalid bot token:** rerun `setup` and paste only the token shown by BotFather. Hidden input does not echo characters.
+- **Telegram TLS verification failure:** Python.org builds may not have a default CA file. Codex-codeshark falls back to the verified macOS `/etc/ssl/cert.pem` bundle without disabling TLS verification.
+- **MCP policy mismatch:** ensure every server configured globally or in the project Codex profile appears under `mcp_policy.known_servers`.
+- **Missing profile:** rerun `setup`. It creates a restricted `codex-codeshark` profile when one does not already exist.
 
-제거:
+## Development
 
-```bash
-python3 scripts/uninstall_launch_agent.py
-```
-
-## 개발
+Run the full offline test suite:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-PYTHONPATH=src python3 -m codex_codeshark doctor
 ```
+
+Tests do not call Telegram or OpenAI networks. Before handing off a change, run both the test suite and `doctor`.
+
+The project intentionally has no runtime dependencies beyond Python's standard library.

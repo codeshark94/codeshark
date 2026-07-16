@@ -14,7 +14,7 @@ def main() -> int:
     subprocess.run(["/bin/launchctl", "bootout", domain, str(PLIST_PATH)], check=False, capture_output=True)
     if PLIST_PATH.exists():
         PLIST_PATH.unlink()
-    print("LaunchAgent 제거 완료")
+    print("LaunchAgent removed")
     return 0
 
 

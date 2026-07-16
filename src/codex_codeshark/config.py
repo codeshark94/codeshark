@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.local.toml"
 DEFAULT_CODEX_PROFILE = "codex-codeshark"
 KEYCHAIN_SERVICE = "codex-codeshark.bot-token"
+_BOT_TOKEN_PATTERN = re.compile(r"[0-9]+:[A-Za-z0-9_-]+")
 
 
 class ConfigError(RuntimeError):
@@ -206,10 +207,20 @@ def keychain_account() -> str:
     return getpass.getuser()
 
 
+def validate_bot_token(token: str) -> str:
+    normalized = token.strip()
+    if not _BOT_TOKEN_PATTERN.fullmatch(normalized):
+        raise ConfigError(
+            "invalid Telegram bot token format; paste only the BotFather token "
+            "(numbers:letters), not a shell command"
+        )
+    return normalized
+
+
 def load_bot_token() -> str:
-    env_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    env_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if env_token:
-        return env_token
+        return validate_bot_token(env_token)
 
     result = subprocess.run(
         [
@@ -227,10 +238,13 @@ def load_bot_token() -> str:
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise ConfigError("Telegram token not found in Keychain; run setup first")
-    return result.stdout.strip()
+    return validate_bot_token(result.stdout)
 
 
-def prompt_and_store_bot_token() -> None:
+def prompt_and_store_bot_token() -> str:
+    token = validate_bot_token(
+        getpass.getpass("BotFather token (input is hidden): ")
+    )
     result = subprocess.run(
         [
             "/usr/bin/security",
@@ -242,10 +256,14 @@ def prompt_and_store_bot_token() -> None:
             KEYCHAIN_SERVICE,
             "-w",
         ],
+        input=f"{token}\n{token}\n",
+        capture_output=True,
+        text=True,
         check=False,
     )
     if result.returncode != 0:
         raise ConfigError("failed to store token in Keychain")
+    return token
 
 
 def write_local_config(

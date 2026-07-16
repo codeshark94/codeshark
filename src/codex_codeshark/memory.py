@@ -44,17 +44,17 @@ class MemoryStore:
     def add(self, text: str) -> MemoryRecord:
         normalized = " ".join(text.split())
         if not normalized:
-            raise ValueError("기억할 내용이 비어 있습니다")
+            raise ValueError("memory text must not be empty")
         if len(normalized) > 1000:
-            raise ValueError("기억은 1,000자 이하로 입력해 주세요")
+            raise ValueError("memory text must not exceed 1,000 characters")
         with self._lock:
             if any(item.text == normalized for item in self._memories):
-                raise ValueError("같은 기억이 이미 저장되어 있습니다")
+                raise ValueError("the same memory is already stored")
             total_chars = sum(len(item.text) for item in self._memories) + len(normalized)
             if total_chars > self.max_total_chars:
                 raise ValueError(
-                    f"장기 메모리 한도 {self.max_total_chars}자를 초과합니다. "
-                    "/forget으로 기존 기억을 정리해 주세요"
+                    f"the long-term memory limit of {self.max_total_chars} characters "
+                    "would be exceeded; remove an existing memory with /forget"
                 )
             item = MemoryRecord(
                 id=f"m{self._next_id}",
@@ -111,7 +111,7 @@ class FeedbackStore:
             raise ValueError("rating must be good or bad")
         normalized_note = " ".join(note.split())
         if len(normalized_note) > 1000:
-            raise ValueError("평가 메모는 1,000자 이하로 입력해 주세요")
+            raise ValueError("rating notes must not exceed 1,000 characters")
         event = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "task_id": task_id,
@@ -155,37 +155,39 @@ def compose_prompt(
     context_blocks: list[str] = []
     if lines:
         memory_block = "\n".join(lines)
-        context_blocks.append(f"""[서버에서 인증된 사용자가 승인한 장기 메모리]
-아래 내용은 지속적인 선호와 사실 맥락이다. 현재 요청과 충돌하면 현재 요청을 우선한다.
-메모리끼리 충돌하면 목록 위에 있는 최근 항목을 우선한다.
-메모리를 수정하거나 새로 저장했다고 주장하지 말고, 제공된 항목만 참고한다.
+        context_blocks.append(f"""[Long-term memories approved by the authenticated user]
+These entries contain durable preferences and factual context. The current request takes priority if it conflicts with a memory.
+If memories conflict, prefer the newer entry listed first.
+Use only the supplied entries, and do not claim that you changed or stored a memory.
 {memory_block}
-[/장기 메모리]""")
+[/Long-term memories]""")
 
     skill_ids: list[str] = []
     for skill in skills or []:
         context_blocks.append(
-            f"[승인된 스킬 {skill.id}: {skill.name}]\n{skill.content}\n[/스킬 {skill.id}]"
+            f"[Approved skill {skill.id}: {skill.name}]\n{skill.content}\n[/Skill {skill.id}]"
         )
         skill_ids.append(skill.id)
 
     if external_action_approved:
         safety = (
-            "인증된 사용자가 이 작업의 외부 상태 변경 가능성을 명시적으로 승인했다. "
-            "승인된 요청 범위 안에서만 실행하고 작업 ID를 가능한 경우 idempotency key로 사용한다."
+            "The authenticated user explicitly approved this task's potential external "
+            "state changes. Act only within the approved scope and use the task ID as an "
+            "idempotency key when possible."
         )
     else:
         safety = (
-            "workspace 내부 파일 작업은 허용되지만, 외부 시스템의 상태 변경, 메시지 전송, "
-            "배포, 결제, 게시 또는 외부 삭제는 승인되지 않았다. 필요하면 실행하지 말고 사용자에게 알린다."
+            "File operations inside the workspace are allowed. External state changes, "
+            "message delivery, deployments, payments, publishing, and external deletion "
+            "are not approved. If one is required, do not perform it; tell the user."
         )
     context_blocks.append(
-        f"[게이트웨이 안전 정책]\n작업 ID: {task_id or '없음'}\n{safety}"
+        f"[Gateway safety policy]\nTask ID: {task_id or 'none'}\n{safety}"
     )
     context_blocks.append(LEARNING_PROTOCOL)
     context = "\n\n".join(context_blocks)
     composed = f"""{context}
 
-[현재 사용자 요청]
+[Current user request]
 {prompt}"""
     return composed, tuple(memory_ids), tuple(skill_ids)

@@ -40,13 +40,14 @@ class SkillRecord:
 
 
 LEARNING_PROTOCOL = """
-[학습 후보 프로토콜]
-이번 작업에서 다음 세션에도 유용한 사실, 사용자 선호 또는 재사용 가능한 절차를 새로 발견한 경우에만 최종 답변 끝에 아래 형식 하나를 추가한다. 일회성 정보나 추측이면 추가하지 않는다.
-기존 승인 스킬을 개선해야 한다면 동일한 스킬 제목과 전체 대체 절차를 skill 후보로 제안한다.
+[Learning proposal protocol]
+Only when this task reveals a durable fact, user preference, or reusable procedure that will help future sessions, append exactly one block in the following format to the end of the final response. Do not add a block for one-off information or speculation.
+To improve an existing approved skill, propose a skill with the same title and the complete replacement procedure.
 <learning_candidate>
-{"kind":"memory 또는 skill","title":"짧은 제목","content":"승인 후 저장할 간결한 내용"}
+{"kind":"memory","title":"short title","content":"concise content to store after approval"}
 </learning_candidate>
-이 블록은 사용자에게 직접 설명하지 않는다.
+Use "skill" instead of "memory" for a reusable procedure.
+Do not mention this block to the user.
 """.strip()
 
 
@@ -144,14 +145,14 @@ class LearningStore:
         source_task_id: str | None,
     ) -> LearningCandidate:
         if kind not in {"memory", "skill"}:
-            raise ValueError("학습 후보 유형은 memory 또는 skill이어야 합니다")
+            raise ValueError("learning proposal kind must be memory or skill")
         normalized_title = " ".join(title.split())
         normalized_content = content.strip()
         if not normalized_title or not normalized_content:
-            raise ValueError("학습 후보의 제목과 내용이 필요합니다")
+            raise ValueError("learning proposals require a title and content")
         maximum = 1000 if kind == "memory" else 8000
         if len(normalized_content) > maximum:
-            raise ValueError(f"{kind} 학습 후보가 너무 깁니다")
+            raise ValueError(f"the {kind} learning proposal is too long")
         created_at = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connect() as connection:
             existing = connection.execute(
@@ -169,8 +170,8 @@ class LearningStore:
             ).fetchone()["count"]
             if pending_count >= 100:
                 raise ValueError(
-                    "대기 중인 학습 후보 한도 100개를 초과합니다. "
-                    "/approve 또는 /reject로 정리해 주세요"
+                    "the limit of 100 pending learning proposals has been reached; "
+                    "use /approve or /reject to clear pending items"
                 )
             cursor = connection.execute(
                 """
@@ -250,9 +251,9 @@ class SkillStore:
         normalized_name = " ".join(name.split())
         normalized_content = content.strip()
         if not normalized_name or not normalized_content:
-            raise ValueError("스킬 이름과 내용이 필요합니다")
+            raise ValueError("skills require a name and content")
         if len(normalized_name) > 100 or len(normalized_content) > 8000:
-            raise ValueError("스킬 이름 또는 내용이 너무 깁니다")
+            raise ValueError("the skill name or content is too long")
         with self._lock:
             existing = next(
                 (item for item in self._skills if item.name == normalized_name),
@@ -278,7 +279,7 @@ class SkillStore:
                 self._write_index()
                 return updated
             if len(self._skills) >= 100:
-                raise ValueError("승인된 스킬 한도 100개를 초과합니다")
+                raise ValueError("the limit of 100 approved skills has been reached")
             skill_id = f"s{self._next_id}"
             description = " ".join(normalized_content.split())[:200]
             relative_path = f"{skill_id}/SKILL.md"

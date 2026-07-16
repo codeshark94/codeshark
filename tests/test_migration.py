@@ -16,12 +16,12 @@ from codex_codeshark.migration import (
 
 class PersonalDataMigrationTests(unittest.TestCase):
     def _build_personal_data(self, runtime: Path) -> tuple[str, str]:
-        memory = MemoryStore(runtime / "memory.json").add("답변은 한국어로 한다")
-        skill = SkillStore(runtime / "skills").add("테스트", "unittest로 검증한다")
+        memory = MemoryStore(runtime / "memory.json").add("Answer in English")
+        skill = SkillStore(runtime / "skills").add("Testing", "Verify with unittest")
         FeedbackStore(runtime / "feedback.jsonl").record(
             task_id="t-complete",
             rating="good",
-            note="정확함",
+            note="accurate",
             thread_id="thread-old",
             memory_ids=(memory.id,),
             skill_ids=(skill.id,),
@@ -30,8 +30,8 @@ class PersonalDataMigrationTests(unittest.TestCase):
         learning = LearningStore(database)
         learning.propose(
             kind="memory",
-            title="응답 선호",
-            content="짧게 답한다",
+            title="Response preference",
+            content="Reply concisely",
             source_task_id=None,
         )
         store = AgentStore(database)
@@ -45,7 +45,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
             123,
             kind="heartbeat",
             expression="600",
-            prompt="서버 상태 확인",
+            prompt="check server status",
             next_run_at=100.0,
         )
         (runtime / "state.json").write_text(
@@ -75,10 +75,13 @@ class PersonalDataMigrationTests(unittest.TestCase):
             self.assertEqual(imported.files, exported.files)
             self.assertEqual(
                 MemoryStore(target / "memory.json").list()[0].text,
-                "답변은 한국어로 한다",
+                "Answer in English",
             )
-            self.assertEqual(SkillStore(target / "skills").list()[0].name, "테스트")
-            self.assertEqual(LearningStore(target / "agent.db").list_pending()[0].title, "응답 선호")
+            self.assertEqual(SkillStore(target / "skills").list()[0].name, "Testing")
+            self.assertEqual(
+                LearningStore(target / "agent.db").list_pending()[0].title,
+                "Response preference",
+            )
 
             store = AgentStore(target / "agent.db")
             task = store.get_task(task_id)
@@ -94,14 +97,14 @@ class PersonalDataMigrationTests(unittest.TestCase):
             archive = root / "personal.codeshark.zip"
             self._build_personal_data(source)
             export_personal_data(archive, runtime_dir=source)
-            MemoryStore(target / "memory.json").add("기존 데이터")
+            MemoryStore(target / "memory.json").add("existing data")
 
             with self.assertRaisesRegex(MigrationError, "--force"):
                 import_personal_data(archive, runtime_dir=target)
             import_personal_data(archive, runtime_dir=target, replace=True)
             self.assertEqual(
                 MemoryStore(target / "memory.json").list()[0].text,
-                "답변은 한국어로 한다",
+                "Answer in English",
             )
 
     def test_rejects_unlisted_archive_paths(self) -> None:
