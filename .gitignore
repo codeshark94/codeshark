@@ -9,3 +9,4 @@ config.local.toml
 *.codeshark.zip
 runtime/*
 !runtime/.gitkeep
+workspace/inbox/

@@ -8,6 +8,8 @@ task_timeout_seconds = 1800
 queue_size = 3
 max_session_turns = 30
 memory_max_chars = 4000
+codex_network_access = false
+attachment_max_bytes = 10000000
 
 # Every MCP server configured in the Codex global/profile config must be named here.
 # Servers omitted from allowed_tools are disabled for this gateway.

@@ -11,6 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Public repository documentation, security policy, contribution guide, issue templates, and macOS CI.
 - Official Codex-codeshark mascot asset.
 - MIT License.
+- Quiet task delivery with approval, error, and final-result messages only.
+- Telegram rate-limit handling and a bounded failed-delivery retry queue.
+- Strict Codex child-environment allowlist and explicit outbound network policy.
+- Service CLI for start, stop, restart, status, and sanitized log inspection.
+- Searchable approved-memory and skill recall with provenance and quality counters.
+- Usage tracking, stale-memory review, and feedback-aware skill ranking.
+- Size-limited Telegram photo and document intake under `workspace/inbox/`.
+- Signed-tag validation, version checks, package builds, and GitHub release automation.
+- Complete source-distribution manifest and per-user data root for installed packages.
 
 ## 0.1.0 - 2026-07-16
 

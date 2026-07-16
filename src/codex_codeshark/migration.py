@@ -74,6 +74,8 @@ def _sanitize_database(path: Path) -> None:
             connection.execute(
                 "UPDATE schedules SET status = 'paused' WHERE status = 'enabled'"
             )
+            if "deliveries" in tables:
+                connection.execute("DELETE FROM deliveries")
     except sqlite3.Error as exc:
         raise MigrationError(f"invalid personal-data database: {exc}") from exc
 
@@ -152,6 +154,8 @@ def export_personal_data(
                 "Codex session files",
                 "runtime/state.json",
                 "runtime logs",
+                "failed Telegram deliveries",
+                "workspace/inbox attachments",
             ],
         }
         temporary = destination.with_suffix(destination.suffix + ".tmp")

@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import os
-import subprocess
+import sys
 from pathlib import Path
 
 
-LABEL = "com.codeshark.agent"
-PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from codex_codeshark.service import uninstall_service  # noqa: E402
 
 
 def main() -> int:
-    domain = f"gui/{os.getuid()}"
-    subprocess.run(["/bin/launchctl", "bootout", domain, str(PLIST_PATH)], check=False, capture_output=True)
-    if PLIST_PATH.exists():
-        PLIST_PATH.unlink()
+    uninstall_service()
     print("LaunchAgent removed")
     return 0
 

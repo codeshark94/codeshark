@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_SOURCE_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_PROJECT_ROOT = (
+    _SOURCE_ROOT
+    if (_SOURCE_ROOT / "pyproject.toml").is_file()
+    else Path.home() / ".codex-codeshark"
+)
+PROJECT_ROOT = Path(
+    os.environ.get("CODEX_CODESHARK_HOME", _DEFAULT_PROJECT_ROOT)
+).expanduser().resolve()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.local.toml"
 DEFAULT_CODEX_PROFILE = "codex-codeshark"
 KEYCHAIN_SERVICE = "codex-codeshark.bot-token"
@@ -33,6 +41,8 @@ class Config:
     queue_size: int = 3
     max_session_turns: int = 30
     memory_max_chars: int = 4000
+    codex_network_access: bool = False
+    attachment_max_bytes: int = 10_000_000
     mcp_known_servers: tuple[str, ...] = ()
     mcp_allowed_tools: tuple[tuple[str, tuple[str, ...]], ...] = ()
     state_path: Path = PROJECT_ROOT / "runtime" / "state.json"
@@ -42,6 +52,13 @@ def _require_int(data: dict[str, Any], key: str, default: int) -> int:
     value = data.get(key, default)
     if not isinstance(value, int) or isinstance(value, bool):
         raise ConfigError(f"{key} must be an integer")
+    return value
+
+
+def _require_bool(data: dict[str, Any], key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{key} must be true or false")
     return value
 
 
@@ -76,6 +93,8 @@ def load_config(path: Path | None = None) -> Config:
     queue_size = _require_int(data, "queue_size", 3)
     max_session_turns = _require_int(data, "max_session_turns", 30)
     memory_max_chars = _require_int(data, "memory_max_chars", 4000)
+    codex_network_access = _require_bool(data, "codex_network_access", False)
+    attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
         raise ConfigError("poll_timeout_seconds must be between 1 and 50")
     if not 30 <= task_timeout <= 86400:
@@ -86,6 +105,8 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError("max_session_turns must be between 5 and 500")
     if not 1000 <= memory_max_chars <= 20000:
         raise ConfigError("memory_max_chars must be between 1000 and 20000")
+    if not 1_000_000 <= attachment_max_bytes <= 50_000_000:
+        raise ConfigError("attachment_max_bytes must be between 1 MB and 50 MB")
 
     mcp_policy = data.get("mcp_policy", {})
     if not isinstance(mcp_policy, dict):
@@ -124,6 +145,8 @@ def load_config(path: Path | None = None) -> Config:
         queue_size=queue_size,
         max_session_turns=max_session_turns,
         memory_max_chars=memory_max_chars,
+        codex_network_access=codex_network_access,
+        attachment_max_bytes=attachment_max_bytes,
         mcp_known_servers=tuple(raw_known_servers),
         mcp_allowed_tools=tuple(allowed_tools),
     )
@@ -180,7 +203,8 @@ def write_codex_profile(profile: str, *, codex_home: Path | None = None) -> Path
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
-        'sandbox_mode = "workspace-write"\napproval_policy = "never"\n',
+        'sandbox_mode = "workspace-write"\napproval_policy = "never"\n\n'
+        '[sandbox_workspace_write]\nnetwork_access = false\n',
         encoding="utf-8",
     )
     temporary.chmod(0o600)
@@ -271,9 +295,14 @@ def write_local_config(
     path: Path | None = None,
     *,
     codex_home: Path | None = None,
+    project_root: Path | None = None,
 ) -> Path:
-    config_path = path or DEFAULT_CONFIG_PATH
-    workdir = PROJECT_ROOT / "workspace"
+    root = project_root or PROJECT_ROOT
+    config_path = path or root / "config.local.toml"
+    workdir = root / "workspace"
+    workdir.mkdir(parents=True, exist_ok=True)
+    workdir.chmod(0o700)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     codex_binary = Path("/Applications/Codex.app/Contents/Resources/codex")
     known_mcp_servers = sorted(
         configured_mcp_servers(DEFAULT_CODEX_PROFILE, codex_home=codex_home)
@@ -289,6 +318,8 @@ def write_local_config(
             "queue_size = 3",
             "max_session_turns = 30",
             "memory_max_chars = 4000",
+            "codex_network_access = false",
+            "attachment_max_bytes = 10000000",
             "",
             "[mcp_policy]",
             "known_servers = " + json.dumps(known_mcp_servers),

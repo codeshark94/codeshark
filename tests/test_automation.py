@@ -129,6 +129,19 @@ class AgentStoreTests(unittest.TestCase):
                 store.finish_task(claimed.id, "completed")
             self.assertEqual(len(store.list_tasks(limit=1000)), 200)
 
+    def test_failed_delivery_can_be_retried_and_payload_is_purged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            delivery = store.record_delivery_failure(123, "final result", "offline")
+            self.assertEqual(store.list_failed_deliveries(), [delivery])
+            self.assertTrue(store.mark_delivery_attempt(delivery.id, "still offline"))
+            self.assertEqual(store.get_delivery(delivery.id).attempts, 2)
+            self.assertTrue(store.mark_delivery_sent(delivery.id))
+            sent = store.get_delivery(delivery.id)
+            self.assertEqual(sent.status, "sent")
+            self.assertEqual(sent.text, "")
+            self.assertEqual(store.list_failed_deliveries(), [])
+
 
 class CronTests(unittest.TestCase):
     def test_next_cron_time_supports_steps_and_exact_values(self) -> None:

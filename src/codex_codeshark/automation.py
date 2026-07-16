@@ -50,6 +50,18 @@ class ScheduleRecord:
     approved: bool
 
 
+@dataclass(frozen=True)
+class DeliveryRecord:
+    id: str
+    chat_id: int
+    text: str
+    status: str
+    attempts: int
+    last_error: str
+    created_at: float
+    updated_at: float
+
+
 class RiskPolicy:
     _PATTERN = re.compile(
         r"(?:\b(?:delete|remove|deploy|publish|post|send|email|pay|purchase|buy|"
@@ -176,6 +188,31 @@ class AgentStore:
             """
         )
 
+    @staticmethod
+    def _prune_deliveries(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            DELETE FROM deliveries
+            WHERE status = 'sent'
+              AND id NOT IN (
+                  SELECT id FROM deliveries
+                  WHERE status = 'sent'
+                  ORDER BY updated_at DESC LIMIT 50
+              )
+            """
+        )
+        connection.execute(
+            """
+            DELETE FROM deliveries
+            WHERE status = 'failed'
+              AND id NOT IN (
+                  SELECT id FROM deliveries
+                  WHERE status = 'failed'
+                  ORDER BY updated_at DESC LIMIT 100
+              )
+            """
+        )
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(
@@ -211,6 +248,18 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS schedules_due
                     ON schedules(status, next_run_at);
+                CREATE TABLE IF NOT EXISTS deliveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 1,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS deliveries_status
+                    ON deliveries(status, updated_at);
                 """
             )
             task_columns = {
@@ -237,6 +286,7 @@ class AgentStore:
             )
             self._prune_tasks(connection)
             self._prune_schedules(connection)
+            self._prune_deliveries(connection)
 
     @staticmethod
     def _task(row: sqlite3.Row | None) -> TaskRecord | None:
@@ -271,6 +321,86 @@ class AgentStore:
             last_run_at=row["last_run_at"],
             approved=bool(row["approved"]),
         )
+
+    @staticmethod
+    def _delivery(row: sqlite3.Row | None) -> DeliveryRecord | None:
+        if row is None:
+            return None
+        return DeliveryRecord(
+            id=f"d{row['id']}",
+            chat_id=row["chat_id"],
+            text=row["text"],
+            status=row["status"],
+            attempts=row["attempts"],
+            last_error=row["last_error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def record_delivery_failure(
+        self,
+        chat_id: int,
+        text: str,
+        error: str,
+    ) -> DeliveryRecord:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO deliveries
+                    (chat_id, text, status, attempts, last_error, created_at, updated_at)
+                VALUES (?, ?, 'failed', 1, ?, ?, ?)
+                """,
+                (chat_id, text[:3900], error[-500:], now, now),
+            )
+            self._prune_deliveries(connection)
+            row = connection.execute(
+                "SELECT * FROM deliveries WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+        return self._delivery(row)
+
+    def get_delivery(self, delivery_id: str) -> DeliveryRecord | None:
+        if not delivery_id.startswith("d") or not delivery_id[1:].isdigit():
+            return None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM deliveries WHERE id = ?",
+                (int(delivery_id[1:]),),
+            ).fetchone()
+        return self._delivery(row)
+
+    def list_failed_deliveries(self, limit: int = 20) -> list[DeliveryRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM deliveries WHERE status = 'failed' "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._delivery(row) for row in rows]
+
+    def mark_delivery_attempt(self, delivery_id: str, error: str) -> bool:
+        if not delivery_id.startswith("d") or not delivery_id[1:].isdigit():
+            return False
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE deliveries SET attempts = attempts + 1, last_error = ?, "
+                "updated_at = ? WHERE id = ? AND status = 'failed'",
+                (error[-500:], time.time(), int(delivery_id[1:])),
+            )
+            return cursor.rowcount == 1
+
+    def mark_delivery_sent(self, delivery_id: str) -> bool:
+        if not delivery_id.startswith("d") or not delivery_id[1:].isdigit():
+            return False
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE deliveries SET status = 'sent', text = '', last_error = '', "
+                "updated_at = ? WHERE id = ? AND status = 'failed'",
+                (time.time(), int(delivery_id[1:])),
+            )
+            self._prune_deliveries(connection)
+            return cursor.rowcount == 1
 
     def enqueue_task(
         self,

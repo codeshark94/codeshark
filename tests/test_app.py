@@ -6,6 +6,7 @@ from pathlib import Path
 from codex_codeshark.app import HELP_TEXT, AgentApp
 from codex_codeshark.codex_runner import RunResult
 from codex_codeshark.config import Config
+from codex_codeshark.telegram_api import TelegramError
 
 
 class FakeTelegramAPI:
@@ -15,8 +16,9 @@ class FakeTelegramAPI:
     def send_message(self, chat_id, text) -> None:
         self.messages.append((chat_id, text))
 
-    def send_typing(self, chat_id) -> None:
-        pass
+    def download_file(self, file_id, destination, *, max_bytes) -> int:
+        destination.write_bytes(b"attachment")
+        return 10
 
 
 class FakeCodexRunner:
@@ -97,7 +99,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
     def test_queues_authorized_private_message(self) -> None:
         self.app._handle_update(self.update(123, "do work"))
         self.assertEqual(self.app.store.pending_count(), 1)
-        self.assertIn("queued", self.api.messages[0][1])
+        self.assertEqual(self.api.messages, [])
 
     def test_remember_list_and_forget_commands(self) -> None:
         self.app._handle_update(self.update(123, "/remember Answer in English"))
@@ -248,8 +250,85 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
         self.assertEqual(self.app.learning.list_pending()[0].kind, "memory")
-        self.assertTrue(any(text == "done" for _, text in self.api.messages))
+        self.assertTrue(any(text.startswith("done\n\nCreated learning proposal") for _, text in self.api.messages))
         self.assertFalse(any("<learning_candidate>" in text for _, text in self.api.messages))
+
+    def test_task_sends_only_the_final_result(self) -> None:
+        self.app.runner = FakeCodexRunner()
+        self.app._handle_update(self.update(123, "do work"))
+        self.assertEqual(self.api.messages, [])
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+        self.assertEqual(self.api.messages, [(123, "done")])
+
+    def test_document_is_saved_inside_workspace_and_queued_without_progress(self) -> None:
+        update = self.update(123, "unused")
+        update["message"].pop("text")
+        update["message"]["caption"] = "Review this file"
+        update["message"]["document"] = {
+            "file_id": "file-1",
+            "file_name": "../../report.txt",
+            "file_size": 10,
+        }
+        self.app._handle_update(update)
+        task = self.app.store.claim_next_task()
+        self.assertIn("Review this file", task.prompt)
+        self.assertRegex(task.prompt, r"inbox/[0-9a-f]{12}-report\.txt")
+        attachment = next((self.app.config.workdir / "inbox").iterdir())
+        self.assertEqual(attachment.read_bytes(), b"attachment")
+        self.assertEqual(self.api.messages, [])
+
+    def test_oversized_attachment_is_rejected_before_download(self) -> None:
+        update = self.update(123, "unused")
+        update["message"].pop("text")
+        update["message"]["document"] = {
+            "file_id": "file-1",
+            "file_name": "large.bin",
+            "file_size": self.app.config.attachment_max_bytes + 1,
+        }
+        self.app._handle_update(update)
+        self.assertEqual(self.app.store.pending_count(), 0)
+        self.assertIn("exceeds", self.api.messages[-1][1])
+
+    def test_attachment_is_deleted_when_queue_is_full(self) -> None:
+        for number in range(self.app.config.queue_size):
+            self.app._handle_update(self.update(123, f"task {number}"))
+        update = self.update(123, "unused")
+        update["message"].pop("text")
+        update["message"]["document"] = {
+            "file_id": "file-1",
+            "file_name": "report.txt",
+            "file_size": 10,
+        }
+        self.app._handle_update(update)
+        self.assertEqual(list((self.app.config.workdir / "inbox").iterdir()), [])
+        self.assertIn("queue is full", self.api.messages[-1][1].lower())
+
+    def test_failed_reply_is_persisted_for_explicit_retry(self) -> None:
+        class FailingAPI(FakeTelegramAPI):
+            def send_message(self, chat_id, text) -> None:
+                raise TelegramError("offline", ambiguous_delivery=True)
+
+        self.app.api = FailingAPI()
+        self.assertFalse(self.app._send_message(123, "final result"))
+        delivery = self.app.store.list_failed_deliveries()[0]
+        self.assertEqual(delivery.text, "final result")
+        self.assertEqual(delivery.attempts, 1)
+
+    def test_recall_and_feedback_quality_are_visible(self) -> None:
+        self.app._handle_update(self.update(123, "/remember Prefer unittest for Python"))
+        self.app._handle_update(self.update(123, "/recall unittest"))
+        self.assertIn("source=m1", self.api.messages[-1][1])
+
+        self.app.runner = FakeCodexRunner()
+        self.app._handle_update(self.update(123, "do work"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+        self.app._handle_update(self.update(123, "/good"))
+        stats = self.app.recall.stats("memory", "m1")
+        self.assertEqual((stats.use_count, stats.good_count), (1, 1))
+        self.app._handle_update(self.update(123, "/memories"))
+        self.assertIn("uses=1, good=1, bad=0", self.api.messages[-1][1])
 
     def test_due_reminder_runs_in_ephemeral_session(self) -> None:
         schedule = self.app.store.create_schedule(

@@ -23,6 +23,7 @@ class CodexRunnerTests(unittest.TestCase):
         command = self.runner.build_command("hello", None)
         self.assertEqual(command[-3:], ["--json", "--skip-git-repo-check", "hello"])
         self.assertIn("codex-codeshark", command)
+        self.assertIn("sandbox_workspace_write.network_access=false", command)
 
     def test_builds_resume_command(self) -> None:
         command = self.runner.build_command("continue", "thread-123")
@@ -51,6 +52,39 @@ class CodexRunnerTests(unittest.TestCase):
         kwargs = run.call_args.kwargs
         self.assertNotIn("TELEGRAM_BOT_TOKEN", kwargs["env"])
         self.assertEqual(kwargs["timeout"], 30)
+
+    def test_child_environment_uses_strict_allowlist(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "telegram-secret",
+                "OPENAI_API_KEY": "openai-secret",
+                "AWS_SECRET_ACCESS_KEY": "aws-secret",
+                "SSH_AUTH_SOCK": "/tmp/ssh.sock",
+                "LANG": "en_US.UTF-8",
+            },
+            clear=True,
+        ):
+            environment = self.runner._child_env()
+        self.assertEqual(environment["LANG"], "en_US.UTF-8")
+        self.assertEqual(environment["NO_COLOR"], "1")
+        self.assertNotIn("TELEGRAM_BOT_TOKEN", environment)
+        self.assertNotIn("OPENAI_API_KEY", environment)
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", environment)
+        self.assertNotIn("SSH_AUTH_SOCK", environment)
+
+    def test_network_access_can_be_explicitly_enabled(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            network_access=True,
+        )
+        self.assertIn(
+            "sandbox_workspace_write.network_access=true",
+            runner.build_command("hello", None),
+        )
 
     @patch("codex_codeshark.codex_runner.subprocess.run")
     def test_keeps_delete_failure_visible(self, run) -> None:

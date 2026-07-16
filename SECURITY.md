@@ -35,8 +35,10 @@ The intended boundaries are:
 - A restricted Codex profile using `workspace-write`
 - A mandatory MCP server inventory and per-tool allowlist
 - Explicit approval for requests classified as destructive or externally mutating
-- Bot tokens stored in macOS Keychain and removed from the Codex child environment
+- Bot tokens stored in macOS Keychain and a strict Codex child-environment allowlist
+- Outbound Codex network access disabled by default and explicitly configured per child
+- Size-limited Telegram attachments stored only in the server-controlled workspace
 
 The risk classifier and model instructions are defense-in-depth controls. They do not replace operating-system isolation or careful credential and MCP policy management.
 
-When the gateway is started manually, the Codex child process inherits the parent environment except for `TELEGRAM_BOT_TOKEN`. Use a minimal environment and do not export unrelated credentials into the gateway process. A stricter environment allowlist is planned before the first stable release.
+The Codex child receives only basic process, locale, temporary-directory, certificate, and Codex-home variables. Parent API keys, Telegram credentials, cloud credentials, and SSH-agent sockets are not forwarded. Credential-bearing MCP tools remain a separate trust boundary and should stay disabled unless required.

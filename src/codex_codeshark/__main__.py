@@ -14,6 +14,14 @@ from .config import (
 )
 from .doctor import run_doctor
 from .migration import MigrationError, export_personal_data, import_personal_data
+from .service import (
+    ServiceError,
+    read_logs,
+    restart_service,
+    service_status,
+    start_service,
+    stop_service,
+)
 from .setup_cli import interactive_setup
 from .telegram_api import TelegramAPI, TelegramError
 
@@ -24,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("run", help="run the Telegram gateway")
     commands.add_parser("setup", help="configure Telegram and Codex locally")
     commands.add_parser("doctor", help="check the local runtime environment")
+    commands.add_parser("start", help="start or install the background service")
+    commands.add_parser("stop", help="stop the background service")
+    commands.add_parser("restart", help="restart the background service")
+    commands.add_parser("service-status", help="show the background service status")
+    logs = commands.add_parser("logs", help="show sanitized background service logs")
+    logs.add_argument("--lines", type=int, default=100)
     for name, help_text in (
         ("export-data", "export portable personal data"),
         ("import-data", "import personal data"),
@@ -51,6 +65,24 @@ def main() -> int:
             return interactive_setup()
         if args.command == "doctor":
             return run_doctor()
+        if args.command in {"start", "stop", "restart", "service-status"}:
+            if args.command == "start":
+                status = start_service()
+            elif args.command == "stop":
+                status = stop_service()
+            elif args.command == "restart":
+                status = restart_service()
+            else:
+                status = service_status()
+            print(f"Service: {status.state}")
+            if status.pid is not None:
+                print(f"PID: {status.pid}")
+            elif status.detail:
+                print(status.detail)
+            return 0 if status.running or args.command == "stop" else 1
+        if args.command == "logs":
+            print(read_logs(args.lines))
+            return 0
         if args.command == "export-data":
             result = export_personal_data(args.archive, replace=args.force)
             print(f"Export complete: {result.archive} ({len(result.files)} files)")
@@ -66,8 +98,8 @@ def main() -> int:
         token = load_bot_token()
         AgentApp(config, TelegramAPI(token)).run_forever()
         return 0
-    except (ConfigError, MigrationError, TelegramError, KeyboardInterrupt) as exc:
-        if isinstance(exc, (ConfigError, MigrationError, TelegramError)):
+    except (ConfigError, MigrationError, ServiceError, TelegramError, KeyboardInterrupt) as exc:
+        if isinstance(exc, (ConfigError, MigrationError, ServiceError, TelegramError)):
             logging.error("%s", exc)
             return 1
         return 130

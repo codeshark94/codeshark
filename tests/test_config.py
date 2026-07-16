@@ -70,6 +70,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.allowed_user_ids, frozenset({123}))
             self.assertEqual(loaded.workdir, workspace.resolve())
             self.assertEqual(loaded.max_session_turns, 25)
+            self.assertFalse(loaded.codex_network_access)
+            self.assertEqual(loaded.attachment_max_bytes, 10_000_000)
             self.assertEqual(loaded.mcp_known_servers, ("github", "docs"))
             self.assertEqual(
                 loaded.mcp_allowed_tools,
@@ -88,6 +90,28 @@ class ConfigTests(unittest.TestCase):
             config = Path(directory) / "config.toml"
             config.write_text("allowed_user_ids = [1, 2]\n", encoding="utf-8")
             with self.assertRaises(ConfigError):
+                load_config(config)
+
+    def test_rejects_non_boolean_network_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config = root / "config.toml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        'codex_network_access = "yes"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "true or false"):
                 load_config(config)
 
     def test_rejects_mcp_allowlist_server_not_in_known_servers(self) -> None:
@@ -185,8 +209,11 @@ class ConfigTests(unittest.TestCase):
                 123,
                 root / "config.toml",
                 codex_home=codex_home,
+                project_root=root,
             )
             self.assertIn('known_servers = ["docs"]', path.read_text(encoding="utf-8"))
+            self.assertTrue((root / "workspace").is_dir())
+            self.assertEqual((root / "workspace").stat().st_mode & 0o777, 0o700)
 
 
 if __name__ == "__main__":

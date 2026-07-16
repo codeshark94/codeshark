@@ -1,0 +1,8 @@
+include CHANGELOG.md
+include CODE_OF_CONDUCT.md
+include CONTRIBUTING.md
+include SECURITY.md
+include config.example.toml
+recursive-include assets *.png
+recursive-include scripts *.py
+recursive-include workspace README.md

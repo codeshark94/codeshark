@@ -41,6 +41,20 @@ def parse_codex_events(output: str) -> tuple[str, str | None]:
 
 
 class CodexRunner:
+    _CHILD_ENV_ALLOWLIST = {
+        "CODEX_HOME",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LOGNAME",
+        "PATH",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "TMPDIR",
+        "USER",
+    }
+
     def __init__(
         self,
         *,
@@ -50,6 +64,7 @@ class CodexRunner:
         timeout_seconds: int,
         mcp_known_servers: tuple[str, ...] = (),
         mcp_allowed_tools: tuple[tuple[str, tuple[str, ...]], ...] = (),
+        network_access: bool = False,
     ) -> None:
         self.binary = binary
         self.profile = profile
@@ -57,6 +72,7 @@ class CodexRunner:
         self.timeout_seconds = timeout_seconds
         self.mcp_known_servers = mcp_known_servers
         self.mcp_allowed_tools = dict(mcp_allowed_tools)
+        self.network_access = network_access
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
         self._cancel_requested = False
@@ -72,6 +88,17 @@ class CodexRunner:
                 args.extend(["-c", f"mcp_servers.{server}.enabled_tools={encoded_tools}"])
         return args
 
+    def _child_env(self) -> dict[str, str]:
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in self._CHILD_ENV_ALLOWLIST
+        }
+        env.setdefault("HOME", str(Path.home()))
+        env.setdefault("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
+        env["NO_COLOR"] = "1"
+        return env
+
     def build_command(
         self,
         prompt: str,
@@ -86,6 +113,13 @@ class CodexRunner:
             "-C",
             str(self.workdir),
         ]
+        base.extend(
+            [
+                "-c",
+                "sandbox_workspace_write.network_access="
+                + str(self.network_access).lower(),
+            ]
+        )
         base.extend(self._mcp_config_args())
         base.append("exec")
         if thread_id:
@@ -109,9 +143,7 @@ class CodexRunner:
         ]
 
     def delete_session(self, thread_id: str) -> None:
-        env = os.environ.copy()
-        env.pop("TELEGRAM_BOT_TOKEN", None)
-        env["NO_COLOR"] = "1"
+        env = self._child_env()
         try:
             result = subprocess.run(
                 self.build_delete_command(thread_id),
@@ -136,9 +168,7 @@ class CodexRunner:
         ephemeral: bool = False,
     ) -> RunResult:
         command = self.build_command(prompt, thread_id, ephemeral=ephemeral)
-        env = os.environ.copy()
-        env.pop("TELEGRAM_BOT_TOKEN", None)
-        env["NO_COLOR"] = "1"
+        env = self._child_env()
         with self._lock:
             self._cancel_requested = False
             self._process = subprocess.Popen(

@@ -72,6 +72,18 @@ class SkillStoreTests(unittest.TestCase):
             self.assertEqual(updated.id, original.id)
             self.assertIn("Improved procedure", store.read(updated))
 
+    def test_quality_breaks_ties_between_equally_relevant_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SkillStore(Path(directory) / "skills")
+            first = store.add("Python alpha", "python procedure alpha")
+            second = store.add("Python beta", "python procedure beta")
+            selected = store.select(
+                "Python work",
+                limit=2,
+                quality_scores={first.id: -4, second.id: 3},
+            )
+            self.assertEqual([item.id for item in selected], [second.id, first.id])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ from codex_codeshark.migration import (
     export_personal_data,
     import_personal_data,
 )
+from codex_codeshark.recall import RecallStore
 
 
 class PersonalDataMigrationTests(unittest.TestCase):
@@ -35,6 +36,14 @@ class PersonalDataMigrationTests(unittest.TestCase):
             source_task_id=None,
         )
         store = AgentStore(database)
+        store.record_delivery_failure(123, "private final result", "offline")
+        RecallStore(database).upsert(
+            kind="memory",
+            source_id=memory.id,
+            title="Response language",
+            content=memory.text,
+            source_task_id="t-complete",
+        )
         task = store.enqueue_task(
             123,
             "check server",
@@ -88,6 +97,9 @@ class PersonalDataMigrationTests(unittest.TestCase):
             self.assertEqual(task.status, "cancelled")
             self.assertEqual(task.prompt, "")
             self.assertEqual(store.get_schedule(schedule_id).status, "paused")
+            self.assertEqual(store.list_failed_deliveries(), [])
+            recalled = RecallStore(target / "agent.db").search("English")[0]
+            self.assertEqual(recalled.source_task_id, "t-complete")
 
     def test_import_requires_force_before_replacing_personal_data(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

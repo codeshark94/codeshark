@@ -14,7 +14,7 @@
     <a href="#what-it-does">Features</a> ·
     <a href="#security-defaults">Security</a> ·
     <a href="#telegram-command-reference">Commands</a> ·
-    <a href="#roadmap">Roadmap</a>
+    <a href="#upgrading">Upgrading</a>
   </p>
 </div>
 
@@ -34,7 +34,7 @@ Open-ended agent frameworks are powerful, but a personal coding gateway benefits
 | Local first | Codex runs on your Mac inside a server-controlled workspace. |
 | Single user | Exactly one paired Telegram user ID is accepted. |
 | Approval gated | Learning and risky external actions wait for explicit approval. |
-| Durable, not unbounded | Queues, sessions, memories, skills, feedback, and logs have retention limits. |
+| Durable, not unbounded | Queues, sessions, memories, skills, feedback, and failed deliveries have retention limits. |
 | Fail closed | Unlisted MCP servers or tools prevent startup instead of silently becoming available. |
 | Portable personal data | Memories, skills, feedback, and schedules can move without exporting secrets. |
 
@@ -46,10 +46,17 @@ Open-ended agent frameworks are powerful, but a personal coding gateway benefits
 - **Ephemeral automation** — scheduled jobs use `codex exec --ephemeral` and do not create conversation history.
 - **Approval-gated learning** — lets Codex propose long-term memories and reusable skills without silently applying them.
 - **Relevant skill loading** — injects at most three approved skills selected for the current request.
+- **Searchable recall** — searches approved memories and skills with source IDs and task provenance.
+- **Feedback-aware learning** — tracks usage and ratings, ranks equally relevant skills, and surfaces memories that need review.
 - **Bounded sessions** — summarizes durable context for review, deletes the full session, and starts fresh at the configured turn limit.
 - **Risk approval** — holds destructive or external-state requests until `/approve` is received.
 - **MCP policy** — disables every server and tool that is not explicitly allowed for this gateway.
+- **Quiet task delivery** — sends no queue/start chatter; Telegram receives only approval prompts, errors, and final results.
+- **Reliable replies** — handles Telegram rate limits and keeps a bounded failed-delivery queue for explicit retry.
+- **Safe attachments** — downloads Telegram photos and documents into a private, gitignored `workspace/inbox/` directory.
+- **First-class service CLI** — installs, starts, stops, restarts, inspects, and safely reads the macOS service.
 - **Portable migration** — exports personal data in a versioned, checksummed archive without tokens or local configuration.
+- **Automated releases** — validates versions and signed tags, runs tests, builds packages, and publishes GitHub releases.
 - **Zero runtime dependencies** — uses only the Python standard library at runtime.
 
 ## Quick start
@@ -69,7 +76,9 @@ git clone https://github.com/Younghegalian/codeshark.git Codex-codeshark
 cd Codex-codeshark
 ```
 
-Codex-codeshark is currently installed from source; it is not published to PyPI.
+Codex-codeshark is currently installed from source; it is not published to PyPI. Packaged
+GitHub release artifacts use `~/.codex-codeshark/` for private configuration and runtime data
+unless `CODEX_CODESHARK_HOME` is set.
 
 ### 2. Set up and pair Telegram
 
@@ -114,22 +123,25 @@ PYTHONPATH=src python3 -m codex_codeshark run
 
 Send `/status` to the bot, then stop the foreground process with `Ctrl+C`.
 
-For an always-on gateway, install the macOS LaunchAgent:
+For an always-on gateway, install and start the macOS LaunchAgent:
 
 ```bash
-PYTHONPATH=src python3 scripts/install_launch_agent.py
+PYTHONPATH=src python3 -m codex_codeshark start
 ```
 
-Verify the service:
+Manage and inspect it with the same CLI:
 
 ```bash
-launchctl print gui/$(id -u)/com.codeshark.agent
-tail -f runtime/agent.out.log runtime/agent.err.log
+PYTHONPATH=src python3 -m codex_codeshark service-status
+PYTHONPATH=src python3 -m codex_codeshark logs --lines 100
+PYTHONPATH=src python3 -m codex_codeshark restart
+PYTHONPATH=src python3 -m codex_codeshark stop
 ```
 
-Remove the service:
+The compatibility scripts remain available for direct install and removal:
 
 ```bash
+python3 scripts/install_launch_agent.py
 python3 scripts/uninstall_launch_agent.py
 ```
 
@@ -140,18 +152,19 @@ Codex-codeshark connects an agent runtime to a real messaging surface. Treat eve
 - Exactly one Telegram user ID is allowed.
 - Group chats and unauthorized users are ignored.
 - The BotFather token is stored in macOS Keychain, not in project files.
-- The Telegram token is removed from the environment before Codex starts.
+- The Codex child process receives a strict environment allowlist; Telegram, OpenAI API,
+  cloud, GitHub, and SSH-agent credentials from the parent are not forwarded.
 - Telegram cannot choose the workspace path or pass arbitrary Codex CLI flags.
 - Codex runs with `sandbox_mode = "workspace-write"` and `approval_policy = "never"`.
+- Codex network access is disabled by default and explicitly set on every child process.
+- Attachment paths are generated by the gateway, size-limited, privately stored, and confined to `workspace/inbox/`.
 - Only one Codex task runs at a time, with cancellation and a configurable timeout.
 - Requests classified as destructive or externally mutating wait for explicit approval.
 - Interrupted approved tasks require approval again after restart.
 - Every configured MCP server must be represented in the gateway policy.
 - Servers without an explicit tool allowlist are disabled.
 
-The text classifier and injected execution policy are defense-in-depth controls, not a perfect security boundary. Keep credential-bearing MCP tools disabled unless they are required, and do not expose this bot as a shared public service.
-
-When started manually, the Codex child process inherits the gateway's environment except for `TELEGRAM_BOT_TOKEN`. Run the gateway with a minimal environment and do not export unrelated credentials into it. A stricter child-environment allowlist is planned before the first stable release.
+The text classifier and injected execution policy are defense-in-depth controls, not a perfect security boundary. Keep credential-bearing MCP tools disabled unless they are required, and do not expose this bot as a shared public service. Enable `codex_network_access` only when a task genuinely needs outbound access.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and the supported-version policy.
 
@@ -186,7 +199,8 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 
 | Command | Purpose |
 |---|---|
-| Plain text | Queue a task in the current interactive Codex session. |
+| Plain text | Queue a task in the current interactive Codex session; only the final result is sent. |
+| Photo or document | Save the attachment under `workspace/inbox/` and queue the caption as its task. |
 | `/status` | Show active work, queue depth, session capacity, and stored item counts. |
 | `/tasks` | List recent persistent task records. |
 | `/cancel` | Cancel the active Codex process or the oldest queued task. |
@@ -199,6 +213,8 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 | `/remember TEXT` | Store an explicitly approved long-term memory. |
 | `/memories` | List approved long-term memories. |
 | `/forget ID` | Delete a long-term memory. |
+| `/recall QUERY` | Search approved memories and skills with provenance and quality counters. |
+| `/review_memories` | List never-used, stale, or negatively rated memories for review. |
 | `/learn memory TEXT` | Create a memory proposal. |
 | `/learn skill NAME \| PROCEDURE` | Create a reusable skill proposal. |
 | `/learning` | List pending learning proposals. |
@@ -208,6 +224,13 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 | `/forget_skill ID` | Delete an approved skill. |
 | `/good [NOTE]` | Positively rate the last successful task. |
 | `/bad [REASON]` | Negatively rate the last successful task. |
+
+### Delivery recovery
+
+| Command | Purpose |
+|---|---|
+| `/deliveries` | List final replies that Telegram did not accept or whose delivery was ambiguous. |
+| `/retry_delivery ID` | Explicitly retry one failed reply and purge its stored text after success. |
 
 ### Automation and policy
 
@@ -241,7 +264,7 @@ Nothing is learned silently:
 2. The proposal appears under `/learning`.
 3. The user applies it with `/approve ID` or discards it with `/reject ID`.
 
-Approved memories become durable context. Approved skills are selected by keyword relevance and loaded only when needed. Approving a skill with an existing name replaces its procedure instead of creating an unbounded set of copies.
+Approved memories become durable context. Approved skills are selected by keyword relevance and loaded only when needed. Usage and `/good` or `/bad` feedback break ties between equally relevant skills. Approving a skill with an existing name replaces its procedure instead of creating an unbounded set of copies.
 
 ## Sessions and scheduled work
 
@@ -259,6 +282,7 @@ Scheduled jobs are always ephemeral. They do not create or continue Codex sessio
 - The fixed workspace path
 - The Codex binary and profile
 - Polling, timeout, queue, session, and memory limits
+- The attachment size limit and explicit Codex network policy
 - The MCP server inventory and per-server tool allowlist
 
 It does not contain the BotFather token or conversation transcripts. It is still private because it includes a Telegram user ID and local filesystem paths.
@@ -292,7 +316,10 @@ Codex-codeshark stores enough state to resume useful work without building an un
 | Long-term memory | 4,000 characters by default; 1,000 characters per item. |
 | Approved skills | Up to 100 skills; 8,000 characters per skill. |
 | Scheduled jobs | Up to 100 active jobs and 200 terminal records. |
+| Failed Telegram deliveries | Up to 100 failed replies; successful retries clear the stored text. |
+| Recall index and quality counters | Approved memories and skills only; no unrestricted transcript content. |
 | `runtime/feedback.jsonl` | Rotates at 1 MB and retains the current file plus one previous file. |
+| `workspace/inbox/` | The 50 newest gateway-managed attachment files; gitignored and excluded from migration archives. |
 
 The gateway does not duplicate full conversation transcripts and does not delete sessions created by other Codex projects or the Codex desktop app.
 
@@ -305,7 +332,7 @@ PYTHONPATH=src python3 -m codex_codeshark export-data \
   "$HOME/codeshark-personal-data.codeshark.zip"
 ```
 
-The archive includes memories, approved skills, task ratings, learning proposals, scheduled jobs, and terminal task metadata. It excludes the Telegram token, local configuration, Codex session files, update offsets, and runtime logs.
+The archive includes memories, approved skills, their recall provenance and quality counters, task ratings, learning proposals, scheduled jobs, and terminal task metadata. It excludes the Telegram token, local configuration, Codex session files, update offsets, failed-delivery payloads, attachments, and runtime logs.
 
 Archives are created with mode `0600` and may contain Telegram chat IDs and personal content. Keep them private and never commit them.
 
@@ -332,7 +359,7 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 | Telegram TLS verification failure | The client falls back to the verified macOS `/etc/ssl/cert.pem` bundle without disabling TLS verification. |
 | MCP policy mismatch | Add every globally or profile-configured server to `mcp_policy.known_servers`. |
 | Missing restricted profile | Rerun `setup` to create the `codex-codeshark` profile. |
-| LaunchAgent is not running | Reinstall it and inspect `runtime/agent.err.log`. |
+| LaunchAgent is not running | Run `PYTHONPATH=src python3 -m codex_codeshark start`, then inspect `logs`. |
 | Bot does not answer | Run `doctor`, confirm the LaunchAgent state, then check that the message came from the paired private chat. |
 
 ## Project layout
@@ -375,17 +402,41 @@ Tests never call Telegram or OpenAI networks. `doctor` intentionally checks the 
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
-## Roadmap
+## Upgrading
 
-Codex-codeshark is an early alpha with a deliberately narrow scope. The highest-value remaining work is:
+Stop the service, update the source tree, rerun the offline checks, and restart:
 
-- [ ] Hardened child process boundary: explicit environment allowlist and documented network policy.
-- [ ] First-class service CLI: `start`, `stop`, `restart`, `service-status`, and safe log inspection.
-- [ ] Telegram delivery resilience: rate-limit handling, bounded retries, and clearer failed-delivery state.
-- [ ] Searchable cross-session recall with provenance, without retaining unrestricted transcripts.
-- [ ] Better learning quality: usage counters, stale-memory review, and feedback-driven skill ranking.
-- [ ] Safe Telegram document and image intake confined to `workspace/`.
-- [ ] Release automation: version checks, signed tags, packaged artifacts, and upgrade guidance.
+```bash
+PYTHONPATH=src python3 -m codex_codeshark stop
+git pull --ff-only
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m codex_codeshark doctor
+PYTHONPATH=src python3 -m codex_codeshark start
+```
+
+SQLite schema additions are applied on startup. Personal data remains in `runtime/`; create an `export-data` archive before major upgrades.
+
+Maintainers publish releases from a signed, GitHub-verified annotated tag whose name matches the versions in `pyproject.toml` and `src/codex_codeshark/__init__.py`:
+
+```bash
+python3 scripts/release_check.py --tag v0.1.0
+git tag -s v0.1.0 -m "Codex-codeshark v0.1.0"
+git push origin v0.1.0
+```
+
+The release workflow verifies the signature and version, runs the full test suite, builds source and wheel packages, and publishes them to GitHub Releases.
+
+## Project status
+
+Codex-codeshark is an early alpha with a deliberately narrow scope. The initial public-readiness milestones are implemented:
+
+- [x] Hardened child process environment and explicit network policy.
+- [x] First-class macOS service CLI and sanitized log inspection.
+- [x] Telegram rate-limit handling and bounded failed-delivery recovery.
+- [x] Searchable cross-session recall with provenance.
+- [x] Usage counters, memory review, and feedback-aware skill ranking.
+- [x] Safe Telegram document and image intake confined to `workspace/`.
+- [x] Signed-tag validation, packaged release artifacts, and upgrade guidance.
 
 Multi-user operation, additional messaging channels, and multi-agent orchestration are not current goals.
 

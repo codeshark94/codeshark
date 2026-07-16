@@ -321,16 +321,23 @@ class SkillStore:
     def read(self, skill: SkillRecord) -> str:
         return (self.root / skill.path).read_text(encoding="utf-8")
 
-    def select(self, prompt: str, limit: int = 3) -> list[SkillRecord]:
+    def select(
+        self,
+        prompt: str,
+        limit: int = 3,
+        *,
+        quality_scores: dict[str, int] | None = None,
+    ) -> list[SkillRecord]:
         tokens = set(re.findall(r"[0-9A-Za-z가-힣_+-]{2,}", prompt.lower()))
-        scored: list[tuple[int, SkillRecord]] = []
+        scored: list[tuple[int, int, SkillRecord]] = []
         for skill in self.list():
             haystack = f"{skill.name} {skill.description}".lower()
             score = sum(1 for token in tokens if token in haystack)
             if score:
-                scored.append((score, skill))
-        scored.sort(key=lambda value: (-value[0], value[1].id))
-        return [replace(skill, content=self.read(skill)) for _, skill in scored[:limit]]
+                quality = (quality_scores or {}).get(skill.id, 0)
+                scored.append((score, quality, skill))
+        scored.sort(key=lambda value: (-value[0], -value[1], value[2].id))
+        return [replace(skill, content=self.read(skill)) for _, _, skill in scored[:limit]]
 
     def _write_index(self) -> None:
         data = {
