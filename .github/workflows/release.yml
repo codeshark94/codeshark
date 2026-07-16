@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Check out signed tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -28,7 +28,7 @@ jobs:
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${sha}" --jq '.verification.verified')" = "true"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
