@@ -156,8 +156,10 @@ class AgentStoreTests(unittest.TestCase):
                 source="telegram-group",
                 ephemeral=True,
                 restricted=True,
+                requester_id=456,
             )
             self.assertTrue(task.restricted)
+            self.assertEqual(task.requester_id, 456)
             self.assertEqual(store.restricted_pending_count(), 1)
 
             restored = AgentStore(path)
@@ -169,6 +171,25 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(cancelled.status, "cancelled")
             self.assertEqual(cancelled.prompt, "")
             self.assertEqual(restored.restricted_pending_count(), 0)
+
+    def test_group_context_is_requester_scoped_bounded_and_deleted_with_group(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.enable_group(-100123, "Engineering", 123)
+            for number in range(7):
+                store.append_group_context(
+                    -100123,
+                    456,
+                    f"request {number}",
+                    f"response {number}",
+                    now=1000 + number,
+                )
+            context = store.group_context(-100123, 456, now=1007)
+            self.assertEqual(len(context), 6)
+            self.assertEqual(context[0][0], "request 1")
+            self.assertEqual(store.group_context(-100123, 789, now=1007), [])
+            self.assertTrue(store.disable_group(-100123))
+            self.assertEqual(store.group_context(-100123, 456, now=1007), [])
 
 
 class CronTests(unittest.TestCase):

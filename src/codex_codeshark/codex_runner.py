@@ -189,6 +189,11 @@ class CodexRunner:
         ]
         for root in self.additional_write_roots:
             base.extend(["--add-dir", str(root)])
+        if self.model:
+            base.extend(["--model", self.model])
+        if self.model_reasoning_effort:
+            encoded = json.dumps(self.model_reasoning_effort)
+            base.extend(["-c", f"model_reasoning_effort={encoded}"])
         base.extend(
             [
                 "-c",

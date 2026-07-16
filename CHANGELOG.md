@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Server-configured delegated project roots for administrator development work.
 - Separate private/group Telegram command scopes and non-migrating group authorization.
 - Effective Codex model reporting in `/status` and `doctor`.
+- Requester-scoped group conversation continuity with six-exchange bounds, 30-day expiry, disable-time deletion, and migration exclusion.
+- Model-initiated automatic learning that proactively creates or updates durable administrator memories and reusable skills, with audit and deletion controls.
+- Bot-specific `gpt-5.5` model pinning for private and isolated group tasks.
 
 ## 0.1.0 - 2026-07-16
 

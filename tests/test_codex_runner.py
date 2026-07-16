@@ -27,6 +27,20 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIn("codex-codeshark", command)
         self.assertIn("sandbox_workspace_write.network_access=false", command)
 
+    def test_pins_configured_model_for_admin_tasks(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            model="gpt-5.5",
+            model_reasoning_effort="xhigh",
+        )
+        command = runner.build_command("hello", None)
+        self.assertIn("--model", command)
+        self.assertIn("gpt-5.5", command)
+        self.assertIn('model_reasoning_effort="xhigh"', command)
+
     def test_builds_resume_command(self) -> None:
         command = self.runner.build_command("continue", "thread-123")
         self.assertEqual(

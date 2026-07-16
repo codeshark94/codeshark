@@ -35,6 +35,7 @@ class TaskRecord:
     attempts: int
     approved: bool
     restricted: bool
+    requester_id: int | None
 
 
 @dataclass(frozen=True)
@@ -239,7 +240,9 @@ class AgentStore:
                     finished_at REAL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     error TEXT NOT NULL DEFAULT '',
-                    approved INTEGER NOT NULL DEFAULT 0
+                    approved INTEGER NOT NULL DEFAULT 0,
+                    restricted INTEGER NOT NULL DEFAULT 0,
+                    requester_id INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS tasks_ready
                     ON tasks(status, due_at, created_at);
@@ -275,6 +278,16 @@ class AgentStore:
                     enabled_by INTEGER NOT NULL,
                     enabled_at REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS group_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    request TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS group_context_requester
+                    ON group_context(chat_id, user_id, created_at);
                 """
             )
             task_columns = {
@@ -288,6 +301,8 @@ class AgentStore:
                 connection.execute(
                     "ALTER TABLE tasks ADD COLUMN restricted INTEGER NOT NULL DEFAULT 0"
                 )
+            if "requester_id" not in task_columns:
+                connection.execute("ALTER TABLE tasks ADD COLUMN requester_id INTEGER")
             schedule_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(schedules)").fetchall()
             }
@@ -323,6 +338,7 @@ class AgentStore:
             attempts=row["attempts"],
             approved=bool(row["approved"]),
             restricted=bool(row["restricted"]),
+            requester_id=row["requester_id"],
         )
 
     @staticmethod
@@ -431,6 +447,7 @@ class AgentStore:
         ephemeral: bool,
         requires_approval: bool = False,
         restricted: bool = False,
+        requester_id: int | None = None,
         due_at: float | None = None,
     ) -> TaskRecord:
         now = time.time()
@@ -441,8 +458,8 @@ class AgentStore:
                 """
                 INSERT INTO tasks
                     (id, chat_id, prompt, source, ephemeral, status, created_at, due_at,
-                     restricted)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     restricted, requester_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -454,6 +471,7 @@ class AgentStore:
                     now,
                     due_at or now,
                     int(restricted),
+                    requester_id,
                 ),
             )
         return self.get_task(task_id)
@@ -598,7 +616,61 @@ class AgentStore:
                 "WHERE chat_id = ? AND restricted = 1 AND status = 'queued'",
                 (time.time(), chat_id),
             )
+            connection.execute("DELETE FROM group_context WHERE chat_id = ?", (chat_id,))
             return cursor.rowcount == 1
+
+    def group_context(
+        self,
+        chat_id: int,
+        user_id: int,
+        *,
+        limit: int = 6,
+        now: float | None = None,
+    ) -> list[tuple[str, str]]:
+        cutoff = (time.time() if now is None else now) - 30 * 86400
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT request, response FROM group_context "
+                "WHERE chat_id = ? AND user_id = ? AND created_at >= ? "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (chat_id, user_id, cutoff, limit),
+            ).fetchall()
+        return [(row["request"], row["response"]) for row in reversed(rows)]
+
+    def append_group_context(
+        self,
+        chat_id: int,
+        user_id: int,
+        request: str,
+        response: str,
+        *,
+        now: float | None = None,
+    ) -> None:
+        normalized_request = request.strip()[:2000]
+        normalized_response = response.strip()[:4000]
+        if not normalized_request or not normalized_response:
+            return
+        created_at = time.time() if now is None else now
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "INSERT INTO group_context "
+                "(chat_id, user_id, request, response, created_at) VALUES (?, ?, ?, ?, ?)",
+                (chat_id, user_id, normalized_request, normalized_response, created_at),
+            )
+            connection.execute(
+                "DELETE FROM group_context WHERE chat_id = ? AND user_id = ? AND id NOT IN "
+                "(SELECT id FROM group_context WHERE chat_id = ? AND user_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 6)",
+                (chat_id, user_id, chat_id, user_id),
+            )
+            connection.execute(
+                "DELETE FROM group_context WHERE created_at < ?",
+                (created_at - 30 * 86400,),
+            )
+            connection.execute(
+                "DELETE FROM group_context WHERE id NOT IN "
+                "(SELECT id FROM group_context ORDER BY created_at DESC, id DESC LIMIT 1000)"
+            )
 
     def is_group_enabled(self, chat_id: int) -> bool:
         with self._connect() as connection:

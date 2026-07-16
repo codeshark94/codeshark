@@ -145,8 +145,37 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.assertTrue(task.ephemeral)
         self.assertTrue(task.restricted)
+        self.assertEqual(task.requester_id, 456)
         self.assertEqual(task.source, "telegram-group")
         self.assertEqual(self.api.messages, [])
+
+    def test_group_context_continues_per_requester_without_cross_user_leakage(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        def run_group(user_id: int, request: str) -> str:
+            self.app._handle_update(
+                self.update(
+                    user_id,
+                    f"@Codex_codeshark_bot {request}",
+                    "group",
+                    chat_id=group_id,
+                )
+            )
+            task = self.app.store.claim_next_task()
+            self.app._execute_task(task)
+            self.app.store.finish_task(task.id, "completed")
+            return runner.prompts[-1][0]
+
+        run_group(456, "My topic is Python")
+        other_prompt = run_group(789, "What topic did I choose?")
+        same_prompt = run_group(456, "What topic did I choose?")
+
+        self.assertNotIn("My topic is Python", other_prompt)
+        self.assertIn("My topic is Python", same_prompt)
+        self.assertIn("Recent conversation with this requester", same_prompt)
 
     def test_group_task_has_no_admin_context_session_learning_or_write_access(self) -> None:
         group_id = -100123
@@ -334,20 +363,16 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
         self.assertEqual(self.app.skills.list(), [])
 
-    def test_learning_candidate_requires_approval_before_memory_write(self) -> None:
+    def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
-        candidate = self.app.learning.list_pending()[0]
-        self.assertEqual(self.app.memory.list(), [])
-
-        self.app._handle_update(self.update(123, f"/approve {candidate.id}"))
         self.assertEqual(self.app.memory.list()[0].text, "The user prefers concise replies")
+        self.assertEqual(self.app.learning.list_recent()[0].status, "approved")
+        self.assertIn("Learned memory", self.api.messages[-1][1])
 
     def test_approved_skill_is_loaded_only_for_relevant_task(self) -> None:
         self.app._handle_update(
             self.update(123, "/learn skill Python testing | Run tests with unittest")
         )
-        candidate = self.app.learning.list_pending()[0]
-        self.app._handle_update(self.update(123, f"/approve {candidate.id}"))
         runner = FakeCodexRunner()
         self.app.runner = runner
 
@@ -356,7 +381,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(task)
         self.assertIn("Run tests with unittest", runner.prompts[0][0])
 
-    def test_model_learning_marker_is_hidden_and_staged(self) -> None:
+    def test_model_learning_marker_is_hidden_and_applied_automatically(self) -> None:
         result = RunResult(
             exit_code=0,
             message=(
@@ -371,8 +396,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, "do work"))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
-        self.assertEqual(self.app.learning.list_pending()[0].kind, "memory")
-        self.assertTrue(any(text.startswith("done\n\nCreated learning proposal") for _, text in self.api.messages))
+        event = self.app.learning.list_recent()[0]
+        self.assertEqual(event.kind, "memory")
+        self.assertEqual(event.status, "approved")
+        self.assertEqual(self.app.memory.list()[0].title, "Preference")
+        self.assertEqual(self.api.messages, [(123, "done")])
         self.assertFalse(any("<learning_candidate>" in text for _, text in self.api.messages))
 
     def test_task_sends_only_the_final_result(self) -> None:
@@ -469,7 +497,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(runner.prompts[0][2])
         self.assertIsNone(self.app.state.snapshot().codex_thread_id)
 
-    def test_rotates_full_session_after_staging_summary(self) -> None:
+    def test_rotates_full_session_after_applying_summary(self) -> None:
         for _ in range(self.app.config.max_session_turns):
             self.app.state.record_codex_turn("thread-old")
         summary = RunResult(
@@ -492,7 +520,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(task)
         self.assertEqual(runner.deleted_sessions, ["thread-old"])
         self.assertEqual(self.app.state.snapshot().codex_thread_id, "thread-new")
-        self.assertEqual(self.app.learning.list_pending()[0].title, "Summary")
+        self.assertEqual(self.app.memory.list()[0].title, "Summary")
+        self.assertEqual(self.app.learning.list_recent()[0].status, "approved")
 
 
 if __name__ == "__main__":

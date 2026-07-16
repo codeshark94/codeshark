@@ -20,6 +20,15 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("Do not modify files", prompt)
         self.assertNotIn("learning_candidate", prompt)
 
+    def test_restricted_group_prompt_includes_only_supplied_requester_context(self) -> None:
+        prompt = compose_restricted_group_prompt(
+            "What did I choose?",
+            task_id="t1",
+            context=[("My topic is Python", "Noted")],
+        )
+        self.assertIn("My topic is Python", prompt)
+        self.assertIn("belongs only to the current Telegram requester", prompt)
+
     def test_persists_lists_and_forgets_memories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "memory.json"
@@ -40,6 +49,15 @@ class MemoryStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.add("same memory")
 
+    def test_automatic_memory_updates_in_place_by_stable_title(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = MemoryStore(Path(directory) / "memory.json")
+            original = store.upsert("Response style", "Use concise replies")
+            updated = store.upsert("response STYLE", "Use concise direct replies")
+            self.assertEqual(updated.id, original.id)
+            self.assertEqual(len(store.list()), 1)
+            self.assertEqual(store.list()[0].text, "Use concise direct replies")
+
     def test_enforces_total_memory_capacity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = MemoryStore(Path(directory) / "memory.json", max_total_chars=20)
@@ -52,7 +70,7 @@ class MemoryStoreTests(unittest.TestCase):
             store = MemoryStore(Path(directory) / "memory.json")
             item = store.add("Answer in English")
             prompt, memory_ids, skill_ids = compose_prompt("Current request", store.list())
-            self.assertIn("Long-term memories approved", prompt)
+            self.assertIn("Long-term memories learned", prompt)
             self.assertIn(item.text, prompt)
             self.assertTrue(prompt.endswith("Current request"))
             self.assertEqual(memory_ids, (item.id,))

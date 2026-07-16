@@ -33,8 +33,8 @@ Open-ended agent frameworks are powerful, but a personal coding gateway benefits
 |---|---|
 | Local first | Codex runs on your Mac; writes stay inside a server-controlled workspace. |
 | One administrator | Exactly one paired Telegram user ID receives sessions, memory, tools, and control commands. |
-| Bounded guests | Only explicit `@bot` mentions in enabled groups enter a separate ephemeral and filesystem-isolated runtime. |
-| Approval gated | Learning and risky external actions wait for explicit approval. |
+| Bounded guests | Only explicit `@bot` mentions in enabled groups enter a separate ephemeral and filesystem-isolated runtime; context is isolated per requester. |
+| Deliberate autonomy | The model proactively learns durable administrator patterns; risky external actions still wait for explicit approval. |
 | Durable, not unbounded | Queues, sessions, memories, skills, feedback, and failed deliveries have retention limits. |
 | Fail closed | Unlisted MCP servers or tools prevent startup instead of silently becoming available. |
 | Portable personal data | Memories, skills, feedback, and schedules can move without exporting secrets. |
@@ -42,16 +42,16 @@ Open-ended agent frameworks are powerful, but a personal coding gateway benefits
 ## What it does
 
 - **Persistent conversation** — continues one Codex thread across Telegram messages and process restarts.
-- **Administrator-enabled groups** — answers `@bot natural-language request` without sharing administrator sessions, memory, custom skills, projects, attachments, network, MCP, or write access.
+- **Administrator-enabled groups** — gives each requester a separate bounded conversation through `@bot natural-language request` without sharing administrator sessions, memory, custom skills, projects, attachments, network, MCP, or write access.
 - **Delegated project development** — lets the administrator inspect and modify server-configured project roots while keeping destructive and external actions behind approval.
 - **Durable task queue** — stores queued work in SQLite and executes exactly one task at a time.
 - **Scheduled work** — supports one-time reminders, heartbeat intervals, and five-field cron expressions.
 - **Ephemeral automation** — scheduled jobs use `codex exec --ephemeral` and do not create conversation history.
-- **Approval-gated learning** — lets Codex propose long-term memories and reusable skills without silently applying them.
+- **Active automatic learning** — lets the model independently decide when administrator context contains a durable preference, pattern, fact, or reusable procedure, then creates or updates it automatically.
 - **Relevant skill loading** — injects at most three approved skills selected for the current request.
 - **Searchable recall** — searches approved memories and skills with source IDs and task provenance.
 - **Feedback-aware learning** — tracks usage and ratings, ranks equally relevant skills, and surfaces memories that need review.
-- **Bounded sessions** — summarizes durable context for review, deletes the full session, and starts fresh at the configured turn limit.
+- **Bounded sessions** — learns a durable summary, deletes the full session, and starts fresh at the configured turn limit.
 - **Risk approval** — holds destructive or external-state requests until `/approve` is received.
 - **MCP policy** — disables every server and tool that is not explicitly allowed for this gateway.
 - **Quiet task delivery** — sends no queue/start chatter; Telegram receives only approval prompts, errors, and final results.
@@ -160,7 +160,7 @@ For natural-language mentions, use BotFather's `/setprivacy` command to **disabl
 @YourBotUsername Explain what a Python context manager does
 ```
 
-Only the paired administrator can enable or disable a group. Group members use a normal message containing `@YourBotUsername`; unmentioned messages are ignored after receipt. Disable access in the group with `/disable_group@YourBotUsername`, or from the administrator's private chat with `/disable_group CHAT_ID`. `/groups` lists the current allowlist.
+Only the paired administrator can enable or disable a group. Group members use a normal message containing `@YourBotUsername`; unmentioned messages are ignored after receipt. Each member's six newest successful exchanges are reused only for that same member in that same group and expire after 30 days. Disable access in the group with `/disable_group@YourBotUsername`, or from the administrator's private chat with `/disable_group CHAT_ID`. Disabling a group also deletes its stored participant context. `/groups` lists the current allowlist.
 
 Disabling Privacy Mode means Telegram delivers group messages to the bot process. Codex-codeshark does not queue, store, or answer unmentioned messages. If you prefer Telegram not to deliver them at all, keep Privacy Mode enabled and group mention mode will not work.
 
@@ -178,6 +178,7 @@ Codex-codeshark connects an agent runtime to a real messaging surface. Treat eve
 - Administrator tasks run with `sandbox_mode = "workspace-write"`, server-controlled `delegated_roots`, and `approval_policy = "never"`.
 - Guest requests use a separate Codex home, an empty workspace outside the repository, an ephemeral session, and a least-privilege [Codex permission profile](https://learn.chatgpt.com/docs/permissions) that grants read access only to that empty workspace and minimal runtime files.
 - Guest web search, network, apps, browser/computer control, MCP servers, memories, multi-agent execution, and image generation are disabled. The isolated Codex state is cleaned after each request.
+- The gateway retains only bounded, requester-scoped group exchanges for conversational continuity. They are never used for administrator learning and are excluded from migration exports.
 - Codex network access is disabled by default and explicitly set on every child process.
 - Attachment paths are generated by the gateway, size-limited, privately stored, and confined to `workspace/inbox/`.
 - Only one Codex task runs at a time, with cancellation and a configurable timeout.
@@ -199,7 +200,7 @@ Administrator private chat                 Enabled Telegram group
 Paired user ID + risk approval gate         Group allowlist + explicit @mention
         |                                           |
         v                                           v
-Session + memory + approved skills          Ephemeral, isolated Codex home
+Session + active memory + learned skills    Requester context + isolated Codex home
         |                                           |
         v                                           v
 workspace + delegated project writes       Empty read-only workspace; no tools/network
@@ -229,7 +230,7 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 | `/enable_group` | Paired administrator, in the group | Allow that group to send restricted mention requests. |
 | `/disable_group` | Paired administrator, in the group | Revoke access immediately. |
 | `/group_status` | Paired administrator, in the group | Show whether that group is enabled. |
-| `@BotUsername REQUEST` | Any member of an enabled group | Run one isolated, read-only, ephemeral natural-language request. |
+| `@BotUsername REQUEST` | Any member of an enabled group | Continue that member's own bounded conversation in an isolated, read-only runtime. |
 | `/groups` | Paired administrator, private chat | List enabled group IDs and titles. |
 | `/disable_group CHAT_ID` | Paired administrator, private chat | Revoke one group without entering it. |
 
@@ -237,16 +238,16 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 
 | Command | Purpose |
 |---|---|
-| `/remember TEXT` | Store an explicitly approved long-term memory. |
-| `/memories` | List approved long-term memories. |
+| `/remember TEXT` | Explicitly store a long-term memory. |
+| `/memories` | List learned long-term memories. |
 | `/forget ID` | Delete a long-term memory. |
 | `/recall QUERY` | Search approved memories and skills with provenance and quality counters. |
 | `/review_memories` | List never-used, stale, or negatively rated memories for review. |
-| `/learn memory TEXT` | Create a memory proposal. |
-| `/learn skill NAME \| PROCEDURE` | Create a reusable skill proposal. |
-| `/learning` | List pending learning proposals. |
-| `/approve ID` | Approve a learning proposal, risky task, or risky scheduled job. |
-| `/reject ID` | Reject a pending proposal, task, or job. |
+| `/learn memory TEXT` | Immediately add or update a memory. |
+| `/learn skill NAME \| PROCEDURE` | Immediately add or update a reusable skill. |
+| `/learning` | Audit recent automatic learning events and any legacy pending proposals. |
+| `/approve ID` | Approve a risky task, risky scheduled job, or legacy learning proposal. |
+| `/reject ID` | Reject a pending risky item or legacy learning proposal. |
 | `/skills` | List approved local skills. |
 | `/forget_skill ID` | Delete an approved skill. |
 | `/good [NOTE]` | Positively rate the last successful task. |
@@ -273,31 +274,27 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 | `/mcp` | Show the effective MCP server and tool policy. |
 | `/help` | Show the command summary. |
 
-## Approval-gated learning
+## Active automatic learning
 
-Codex may append a hidden structured proposal when a successful task reveals a durable preference, fact, or reusable procedure. The gateway removes that block from the Telegram response and stages it for review.
+After every successful private administrator task, the model proactively evaluates the current conversation and accumulated session context. It independently decides whether the interaction reveals a high-value durable preference, working pattern, personal or project fact, or reusable procedure. No `/learn` command is required. One-off details, speculation, secrets, credentials, and unnecessary sensitive data are explicitly excluded.
+
+When learning is warranted, the model appends a hidden structured record. The gateway removes it from the Telegram response, applies it immediately, and records an audit event.
 
 ```text
 Task succeeds
-    -> Codex proposes memory or skill
-    -> gateway stores proposal as pending
-    -> /approve applies it
-       or /reject discards it
+    -> model independently evaluates the context
+    -> no durable pattern: no change
+       durable pattern: create or update memory/skill
+    -> gateway applies it and records the event
 ```
 
-Nothing is learned silently:
-
-1. Codex or the user proposes a memory or skill.
-2. The proposal appears under `/learning`.
-3. The user applies it with `/approve ID` or discards it with `/reject ID`.
-
-Approved memories become durable context. Approved skills are selected by keyword relevance and loaded only when needed. Usage and `/good` or `/bad` feedback break ties between equally relevant skills. Approving a skill with an existing name replaces its procedure instead of creating an unbounded set of copies.
+`/learning` shows the recent audit history. `/memories`, `/skills`, `/forget`, and `/forget_skill` remain the administrator's inspection and deletion controls. A stable memory title or skill name updates the existing record in place instead of creating unbounded copies. Learned memories become durable context; learned skills are selected by keyword relevance and loaded only when needed. Usage and `/good` or `/bad` feedback break ties between equally relevant skills. Group requests and scheduled jobs never feed this learning loop.
 
 ## Sessions and scheduled work
 
 Interactive Telegram requests continue the current persisted Codex session. The session ID and turn count are stored in `runtime/state.json`.
 
-When `max_session_turns` is reached, Codex creates a durable-summary proposal. The gateway deletes the old Codex session only after the proposal is staged successfully. If summarization or deletion fails, the existing session is kept.
+When `max_session_turns` is reached, Codex automatically learns a durable summary. The gateway deletes the old Codex session only after that summary is successfully applied. If learning or deletion fails, the existing session is kept.
 
 Scheduled jobs are always ephemeral. They do not create or continue Codex sessions. A recurring job cannot enqueue another run while its previous run is active, preventing an unbounded backlog.
 
@@ -307,7 +304,7 @@ Scheduled jobs are always ephemeral. They do not create or continue Codex sessio
 
 - The paired Telegram user ID
 - The fixed workspace path
-- The Codex binary and profile
+- The Codex binary, profile, and bot-specific model
 - Polling, timeout, queue, session, and memory limits
 - The attachment size limit and explicit Codex network policy
 - Server-controlled read-only and delegated writable project roots
@@ -323,7 +320,7 @@ For example, this lets the private administrator work across local projects as a
 delegated_roots = ["/Users/yourname/workspace"]
 ```
 
-The active model is inherited from the normal Codex configuration and profile. `/status` and `doctor` report the effective model; the isolated group runtime is pinned to the same model without loading the administrator's configuration, memories, or project instructions.
+`codex_model` pins the model for both private and isolated group tasks. The generated configuration currently uses `gpt-5.5`; `/status` and `doctor` report the effective model. The group runtime uses that same model without loading the administrator's configuration, memories, or project instructions.
 
 ### MCP policy example
 
@@ -345,13 +342,14 @@ Codex-codeshark stores enough state to resume useful work without building an un
 | Store | Retention policy |
 |---|---|
 | `runtime/state.json` | Current session ID, turn count, and Telegram update offset only. |
-| Interactive Codex session | Deleted and rotated at `max_session_turns` after staging a summary proposal. |
+| Interactive Codex session | Deleted and rotated at `max_session_turns` after its durable summary is learned. |
 | Scheduled Codex runs | Ephemeral; no Codex session is stored. |
 | Group Codex runs | Ephemeral; isolated runtime databases and shell snapshots are removed after each request. |
+| Group requester context | Six successful exchanges per `(group, requester)`, 30-day expiry, 1,000 rows globally; deleted when the group is disabled and excluded from migration. |
 | Enabled group allowlist | Stored locally in SQLite; maximum 20 groups; excluded from personal-data migration. |
 | Task records in `runtime/agent.db` | Raw prompts are cleared on terminal status; 200 terminal records are retained. |
-| Learning proposals | Up to 100 pending proposals and 200 processed records. |
-| Long-term memory | 4,000 characters by default; 1,000 characters per item. |
+| Automatic learning audit | Up to 200 processed events plus at most 100 legacy pending proposals. |
+| Long-term memory | 12,000 characters by default; 1,000 characters per item. |
 | Approved skills | Up to 100 skills; 8,000 characters per skill. |
 | Scheduled jobs | Up to 100 active jobs and 200 terminal records. |
 | Failed Telegram deliveries | Up to 100 failed replies; successful retries clear the stored text. |
@@ -370,7 +368,7 @@ PYTHONPATH=src python3 -m codex_codeshark export-data \
   "$HOME/codeshark-personal-data.codeshark.zip"
 ```
 
-The archive includes memories, approved skills, their recall provenance and quality counters, task ratings, learning proposals, scheduled jobs, and administrator task metadata. It excludes the Telegram token, local configuration, Codex session files, enabled-group authorization, group request records, update offsets, failed-delivery payloads, attachments, and runtime logs. A migrated installation therefore starts with no enabled groups.
+The archive includes learned memories and skills, their recall provenance and quality counters, task ratings, learning audit records, scheduled jobs, and administrator task metadata. It excludes the Telegram token, local configuration, Codex session files, enabled-group authorization, group participant context, group request records, update offsets, failed-delivery payloads, attachments, and runtime logs. A migrated installation therefore starts with no enabled groups.
 
 Archives are created with mode `0600` and may contain Telegram chat IDs and personal content. Keep them private and never commit them.
 

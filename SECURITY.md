@@ -35,6 +35,7 @@ The intended boundaries are:
 - Optional administrator-configured read-only roots and writable delegated project roots for trusted private-chat work
 - Group access denied by default and enabled only by the paired administrator
 - Group members limited to explicit bot mentions in an enabled group, with no attachments or control commands
+- Group continuity scoped to each `(group, requester)`, bounded to six exchanges with 30-day expiry, excluded from administrator learning and migration exports
 - A separate ephemeral group Codex runtime outside the repository, using a least-privilege filesystem permission profile that can read only its empty workspace and minimal runtime files
 - Group network, web search, apps, browser/computer control, MCP, memories, multi-agent execution, and write access disabled
 - A mandatory MCP server inventory and per-tool allowlist
@@ -47,4 +48,6 @@ The administrator-side risk classifier and model instructions are defense-in-dep
 
 The Codex child receives only basic process, locale, temporary-directory, certificate, and Codex-home variables. Parent API keys, Telegram credentials, cloud credentials, and SSH-agent sockets are not forwarded. Credential-bearing MCP tools remain a separate trust boundary and should stay disabled unless required.
 
-Group tasks use an isolated Codex home containing only a symlink to the existing Codex authentication file plus Codex-generated caches. The filesystem profile prevents model-generated commands from reading that home. Ephemeral task databases, logs, shell snapshots, and other non-cache state are removed after each group request. Enabled group IDs and group request records are deliberately excluded from migration exports.
+Group tasks use an isolated Codex home containing only a symlink to the existing Codex authentication file plus Codex-generated caches. The filesystem profile prevents model-generated commands from reading that home. Ephemeral task databases, logs, shell snapshots, and other non-cache state are removed after each group request. The gateway separately stores bounded requester-scoped exchanges for continuity; disabling a group deletes them. Enabled group IDs, participant context, and group request records are deliberately excluded from migration exports.
+
+Private administrator tasks may trigger model-initiated automatic learning. The model is instructed to learn only durable, high-value patterns and to exclude secrets, credentials, speculation, and unnecessary sensitive data. Automatic learning is never sourced from group or scheduled tasks. Administrators can audit events with `/learning` and inspect or delete learned data with `/memories`, `/skills`, `/forget`, and `/forget_skill`.

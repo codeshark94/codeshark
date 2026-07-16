@@ -44,11 +44,12 @@ class Config:
     workdir: Path
     codex_binary: Path
     codex_profile: str = DEFAULT_CODEX_PROFILE
+    codex_model: str = "gpt-5.5"
     poll_timeout_seconds: int = 30
     task_timeout_seconds: int = 1800
     queue_size: int = 3
     max_session_turns: int = 30
-    memory_max_chars: int = 4000
+    memory_max_chars: int = 12000
     codex_network_access: bool = False
     attachment_max_bytes: int = 10_000_000
     read_only_roots: tuple[Path, ...] = ()
@@ -94,18 +95,23 @@ def load_config(path: Path | None = None) -> Config:
     workdir = Path(str(data.get("workdir", ""))).expanduser()
     codex_binary = Path(str(data.get("codex_binary", ""))).expanduser()
     codex_profile = data.get("codex_profile", DEFAULT_CODEX_PROFILE)
+    codex_model = data.get("codex_model", "gpt-5.5")
     if not workdir.is_absolute() or not workdir.is_dir():
         raise ConfigError(f"workdir must be an existing absolute directory: {workdir}")
     if not codex_binary.is_absolute() or not codex_binary.is_file():
         raise ConfigError(f"codex_binary must be an existing absolute file: {codex_binary}")
     if not isinstance(codex_profile, str) or not codex_profile.strip():
         raise ConfigError("codex_profile must be a non-empty string")
+    if not isinstance(codex_model, str) or not re.fullmatch(
+        r"[A-Za-z0-9._-]{1,100}", codex_model
+    ):
+        raise ConfigError("codex_model must be a valid model identifier")
 
     poll_timeout = _require_int(data, "poll_timeout_seconds", 30)
     task_timeout = _require_int(data, "task_timeout_seconds", 1800)
     queue_size = _require_int(data, "queue_size", 3)
     max_session_turns = _require_int(data, "max_session_turns", 30)
-    memory_max_chars = _require_int(data, "memory_max_chars", 4000)
+    memory_max_chars = _require_int(data, "memory_max_chars", 12000)
     codex_network_access = _require_bool(data, "codex_network_access", False)
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
@@ -199,6 +205,7 @@ def load_config(path: Path | None = None) -> Config:
         workdir=workdir.resolve(),
         codex_binary=codex_binary.resolve(),
         codex_profile=codex_profile.strip(),
+        codex_model=codex_model,
         poll_timeout_seconds=poll_timeout,
         task_timeout_seconds=task_timeout,
         queue_size=queue_size,
@@ -449,11 +456,12 @@ def write_local_config(
             f"workdir = {json.dumps(str(workdir), ensure_ascii=False)}",
             f"codex_binary = {json.dumps(str(codex_binary), ensure_ascii=False)}",
             f'codex_profile = "{DEFAULT_CODEX_PROFILE}"',
+            'codex_model = "gpt-5.5"',
             "poll_timeout_seconds = 30",
             "task_timeout_seconds = 1800",
             "queue_size = 3",
             "max_session_turns = 30",
-            "memory_max_chars = 4000",
+            "memory_max_chars = 12000",
             "codex_network_access = false",
             "attachment_max_bytes = 10000000",
             "read_only_roots = []",

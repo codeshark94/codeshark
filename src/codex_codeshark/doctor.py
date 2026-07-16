@@ -82,9 +82,10 @@ def run_doctor() -> int:
             config.codex_profile,
             codex_home=config.codex_home,
         )
-        if model is None:
+        effective_model = config.codex_model or model
+        if effective_model is None:
             return "Codex default"
-        return model + (f" ({effort})" if effort else "")
+        return effective_model + (f" ({effort})" if effort else "")
 
     check("Codex model", model_check)
 

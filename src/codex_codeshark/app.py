@@ -12,7 +12,13 @@ from pathlib import Path
 from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
 from .codex_runner import CodexRunner, RunResult
 from .config import Config, configured_codex_runtime, prepare_group_runtime
-from .learning import LearningStore, SkillStore, extract_learning_candidate
+from .learning import (
+    LearningCandidate,
+    LearningStore,
+    ProposedLearning,
+    SkillStore,
+    extract_learning_candidate,
+)
 from .memory import (
     FeedbackStore,
     MemoryStore,
@@ -31,14 +37,15 @@ HELP_TEXT = """Codex-codeshark
 Plain text: submit a task to the current Codex session
 /status: show the active task, queue, and session
 /new: delete the current session and start fresh
-/remember TEXT: store an approved long-term memory
+/remember TEXT: explicitly store a long-term memory
 /memories, /forget ID: manage long-term memories
-/recall QUERY: search approved memories and skills with provenance
+/recall QUERY: search learned memories and skills with provenance
 /review_memories: review unused, stale, or poorly rated memories
-/learn memory TEXT: propose a memory
-/learn skill NAME | PROCEDURE: propose a reusable skill
-/learning, /approve ID, /reject ID: review learning and risky work
-/skills, /forget_skill ID: manage approved skills
+/learn memory TEXT: immediately store or update a memory
+/learn skill NAME | PROCEDURE: immediately store or update a reusable skill
+/learning: audit automatic learning history
+/approve ID, /reject ID: review risky work or legacy learning proposals
+/skills, /forget_skill ID: manage learned skills
 /tasks: show recent persistent tasks
 /deliveries, /retry_delivery ID: inspect or retry failed replies
 /groups, /disable_group CHAT_ID: manage administrator-enabled groups
@@ -55,11 +62,12 @@ Writes are confined to the workspace and server-controlled delegated project roo
 
 GROUP_HELP_TEXT = """Group access is restricted.
 
-@BotUsername REQUEST: run one read-only, ephemeral request
+@BotUsername REQUEST: continue your own bounded, read-only conversation
 
 Group requests cannot access administrator memories, custom skills, sessions, attachments,
 projects, network, MCP tools, file writes, or external actions. Full administrative access remains
-private-chat only."""
+private-chat only. Each member's six most recent exchanges are kept for up to 30 days and are
+never shared with another member or included in personal-data migration."""
 
 
 @dataclass(frozen=True)
@@ -109,7 +117,7 @@ class AgentApp:
         self.store = AgentStore(database_path)
         self.risk_policy = RiskPolicy()
         prepare_group_runtime(config)
-        model, reasoning_effort = configured_codex_runtime(
+        _configured_model, reasoning_effort = configured_codex_runtime(
             config.codex_profile,
             codex_home=config.codex_home,
         )
@@ -120,7 +128,7 @@ class AgentApp:
             restricted_workdir=config.group_workdir,
             restricted_codex_home=config.group_codex_home,
             timeout_seconds=config.task_timeout_seconds,
-            model=model,
+            model=config.codex_model,
             model_reasoning_effort=reasoning_effort,
             additional_write_roots=config.delegated_roots,
             mcp_known_servers=config.mcp_known_servers,
@@ -324,7 +332,8 @@ class AgentApp:
                 chat_id,
                 f"Group access enabled. Members may mention @{self._bot_username or 'bot'} "
                 "with a natural-language request. "
-                "All group requests are ephemeral and isolated from projects and administrator data.",
+                "Each member gets a separate bounded conversation. Group requests remain "
+                "isolated from projects and administrator data.",
             )
             return
 
@@ -362,7 +371,7 @@ class AgentApp:
         if not request:
             self._send_message(chat_id, "Mention this bot and include a request.")
             return
-        self._enqueue_group_task(chat_id, request)
+        self._enqueue_group_task(chat_id, user_id, request)
 
     def _extract_group_mention(self, text: str) -> str | None:
         if self._bot_username is None:
@@ -376,7 +385,7 @@ class AgentApp:
             return None
         return (text[: match.start()] + text[match.end() :]).strip()
 
-    def _enqueue_group_task(self, chat_id: int, prompt: str) -> None:
+    def _enqueue_group_task(self, chat_id: int, user_id: int, prompt: str) -> None:
         if self.risk_policy.requires_approval(prompt):
             self._send_message(
                 chat_id,
@@ -395,6 +404,7 @@ class AgentApp:
             source="telegram-group",
             ephemeral=True,
             restricted=True,
+            requester_id=user_id,
         )
         self._wake_worker.set()
 
@@ -512,7 +522,16 @@ class AgentApp:
         if not task.ephemeral and not task.restricted:
             rotation_notice = self._rotate_session_if_needed()
         if task.restricted:
-            prompt = compose_restricted_group_prompt(task.prompt, task_id=task.id)
+            context = (
+                self.store.group_context(task.chat_id, task.requester_id)
+                if task.requester_id is not None
+                else []
+            )
+            prompt = compose_restricted_group_prompt(
+                task.prompt,
+                task_id=task.id,
+                context=context,
+            )
             memory_ids: tuple[str, ...] = ()
             skill_ids: tuple[str, ...] = ()
         else:
@@ -544,28 +563,26 @@ class AgentApp:
             proposed = None
         else:
             clean_message, proposed = extract_learning_candidate(result.message)
-        learning_notice = None
-        if proposed and successful:
-            try:
-                candidate = self.learning.propose(
-                    kind=proposed.kind,
-                    title=proposed.title,
-                    content=proposed.content,
-                    source_task_id=task.id,
-                )
-            except ValueError as exc:
-                learning_notice = f"Could not store the learning proposal: {exc}"
-            else:
-                learning_notice = (
-                    f"Created learning proposal {candidate.id} ({candidate.kind}). "
-                    f"Use /approve {candidate.id} or /reject {candidate.id}."
-                )
-        notices = [item for item in (rotation_notice, learning_notice) if item]
+        if proposed and successful and task.source == "telegram":
+            self._auto_apply_learning(proposed, source_task_id=task.id)
+        notices = [item for item in (rotation_notice,) if item]
         if clean_message and notices:
             clean_message += "\n\n" + "\n".join(notices)
         elif notices:
             clean_message = "\n".join(notices)
         result = replace(result, message=clean_message)
+        if (
+            successful
+            and task.restricted
+            and task.requester_id is not None
+            and self.store.is_group_enabled(task.chat_id)
+        ):
+            self.store.append_group_context(
+                task.chat_id,
+                task.requester_id,
+                task.prompt,
+                clean_message,
+            )
         self._deliver_result(task.chat_id, result, persist_session=not task.ephemeral)
         if not task.restricted:
             with self._status_lock:
@@ -608,12 +625,18 @@ class AgentApp:
         else:
             LOGGER.warning("session rotation produced no durable summary; keeping current session")
             return None
-        candidate = self.learning.propose(
-            kind=proposed_kind,
-            title=proposed_title,
-            content=proposed_content,
-            source_task_id=None,
-        )
+        try:
+            candidate = self.learning.propose(
+                kind=proposed_kind,
+                title=proposed_title,
+                content=proposed_content,
+                source_task_id=None,
+            )
+            self._apply_learning_candidate(candidate)
+            self.learning.set_status(candidate.id, "approved")
+        except (OSError, RuntimeError, ValueError):
+            LOGGER.exception("session rotation learning failed; keeping current session")
+            return None
         try:
             self.runner.delete_session(snapshot.codex_thread_id)
         except Exception:
@@ -622,8 +645,56 @@ class AgentApp:
         self.state.set_codex_thread_id(None)
         return (
             f"The session reached its capacity and was rotated. "
-            f"Its durable summary is learning proposal {candidate.id}."
+            "Its durable patterns were learned automatically."
         )
+
+    def _apply_learning_candidate(self, candidate: LearningCandidate) -> str:
+        if candidate.kind == "memory":
+            item = self.memory.upsert(candidate.title, candidate.content)
+            self.recall.upsert(
+                kind="memory",
+                source_id=item.id,
+                title=candidate.title,
+                content=item.text,
+                source_task_id=candidate.source_task_id,
+                created_at=item.created_at,
+            )
+            return item.id
+        item = self.skills.add(candidate.title, candidate.content)
+        self.recall.upsert(
+            kind="skill",
+            source_id=item.id,
+            title=item.name,
+            content=self.skills.read(item),
+            source_task_id=candidate.source_task_id,
+            created_at=item.created_at,
+        )
+        return item.id
+
+    def _auto_apply_learning(
+        self,
+        proposed: ProposedLearning,
+        *,
+        source_task_id: str | None,
+    ) -> str | None:
+        try:
+            candidate = self.learning.propose(
+                kind=proposed.kind,
+                title=proposed.title,
+                content=proposed.content,
+                source_task_id=source_task_id,
+            )
+            source_id = self._apply_learning_candidate(candidate)
+            self.learning.set_status(candidate.id, "approved")
+        except (OSError, RuntimeError, ValueError) as exc:
+            LOGGER.warning("automatic learning failed: %s", exc)
+            return None
+        LOGGER.info(
+            "automatically applied learning candidate=%s source=%s",
+            candidate.id,
+            source_id,
+        )
+        return source_id
 
     def _deliver_result(
         self,
@@ -723,8 +794,8 @@ class AgentApp:
     def _learn(self, chat_id: int, argument: str) -> None:
         kind, separator, content = argument.partition(" ")
         if kind == "memory" and separator and content.strip():
-            title = "User-proposed memory"
             body = content.strip()
+            title = "Manual memory: " + " ".join(body.split())[:80]
         elif kind == "skill" and separator and "|" in content:
             title, body = (part.strip() for part in content.split("|", 1))
             if not title or not body:
@@ -743,12 +814,14 @@ class AgentApp:
                 content=body,
                 source_task_id=None,
             )
-        except ValueError as exc:
-            self._send_message(chat_id, f"Could not create the learning proposal: {exc}")
+            source_id = self._apply_learning_candidate(candidate)
+            self.learning.set_status(candidate.id, "approved")
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._send_message(chat_id, f"Could not apply the learning: {exc}")
             return
         self._send_message(
             chat_id,
-            f"Created learning proposal {candidate.id}. Use /approve {candidate.id} to apply it.",
+            f"Learned {kind} {source_id}.",
         )
 
     def _approve(self, chat_id: int, item_id: str) -> None:
@@ -758,27 +831,8 @@ class AgentApp:
                 self._send_message(chat_id, "No pending learning proposal was found for that ID.")
                 return
             try:
-                if candidate.kind == "memory":
-                    item = self.memory.add(candidate.content)
-                    self.recall.upsert(
-                        kind="memory",
-                        source_id=item.id,
-                        title=candidate.title,
-                        content=item.text,
-                        source_task_id=candidate.source_task_id,
-                        created_at=item.created_at,
-                    )
-                else:
-                    item = self.skills.add(candidate.title, candidate.content)
-                    self.recall.upsert(
-                        kind="skill",
-                        source_id=item.id,
-                        title=item.name,
-                        content=self.skills.read(item),
-                        source_task_id=candidate.source_task_id,
-                        created_at=item.created_at,
-                    )
-            except ValueError as exc:
+                self._apply_learning_candidate(candidate)
+            except (OSError, RuntimeError, ValueError) as exc:
                 self._send_message(chat_id, f"Could not apply the learning proposal: {exc}")
                 return
             self.learning.set_status(item_id, "approved")
@@ -912,12 +966,17 @@ class AgentApp:
                         skill_ids=completed.skill_ids,
                         rating=rating,
                     )
-                    candidate = None
                     if note:
-                        candidate = self.learning.propose(
-                            kind="memory",
-                            title="User correction" if rating == "bad" else "User confirmation",
-                            content=note,
+                        self._auto_apply_learning(
+                            ProposedLearning(
+                                kind="memory",
+                                title=(
+                                    "User correction"
+                                    if rating == "bad"
+                                    else "User confirmation"
+                                ),
+                                content=note,
+                            ),
                             source_task_id=completed.id,
                         )
                 except ValueError as exc:
@@ -925,8 +984,6 @@ class AgentApp:
                 else:
                     self._last_completed_task = None
                     message = "Stored the rating for the last completed task."
-                    if candidate:
-                        message += f" Learning proposal: {candidate.id}."
         self._send_message(chat_id, message)
 
     def _status_text(self) -> str:
@@ -944,7 +1001,8 @@ class AgentApp:
                 f"Session turns: {snapshot.session_turn_count}/{self.config.max_session_turns}",
                 f"Long-term memories: {len(self.memory.list())}",
                 f"Approved skills: {len(self.skills.list())}",
-                f"Learning proposals: {len(self.learning.list_pending())}",
+                "Automatic learning: enabled",
+                f"Pending legacy learning proposals: {len(self.learning.list_pending())}",
                 f"Scheduled jobs: {len(self.store.list_schedules())}",
                 f"Enabled groups: {len(self.store.list_groups())}",
                 f"Failed deliveries: {len(self.store.list_failed_deliveries())}",
@@ -970,7 +1028,8 @@ class AgentApp:
                 if stats
                 else "not indexed"
             )
-            lines.append(f"{item.id}. {item.text}\n  {usage}")
+            title = f"{item.title}: " if item.title else ""
+            lines.append(f"{item.id}. {title}{item.text}\n  {usage}")
         return "\n".join(lines)
 
     def _recall_text(self, query: str) -> str:
@@ -978,7 +1037,7 @@ class AgentApp:
             return "Usage: /recall QUERY"
         matches = self.recall.search(query)
         if not matches:
-            return "No approved memories or skills matched that query."
+            return "No learned memories or skills matched that query."
         lines = [f'Recall results for "{query}":']
         for item in matches:
             preview = " ".join(item.content.split())[:300]
@@ -1008,21 +1067,23 @@ class AgentApp:
         return "\n".join(lines)
 
     def _learning_text(self) -> str:
-        candidates = self.learning.list_pending()
+        candidates = self.learning.list_recent()
         if not candidates:
-            return "There are no pending learning proposals."
-        lines = ["Pending learning proposals:"]
+            return "Automatic learning is enabled. No learning events are recorded yet."
+        lines = ["Automatic learning is enabled. Recent learning events:"]
         for item in candidates:
             preview = " ".join(item.content.split())[:180]
-            lines.append(f"{item.id} [{item.kind}] {item.title}\n  {preview}")
-        lines.append("\nApprove: /approve ID · Reject: /reject ID")
+            status = "applied" if item.status == "approved" else item.status
+            lines.append(f"{item.id} [{status}/{item.kind}] {item.title}\n  {preview}")
+        if any(item.status == "pending" for item in candidates):
+            lines.append("\nLegacy pending items: /approve ID or /reject ID")
         return "\n".join(lines)
 
     def _skills_text(self) -> str:
         skills = self.skills.list()
         if not skills:
-            return "There are no approved skills."
-        lines = ["Approved skills:"]
+            return "There are no learned skills."
+        lines = ["Learned skills:"]
         for item in skills:
             stats = self.recall.stats("skill", item.id)
             usage = (
@@ -1040,7 +1101,7 @@ class AgentApp:
             self.recall.upsert(
                 kind="memory",
                 source_id=item.id,
-                title="Approved memory",
+                title=item.title or "Approved memory",
                 content=item.text,
                 source_task_id=None,
                 created_at=item.created_at,

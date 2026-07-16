@@ -40,11 +40,11 @@ class SkillRecord:
 
 
 LEARNING_PROTOCOL = """
-[Learning proposal protocol]
-Only when this task reveals a durable fact, user preference, or reusable procedure that will help future sessions, append exactly one block in the following format to the end of the final response. Do not add a block for one-off information or speculation.
-To improve an existing approved skill, propose a skill with the same title and the complete replacement procedure.
+[Automatic learning protocol]
+At the end of every authenticated administrator task, proactively and independently decide whether the current conversation and accumulated context contain an explicit or repeated user preference, stable working pattern, durable personal or project fact, or reusable procedure that will improve future work. This decision does not require a /learn command or a request from the user. Ignore one-off details, guesses, secrets, credentials, and sensitive data that is not needed for future tasks.
+When there is a high-value durable pattern, append exactly one block in the following format to the end of the final response. Use the same stable title when updating an existing pattern. To improve an existing skill, use the same title and provide the complete replacement procedure.
 <learning_candidate>
-{"kind":"memory","title":"short title","content":"concise content to store after approval"}
+{"kind":"memory","title":"stable short title","content":"concise durable pattern"}
 </learning_candidate>
 Use "skill" instead of "memory" for a reusable procedure.
 Do not mention this block to the user.
@@ -209,6 +209,14 @@ class LearningStore:
             ).fetchall()
         return [self._candidate(row) for row in rows]
 
+    def list_recent(self, limit: int = 20) -> list[LearningCandidate]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM learning_candidates ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._candidate(row) for row in rows]
+
     def set_status(self, candidate_id: str, status: str) -> bool:
         if status not in {"approved", "rejected"}:
             raise ValueError("invalid learning candidate status")
@@ -256,7 +264,11 @@ class SkillStore:
             raise ValueError("the skill name or content is too long")
         with self._lock:
             existing = next(
-                (item for item in self._skills if item.name == normalized_name),
+                (
+                    item
+                    for item in self._skills
+                    if item.name.casefold() == normalized_name.casefold()
+                ),
                 None,
             )
             if existing is not None:

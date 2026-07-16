@@ -87,6 +87,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.allowed_user_ids, frozenset({123}))
             self.assertEqual(loaded.workdir, workspace.resolve())
             self.assertEqual(loaded.max_session_turns, 25)
+            self.assertEqual(loaded.codex_model, "gpt-5.5")
             self.assertFalse(loaded.codex_network_access)
             self.assertEqual(loaded.attachment_max_bytes, 10_000_000)
             self.assertEqual(loaded.read_only_roots, (read_only.resolve(),))
