@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior and how it would be verified.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and data impact
+      description: Does this change authentication, credentials, external side effects, retention, or workspace access?
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This keeps the project single-user and Telegram-only.
+          required: true

@@ -6,8 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "codex-codeshark"
 version = "0.1.0"
 description = "Codex-codeshark private Telegram gateway for a local OpenAI Codex CLI session"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
+license = "MIT"
+keywords = ["codex", "telegram", "agent", "automation", "memory"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development",
+]
+
+[project.urls]
+Homepage = "https://github.com/Younghegalian/codeshark"
+Issues = "https://github.com/Younghegalian/codeshark/issues"
+Changelog = "https://github.com/Younghegalian/codeshark/blob/main/CHANGELOG.md"
+Security = "https://github.com/Younghegalian/codeshark/security/policy"
 
 [project.scripts]
 codex-codeshark = "codex_codeshark.__main__:main"
