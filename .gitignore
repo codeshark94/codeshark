@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+config.local.toml
+*.codeshark.zip
+runtime/*
+!runtime/.gitkeep
