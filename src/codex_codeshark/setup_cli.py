@@ -6,6 +6,8 @@ import time
 
 from .config import (
     DEFAULT_CODEX_PROFILE,
+    load_config,
+    prepare_group_runtime,
     prompt_and_store_bot_token,
     write_codex_profile,
     write_local_config,
@@ -64,6 +66,7 @@ def interactive_setup() -> int:
 
     config_path = write_local_config(paired_user_id)
     profile_path = write_codex_profile(DEFAULT_CODEX_PROFILE)
+    prepare_group_runtime(load_config(config_path))
     api.set_commands()
     api.delete_webhook(drop_pending_updates=True)
     api.send_message(paired_user_id, "Pairing complete. Run the local doctor command next.")

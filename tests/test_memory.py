@@ -4,10 +4,22 @@ import unittest
 from pathlib import Path
 
 from codex_codeshark.learning import SkillStore
-from codex_codeshark.memory import FeedbackStore, MemoryStore, compose_prompt
+from codex_codeshark.memory import (
+    FeedbackStore,
+    MemoryStore,
+    compose_prompt,
+    compose_restricted_group_prompt,
+)
 
 
 class MemoryStoreTests(unittest.TestCase):
+    def test_restricted_group_prompt_blocks_private_context_and_actions(self) -> None:
+        prompt = compose_restricted_group_prompt("Explain Python", task_id="t1")
+        self.assertIn("non-privileged", prompt)
+        self.assertIn("Do not use or disclose administrator memories", prompt)
+        self.assertIn("Do not modify files", prompt)
+        self.assertNotIn("learning_candidate", prompt)
+
     def test_persists_lists_and_forgets_memories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "memory.json"
@@ -45,6 +57,26 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertTrue(prompt.endswith("Current request"))
             self.assertEqual(memory_ids, (item.id,))
             self.assertEqual(skill_ids, ())
+
+    def test_compose_prompt_lists_server_controlled_read_only_roots(self) -> None:
+        prompt, _, _ = compose_prompt(
+            "Analyze the project",
+            [],
+            read_only_roots=(Path("/srv/projects"),),
+        )
+        self.assertIn("Server-controlled read-only project roots", prompt)
+        self.assertIn("/srv/projects", prompt)
+        self.assertIn("Do not create, edit, delete", prompt)
+
+    def test_compose_prompt_lists_delegated_writable_roots(self) -> None:
+        prompt, _, _ = compose_prompt(
+            "Update the project",
+            [],
+            delegated_roots=(Path("/srv/delegated"),),
+        )
+        self.assertIn("/srv/delegated", prompt)
+        self.assertIn("inspect, edit, create, test", prompt)
+        self.assertIn("external state changes still require explicit", prompt)
 
     def test_compose_prompt_limits_memory_size(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

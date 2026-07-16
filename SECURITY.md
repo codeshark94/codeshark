@@ -30,15 +30,21 @@ Do not include real Telegram tokens, Codex credentials, personal data, or unrela
 
 The intended boundaries are:
 
-- One explicitly paired Telegram user in a private chat
-- A server-controlled `workspace/` directory
-- A restricted Codex profile using `workspace-write`
+- One explicitly paired Telegram administrator in a private chat
+- Administrator writes confined to `workspace/` and explicit `delegated_roots` by a `workspace-write` Codex profile
+- Optional administrator-configured read-only roots and writable delegated project roots for trusted private-chat work
+- Group access denied by default and enabled only by the paired administrator
+- Group members limited to explicit bot mentions in an enabled group, with no attachments or control commands
+- A separate ephemeral group Codex runtime outside the repository, using a least-privilege filesystem permission profile that can read only its empty workspace and minimal runtime files
+- Group network, web search, apps, browser/computer control, MCP, memories, multi-agent execution, and write access disabled
 - A mandatory MCP server inventory and per-tool allowlist
 - Explicit approval for requests classified as destructive or externally mutating
 - Bot tokens stored in macOS Keychain and a strict Codex child-environment allowlist
 - Outbound Codex network access disabled by default and explicitly configured per child
 - Size-limited Telegram attachments stored only in the server-controlled workspace
 
-The risk classifier and model instructions are defense-in-depth controls. They do not replace operating-system isolation or careful credential and MCP policy management.
+The administrator-side risk classifier and model instructions are defense-in-depth controls. Guest isolation additionally relies on Codex permission profiles and therefore requires Codex CLI 0.138.0 or newer; startup rejects older versions.
 
 The Codex child receives only basic process, locale, temporary-directory, certificate, and Codex-home variables. Parent API keys, Telegram credentials, cloud credentials, and SSH-agent sockets are not forwarded. Credential-bearing MCP tools remain a separate trust boundary and should stay disabled unless required.
+
+Group tasks use an isolated Codex home containing only a symlink to the existing Codex authentication file plus Codex-generated caches. The filesystem profile prevents model-generated commands from reading that home. Ephemeral task databases, logs, shell snapshots, and other non-cache state are removed after each group request. Enabled group IDs and group request records are deliberately excluded from migration exports.

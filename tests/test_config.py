@@ -6,11 +6,14 @@ from unittest.mock import Mock, patch
 from codex_codeshark.config import (
     Config,
     ConfigError,
+    configured_codex_runtime,
     validate_codex_profile,
+    validate_codex_version,
     validate_bot_token,
     configured_mcp_servers,
     load_config,
     prompt_and_store_bot_token,
+    prepare_group_runtime,
     validate_mcp_policy,
     write_codex_profile,
     write_local_config,
@@ -25,6 +28,14 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError) as caught:
             validate_bot_token(invalid)
         self.assertNotIn(invalid, str(caught.exception))
+
+    @patch("codex_codeshark.config.subprocess.run")
+    def test_requires_codex_permission_profile_support(self, run_mock: Mock) -> None:
+        run_mock.return_value = Mock(returncode=0, stdout="codex-cli 0.144.5", stderr="")
+        self.assertEqual(validate_codex_version(Path("/codex")), "0.144.5")
+        run_mock.return_value = Mock(returncode=0, stdout="codex-cli 0.137.0", stderr="")
+        with self.assertRaisesRegex(ConfigError, "0.138.0"):
+            validate_codex_version(Path("/codex"))
 
     @patch("codex_codeshark.config.subprocess.run")
     @patch("codex_codeshark.config.getpass.getpass")
@@ -50,6 +61,10 @@ class ConfigTests(unittest.TestCase):
             binary.write_text("", encoding="utf-8")
             workspace = root / "workspace"
             workspace.mkdir()
+            read_only = root / "read-only"
+            read_only.mkdir()
+            delegated = root / "delegated"
+            delegated.mkdir()
             config = root / "config.toml"
             config.write_text(
                 "\n".join(
@@ -58,6 +73,8 @@ class ConfigTests(unittest.TestCase):
                         f'workdir = "{workspace}"',
                         f'codex_binary = "{binary}"',
                         "max_session_turns = 25",
+                        f'read_only_roots = ["{read_only}"]',
+                        f'delegated_roots = ["{delegated}"]',
                         '[mcp_policy]',
                         'known_servers = ["github", "docs"]',
                         '[mcp_policy.allowed_tools]',
@@ -72,6 +89,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.max_session_turns, 25)
             self.assertFalse(loaded.codex_network_access)
             self.assertEqual(loaded.attachment_max_bytes, 10_000_000)
+            self.assertEqual(loaded.read_only_roots, (read_only.resolve(),))
+            self.assertEqual(loaded.delegated_roots, (delegated.resolve(),))
             self.assertEqual(loaded.mcp_known_servers, ("github", "docs"))
             self.assertEqual(
                 loaded.mcp_allowed_tools,
@@ -112,6 +131,55 @@ class ConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ConfigError, "true or false"):
+                load_config(config)
+
+    def test_rejects_relative_read_only_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config = root / "config.toml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        'read_only_roots = ["../other"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "absolute"):
+                load_config(config)
+
+    def test_rejects_overlapping_read_only_and_delegated_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            project = root / "projects"
+            project.mkdir()
+            delegated = project / "delegated"
+            delegated.mkdir()
+            config = root / "config.toml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        f'read_only_roots = ["{project}"]',
+                        f'delegated_roots = ["{delegated}"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "cannot overlap"):
                 load_config(config)
 
     def test_rejects_mcp_allowlist_server_not_in_known_servers(self) -> None:
@@ -178,6 +246,46 @@ class ConfigTests(unittest.TestCase):
                 "2 configured, 1 allowed",
             )
 
+    def test_resolves_effective_model_from_global_and_profile_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.toml").write_text(
+                'model = "global-model"\nmodel_reasoning_effort = "high"\n',
+                encoding="utf-8",
+            )
+            (root / "codex-codeshark.config.toml").write_text(
+                'model = "profile-model"\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                configured_codex_runtime("codex-codeshark", codex_home=root),
+                ("profile-model", "high"),
+            )
+
+    def test_prepares_group_runtime_with_auth_symlink_and_separate_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            codex_home = root / "admin-codex-home"
+            codex_home.mkdir()
+            auth = codex_home / "auth.json"
+            auth.write_text("{}", encoding="utf-8")
+            config = Config(
+                allowed_user_ids=frozenset({123}),
+                workdir=root,
+                codex_binary=Path(__file__),
+                codex_home=codex_home,
+                group_workdir=root / "group" / "workspace",
+                group_codex_home=root / "group" / "codex-home",
+            )
+            self.assertEqual(
+                prepare_group_runtime(config),
+                str((root / "group" / "workspace").resolve()),
+            )
+            link = config.group_codex_home / "auth.json"
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(link.resolve(), auth.resolve())
+            self.assertEqual(config.group_workdir.stat().st_mode & 0o777, 0o700)
+
     def test_writes_and_validates_restricted_codex_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -214,6 +322,8 @@ class ConfigTests(unittest.TestCase):
             self.assertIn('known_servers = ["docs"]', path.read_text(encoding="utf-8"))
             self.assertTrue((root / "workspace").is_dir())
             self.assertEqual((root / "workspace").stat().st_mode & 0o777, 0o700)
+            self.assertIn("read_only_roots = []", path.read_text(encoding="utf-8"))
+            self.assertIn("delegated_roots = []", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

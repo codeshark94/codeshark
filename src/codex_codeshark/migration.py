@@ -66,6 +66,11 @@ def _sanitize_database(path: Path) -> None:
             if not required.issubset(tables):
                 missing = ", ".join(sorted(required - tables))
                 raise MigrationError(f"personal-data database is missing tables: {missing}")
+            task_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+            }
+            if "restricted" in task_columns:
+                connection.execute("DELETE FROM tasks WHERE restricted = 1")
             connection.execute(
                 "UPDATE tasks SET status = 'cancelled', prompt = '', finished_at = ? "
                 "WHERE status IN ('awaiting_approval', 'queued', 'running')",
@@ -76,6 +81,8 @@ def _sanitize_database(path: Path) -> None:
             )
             if "deliveries" in tables:
                 connection.execute("DELETE FROM deliveries")
+            if "group_chats" in tables:
+                connection.execute("DELETE FROM group_chats")
     except sqlite3.Error as exc:
         raise MigrationError(f"invalid personal-data database: {exc}") from exc
 
@@ -155,6 +162,7 @@ def export_personal_data(
                 "runtime/state.json",
                 "runtime logs",
                 "failed Telegram deliveries",
+                "enabled Telegram group IDs",
                 "workspace/inbox attachments",
             ],
         }

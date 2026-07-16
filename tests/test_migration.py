@@ -37,6 +37,14 @@ class PersonalDataMigrationTests(unittest.TestCase):
         )
         store = AgentStore(database)
         store.record_delivery_failure(123, "private final result", "offline")
+        store.enable_group(-100123, "Private group", 123)
+        store.enqueue_task(
+            -100123,
+            "guest question",
+            source="telegram-group",
+            ephemeral=True,
+            restricted=True,
+        )
         RecallStore(database).upsert(
             kind="memory",
             source_id=memory.id,
@@ -98,6 +106,8 @@ class PersonalDataMigrationTests(unittest.TestCase):
             self.assertEqual(task.prompt, "")
             self.assertEqual(store.get_schedule(schedule_id).status, "paused")
             self.assertEqual(store.list_failed_deliveries(), [])
+            self.assertEqual(store.list_groups(), [])
+            self.assertFalse(any(item.restricted for item in store.list_tasks()))
             recalled = RecallStore(target / "agent.db").search("English")[0]
             self.assertEqual(recalled.source_task_id, "t-complete")
 

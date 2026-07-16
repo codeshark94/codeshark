@@ -34,6 +34,7 @@ class TaskRecord:
     due_at: float
     attempts: int
     approved: bool
+    restricted: bool
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,14 @@ class DeliveryRecord:
     last_error: str
     created_at: float
     updated_at: float
+
+
+@dataclass(frozen=True)
+class GroupChatRecord:
+    chat_id: int
+    title: str
+    enabled_by: int
+    enabled_at: float
 
 
 class RiskPolicy:
@@ -260,6 +269,12 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS deliveries_status
                     ON deliveries(status, updated_at);
+                CREATE TABLE IF NOT EXISTS group_chats (
+                    chat_id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    enabled_by INTEGER NOT NULL,
+                    enabled_at REAL NOT NULL
+                );
                 """
             )
             task_columns = {
@@ -268,6 +283,10 @@ class AgentStore:
             if "approved" not in task_columns:
                 connection.execute(
                     "ALTER TABLE tasks ADD COLUMN approved INTEGER NOT NULL DEFAULT 0"
+                )
+            if "restricted" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN restricted INTEGER NOT NULL DEFAULT 0"
                 )
             schedule_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(schedules)").fetchall()
@@ -303,6 +322,7 @@ class AgentStore:
             due_at=row["due_at"],
             attempts=row["attempts"],
             approved=bool(row["approved"]),
+            restricted=bool(row["restricted"]),
         )
 
     @staticmethod
@@ -410,6 +430,7 @@ class AgentStore:
         source: str,
         ephemeral: bool,
         requires_approval: bool = False,
+        restricted: bool = False,
         due_at: float | None = None,
     ) -> TaskRecord:
         now = time.time()
@@ -419,10 +440,21 @@ class AgentStore:
             connection.execute(
                 """
                 INSERT INTO tasks
-                    (id, chat_id, prompt, source, ephemeral, status, created_at, due_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, chat_id, prompt, source, ephemeral, status, created_at, due_at,
+                     restricted)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (task_id, chat_id, prompt, source, int(ephemeral), status, now, due_at or now),
+                (
+                    task_id,
+                    chat_id,
+                    prompt,
+                    source,
+                    int(ephemeral),
+                    status,
+                    now,
+                    due_at or now,
+                    int(restricted),
+                ),
             )
         return self.get_task(task_id)
 
@@ -518,6 +550,78 @@ class AgentStore:
                 "WHERE status IN ('awaiting_approval', 'queued', 'running')"
             ).fetchone()
             return int(row["count"])
+
+    def restricted_pending_count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM tasks "
+                "WHERE restricted = 1 "
+                "AND status IN ('awaiting_approval', 'queued', 'running')"
+            ).fetchone()
+            return int(row["count"])
+
+    def enable_group(self, chat_id: int, title: str, enabled_by: int) -> GroupChatRecord:
+        normalized_title = " ".join(title.split())[:200] or str(chat_id)
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM group_chats WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+            if exists is None:
+                count = connection.execute(
+                    "SELECT COUNT(*) AS count FROM group_chats"
+                ).fetchone()["count"]
+                if count >= 20:
+                    raise ValueError("the enabled group limit of 20 has been reached")
+            connection.execute(
+                """
+                INSERT INTO group_chats (chat_id, title, enabled_by, enabled_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    title = excluded.title,
+                    enabled_by = excluded.enabled_by,
+                    enabled_at = excluded.enabled_at
+                """,
+                (chat_id, normalized_title, enabled_by, now),
+            )
+        return GroupChatRecord(chat_id, normalized_title, enabled_by, now)
+
+    def disable_group(self, chat_id: int) -> bool:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM group_chats WHERE chat_id = ?",
+                (chat_id,),
+            )
+            connection.execute(
+                "UPDATE tasks SET status = 'cancelled', prompt = '', finished_at = ? "
+                "WHERE chat_id = ? AND restricted = 1 AND status = 'queued'",
+                (time.time(), chat_id),
+            )
+            return cursor.rowcount == 1
+
+    def is_group_enabled(self, chat_id: int) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM group_chats WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        return row is not None
+
+    def list_groups(self) -> list[GroupChatRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM group_chats ORDER BY enabled_at DESC"
+            ).fetchall()
+        return [
+            GroupChatRecord(
+                chat_id=row["chat_id"],
+                title=row["title"],
+                enabled_by=row["enabled_by"],
+                enabled_at=row["enabled_at"],
+            )
+            for row in rows
+        ]
 
     def list_tasks(self, limit: int = 10) -> list[TaskRecord]:
         with self._connect() as connection:

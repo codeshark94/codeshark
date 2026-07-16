@@ -20,10 +20,18 @@ _DEFAULT_PROJECT_ROOT = (
 PROJECT_ROOT = Path(
     os.environ.get("CODEX_CODESHARK_HOME", _DEFAULT_PROJECT_ROOT)
 ).expanduser().resolve()
+DEFAULT_CODEX_HOME = Path(
+    os.environ.get("CODEX_HOME", Path.home() / ".codex")
+).expanduser().resolve()
+_DEFAULT_GROUP_RUNTIME_ROOT = Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "group"
+GROUP_RUNTIME_ROOT = Path(
+    os.environ.get("CODEX_CODESHARK_GROUP_HOME", _DEFAULT_GROUP_RUNTIME_ROOT)
+).expanduser().resolve()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.local.toml"
 DEFAULT_CODEX_PROFILE = "codex-codeshark"
 KEYCHAIN_SERVICE = "codex-codeshark.bot-token"
 _BOT_TOKEN_PATTERN = re.compile(r"[0-9]+:[A-Za-z0-9_-]+")
+_MIN_PERMISSION_PROFILE_VERSION = (0, 138, 0)
 
 
 class ConfigError(RuntimeError):
@@ -43,9 +51,14 @@ class Config:
     memory_max_chars: int = 4000
     codex_network_access: bool = False
     attachment_max_bytes: int = 10_000_000
+    read_only_roots: tuple[Path, ...] = ()
+    delegated_roots: tuple[Path, ...] = ()
     mcp_known_servers: tuple[str, ...] = ()
     mcp_allowed_tools: tuple[tuple[str, tuple[str, ...]], ...] = ()
     state_path: Path = PROJECT_ROOT / "runtime" / "state.json"
+    codex_home: Path = DEFAULT_CODEX_HOME
+    group_workdir: Path = GROUP_RUNTIME_ROOT / "workspace"
+    group_codex_home: Path = GROUP_RUNTIME_ROOT / "codex-home"
 
 
 def _require_int(data: dict[str, Any], key: str, default: int) -> int:
@@ -108,6 +121,52 @@ def load_config(path: Path | None = None) -> Config:
     if not 1_000_000 <= attachment_max_bytes <= 50_000_000:
         raise ConfigError("attachment_max_bytes must be between 1 MB and 50 MB")
 
+    raw_read_only_roots = data.get("read_only_roots", [])
+    if not isinstance(raw_read_only_roots, list) or len(raw_read_only_roots) > 20:
+        raise ConfigError("read_only_roots must be a list of at most 20 directories")
+    read_only_roots: list[Path] = []
+    for raw_root in raw_read_only_roots:
+        if not isinstance(raw_root, str):
+            raise ConfigError("read_only_roots must contain directory paths")
+        root = Path(raw_root).expanduser()
+        if not root.is_absolute() or not root.is_dir():
+            raise ConfigError(f"read_only_roots must contain existing absolute directories: {root}")
+        resolved = root.resolve()
+        if resolved not in read_only_roots:
+            read_only_roots.append(resolved)
+
+    raw_delegated_roots = data.get("delegated_roots", [])
+    if not isinstance(raw_delegated_roots, list) or len(raw_delegated_roots) > 20:
+        raise ConfigError("delegated_roots must be a list of at most 20 directories")
+    delegated_roots: list[Path] = []
+    for raw_root in raw_delegated_roots:
+        if not isinstance(raw_root, str):
+            raise ConfigError("delegated_roots must contain directory paths")
+        root = Path(raw_root).expanduser()
+        if not root.is_absolute() or not root.is_dir():
+            raise ConfigError(f"delegated_roots must contain existing absolute directories: {root}")
+        resolved = root.resolve()
+        if resolved not in delegated_roots:
+            delegated_roots.append(resolved)
+    overlap = {
+        (read_root, delegated_root)
+        for read_root in read_only_roots
+        for delegated_root in delegated_roots
+        if (
+            read_root == delegated_root
+            or read_root in delegated_root.parents
+            or delegated_root in read_root.parents
+        )
+    }
+    if overlap:
+        raise ConfigError(
+            "read-only and delegated project roots cannot overlap: "
+            + ", ".join(
+                f"{read_root} <> {delegated_root}"
+                for read_root, delegated_root in sorted(overlap)
+            )
+        )
+
     mcp_policy = data.get("mcp_policy", {})
     if not isinstance(mcp_policy, dict):
         raise ConfigError("mcp_policy must be a table")
@@ -147,6 +206,8 @@ def load_config(path: Path | None = None) -> Config:
         memory_max_chars=memory_max_chars,
         codex_network_access=codex_network_access,
         attachment_max_bytes=attachment_max_bytes,
+        read_only_roots=tuple(read_only_roots),
+        delegated_roots=tuple(delegated_roots),
         mcp_known_servers=tuple(raw_known_servers),
         mcp_allowed_tools=tuple(allowed_tools),
     )
@@ -173,6 +234,60 @@ def configured_mcp_servers(
             raise ConfigError(f"mcp_servers must be a table in {path}")
         servers.update(str(name) for name in raw_servers)
     return frozenset(servers)
+
+
+def configured_codex_runtime(
+    codex_profile: str,
+    *,
+    codex_home: Path | None = None,
+) -> tuple[str | None, str | None]:
+    root = (codex_home or DEFAULT_CODEX_HOME).expanduser()
+    model: str | None = None
+    reasoning_effort: str | None = None
+    for path in (root / "config.toml", root / f"{codex_profile}.config.toml"):
+        if not path.is_file():
+            continue
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ConfigError(f"cannot inspect Codex runtime config {path}: {exc}") from exc
+        if isinstance(data.get("model"), str) and data["model"].strip():
+            model = data["model"].strip()
+        if (
+            isinstance(data.get("model_reasoning_effort"), str)
+            and data["model_reasoning_effort"].strip()
+        ):
+            reasoning_effort = data["model_reasoning_effort"].strip()
+    return model, reasoning_effort
+
+
+def prepare_group_runtime(config: Config) -> str:
+    workdir = config.group_workdir.expanduser().resolve()
+    isolated_home = config.group_codex_home.expanduser().resolve()
+    if (
+        workdir == isolated_home
+        or workdir in isolated_home.parents
+        or isolated_home in workdir.parents
+    ):
+        raise ConfigError("group_workdir and group_codex_home must be separate directories")
+
+    workdir.mkdir(parents=True, exist_ok=True)
+    isolated_home.mkdir(parents=True, exist_ok=True)
+    workdir.chmod(0o700)
+    isolated_home.chmod(0o700)
+
+    auth_source = (config.codex_home / "auth.json").expanduser().resolve()
+    if not auth_source.is_file():
+        raise ConfigError(f"Codex authentication file is missing: {auth_source}")
+    auth_link = isolated_home / "auth.json"
+    if auth_link.exists() or auth_link.is_symlink():
+        if not auth_link.is_symlink() or auth_link.resolve() != auth_source:
+            raise ConfigError(
+                "group Codex home contains an unexpected auth.json; remove it and rerun doctor"
+            )
+    else:
+        auth_link.symlink_to(auth_source)
+    return str(workdir)
 
 
 def validate_mcp_policy(config: Config, *, codex_home: Path | None = None) -> str:
@@ -225,6 +340,27 @@ def validate_codex_profile(config: Config, *, codex_home: Path | None = None) ->
     if data.get("approval_policy") != "never":
         raise ConfigError("Codex profile approval_policy must be never")
     return config.codex_profile
+
+
+def validate_codex_version(binary: Path) -> str:
+    result = subprocess.run(
+        [str(binary), "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", output)
+    if result.returncode != 0 or match is None:
+        raise ConfigError(f"could not determine Codex CLI version: {output or 'no output'}")
+    version = tuple(int(part) for part in match.groups())
+    if version < _MIN_PERMISSION_PROFILE_VERSION:
+        required = ".".join(str(part) for part in _MIN_PERMISSION_PROFILE_VERSION)
+        raise ConfigError(
+            f"Codex CLI {match.group(0)} is too old; group isolation requires {required} or newer"
+        )
+    return match.group(0)
 
 
 def keychain_account() -> str:
@@ -320,6 +456,8 @@ def write_local_config(
             "memory_max_chars = 4000",
             "codex_network_access = false",
             "attachment_max_bytes = 10000000",
+            "read_only_roots = []",
+            "delegated_roots = []",
             "",
             "[mcp_policy]",
             "known_servers = " + json.dumps(known_mcp_servers),

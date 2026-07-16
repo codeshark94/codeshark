@@ -220,7 +220,7 @@ class TelegramAPI:
                 temporary_path.unlink()
 
     def set_commands(self) -> None:
-        commands = [
+        private_commands = [
             {"command": "help", "description": "Show command help"},
             {"command": "status", "description": "Show task and session status"},
             {"command": "new", "description": "Delete the current session"},
@@ -236,6 +236,8 @@ class TelegramAPI:
             {"command": "skills", "description": "List approved skills"},
             {"command": "forget_skill", "description": "Delete an approved skill"},
             {"command": "tasks", "description": "List recent persistent tasks"},
+            {"command": "groups", "description": "List administrator-enabled groups"},
+            {"command": "disable_group", "description": "Disable a Telegram group"},
             {"command": "deliveries", "description": "List failed Telegram replies"},
             {"command": "retry_delivery", "description": "Retry a failed Telegram reply"},
             {"command": "remind", "description": "Create a one-time job"},
@@ -250,4 +252,20 @@ class TelegramAPI:
             {"command": "bad", "description": "Rate the last task negatively"},
             {"command": "cancel", "description": "Cancel the current task"},
         ]
-        self.call("setMyCommands", {"commands": json.dumps(commands, ensure_ascii=False)})
+        self.call(
+            "deleteMyCommands",
+            {"scope": json.dumps({"type": "default"})},
+        )
+        self.call(
+            "setMyCommands",
+            {
+                "commands": json.dumps(private_commands, ensure_ascii=False),
+                "scope": json.dumps({"type": "all_private_chats"}),
+            },
+        )
+        self.call(
+            "deleteMyCommands",
+            {
+                "scope": json.dumps({"type": "all_group_chats"}),
+            },
+        )

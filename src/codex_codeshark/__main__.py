@@ -10,6 +10,7 @@ from .config import (
     load_bot_token,
     load_config,
     validate_codex_profile,
+    validate_codex_version,
     validate_mcp_policy,
 )
 from .doctor import run_doctor
@@ -93,6 +94,7 @@ def main() -> int:
             print("Scheduled jobs were imported as paused. Review and resume them in Telegram.")
             return 0
         config = load_config()
+        validate_codex_version(config.codex_binary)
         validate_codex_profile(config)
         validate_mcp_policy(config)
         token = load_bot_token()

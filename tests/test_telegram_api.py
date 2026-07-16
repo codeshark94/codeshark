@@ -14,8 +14,21 @@ class TelegramAPITests(unittest.TestCase):
         api = TelegramAPI("123456789:ABC_def-123")
         api.call = Mock()
         api.set_commands()
-        payload = api.call.call_args.args[1]
-        commands = json.loads(payload["commands"])
+        self.assertEqual(api.call.call_count, 3)
+        self.assertEqual(api.call.call_args_list[0].args[0], "deleteMyCommands")
+
+        private_payload = api.call.call_args_list[1].args[1]
+        group_payload = api.call.call_args_list[2].args[1]
+        self.assertEqual(
+            json.loads(private_payload["scope"]),
+            {"type": "all_private_chats"},
+        )
+        self.assertEqual(
+            json.loads(group_payload["scope"]),
+            {"type": "all_group_chats"},
+        )
+        self.assertEqual(api.call.call_args_list[2].args[0], "deleteMyCommands")
+        commands = json.loads(private_payload["commands"])
         self.assertTrue(commands)
         for command in commands:
             self.assertNotRegex(command["description"], r"[가-힣]")

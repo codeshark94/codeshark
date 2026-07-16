@@ -20,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Size-limited Telegram photo and document intake under `workspace/inbox/`.
 - Signed-tag validation, version checks, package builds, and GitHub release automation.
 - Complete source-distribution manifest and per-user data root for installed packages.
+- Administrator-enabled Telegram groups with mention-triggered, natural-language, ephemeral guest requests.
+- Separate guest Codex home and least-privilege filesystem permission profile with network, MCP, personal context, and writes disabled.
+- Server-configured delegated project roots for administrator development work.
+- Separate private/group Telegram command scopes and non-migrating group authorization.
+- Effective Codex model reporting in `/status` and `doctor`.
 
 ## 0.1.0 - 2026-07-16
 

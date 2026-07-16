@@ -142,6 +142,34 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(sent.text, "")
             self.assertEqual(store.list_failed_deliveries(), [])
 
+    def test_restricted_group_task_and_group_acl_are_persistent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.db"
+            store = AgentStore(path)
+            group = store.enable_group(-100123, "Engineering", 123)
+            self.assertEqual(group.chat_id, -100123)
+            self.assertTrue(store.is_group_enabled(-100123))
+
+            task = store.enqueue_task(
+                -100123,
+                "explain this",
+                source="telegram-group",
+                ephemeral=True,
+                restricted=True,
+            )
+            self.assertTrue(task.restricted)
+            self.assertEqual(store.restricted_pending_count(), 1)
+
+            restored = AgentStore(path)
+            self.assertTrue(restored.is_group_enabled(-100123))
+            self.assertTrue(restored.get_task(task.id).restricted)
+            self.assertTrue(restored.disable_group(-100123))
+            self.assertEqual(restored.list_groups(), [])
+            cancelled = restored.get_task(task.id)
+            self.assertEqual(cancelled.status, "cancelled")
+            self.assertEqual(cancelled.prompt, "")
+            self.assertEqual(restored.restricted_pending_count(), 0)
+
 
 class CronTests(unittest.TestCase):
     def test_next_cron_time_supports_steps_and_exact_values(self) -> None:

@@ -14,6 +14,8 @@ class CodexRunnerTests(unittest.TestCase):
             binary=Path("/tmp/codex"),
             profile="codex-codeshark",
             workdir=Path("/tmp/workspace"),
+            restricted_workdir=Path("/tmp/group-workspace"),
+            restricted_codex_home=Path("/tmp/group-codex-home"),
             timeout_seconds=60,
             mcp_known_servers=("github", "docs"),
             mcp_allowed_tools=(("github", ("list_issues",)),),
@@ -85,6 +87,59 @@ class CodexRunnerTests(unittest.TestCase):
             "sandbox_workspace_write.network_access=true",
             runner.build_command("hello", None),
         )
+
+    def test_delegated_project_roots_are_added_to_admin_sandbox(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            additional_write_roots=(Path("/tmp/project-a"), Path("/tmp/project-b")),
+        )
+        command = runner.build_command("work across projects", None)
+        self.assertEqual(command.count("--add-dir"), 2)
+        self.assertIn("/tmp/project-a", command)
+        self.assertIn("/tmp/project-b", command)
+
+    def test_restricted_group_command_uses_isolated_permission_profile(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            restricted_workdir=Path("/tmp/group-workspace"),
+            restricted_codex_home=Path("/tmp/group-codex-home"),
+            timeout_seconds=60,
+            model="gpt-test",
+            model_reasoning_effort="xhigh",
+            network_access=True,
+            mcp_known_servers=("docs",),
+            mcp_allowed_tools=(("docs", ("search",)),),
+        )
+        command = runner.build_command(
+            "group question",
+            None,
+            ephemeral=True,
+            restricted=True,
+        )
+        self.assertIn("/tmp/group-workspace", command)
+        self.assertIn('default_permissions="codeshark_group"', command)
+        self.assertIn("permissions.codeshark_group.network.enabled=false", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+        self.assertIn("--strict-config", command)
+        self.assertIn("gpt-test", command)
+        self.assertIn('model_reasoning_effort="xhigh"', command)
+        self.assertNotIn("--sandbox", command)
+        self.assertNotIn("mcp_servers.docs.enabled=false", command)
+        self.assertNotIn('mcp_servers.docs.enabled_tools=["search"]', command)
+
+    def test_restricted_group_task_cannot_resume_admin_session(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot resume"):
+            self.runner.build_command("question", "thread-123", restricted=True)
+
+    def test_restricted_child_environment_uses_isolated_codex_home(self) -> None:
+        environment = self.runner._child_env(restricted=True)
+        self.assertEqual(environment["CODEX_HOME"], "/tmp/group-codex-home")
 
     @patch("codex_codeshark.codex_runner.subprocess.run")
     def test_keeps_delete_failure_visible(self, run) -> None:

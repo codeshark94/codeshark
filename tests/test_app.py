@@ -23,6 +23,7 @@ class FakeTelegramAPI:
 
 class FakeCodexRunner:
     def __init__(self, result: RunResult | None = None) -> None:
+        self.model = "test-model"
         self.prompts = []
         self.deleted_sessions = []
         self.delete_error = None
@@ -36,8 +37,8 @@ class FakeCodexRunner:
             )
         ]
 
-    def run(self, prompt, thread_id, *, ephemeral=False) -> RunResult:
-        self.prompts.append((prompt, thread_id, ephemeral))
+    def run(self, prompt, thread_id, *, ephemeral=False, restricted=False) -> RunResult:
+        self.prompts.append((prompt, thread_id, ephemeral, restricted))
         if len(self.results) > 1:
             return self.results.pop(0)
         return self.results[0]
@@ -59,25 +60,42 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         binary.write_text("", encoding="utf-8")
         workspace = root / "workspace"
         workspace.mkdir()
+        codex_home = root / "codex-home"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text("{}", encoding="utf-8")
         config = Config(
             allowed_user_ids=frozenset({123}),
             workdir=workspace,
             codex_binary=binary,
             state_path=root / "state.json",
+            codex_home=codex_home,
+            group_workdir=root / "group-workspace",
+            group_codex_home=root / "group-codex-home",
         )
         self.api = FakeTelegramAPI()
         self.app = AgentApp(config, self.api)
+        self.app._bot_username = "codex_codeshark_bot"
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     @staticmethod
-    def update(user_id: int, text: str, chat_type: str = "private") -> dict:
+    def update(
+        user_id: int,
+        text: str,
+        chat_type: str = "private",
+        *,
+        chat_id: int | None = None,
+        title: str | None = None,
+    ) -> dict:
+        chat = {"id": user_id if chat_id is None else chat_id, "type": chat_type}
+        if title is not None:
+            chat["title"] = title
         return {
             "update_id": 1,
             "message": {
                 "from": {"id": user_id},
-                "chat": {"id": user_id, "type": chat_type},
+                "chat": chat,
                 "text": text,
             },
         }
@@ -95,6 +113,110 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, "do work", chat_type="group"))
         self.assertEqual(self.app.store.pending_count(), 0)
         self.assertEqual(self.api.messages, [])
+
+    def test_admin_enables_group_and_members_get_restricted_mentions_only(self) -> None:
+        group_id = -100123
+        self.app._handle_update(
+            self.update(
+                123,
+                "/enable_group@Codex_codeshark_bot",
+                "supergroup",
+                chat_id=group_id,
+                title="Engineering",
+            )
+        )
+        self.assertTrue(self.app.store.is_group_enabled(group_id))
+        self.assertIn("Group access enabled", self.api.messages[-1][1])
+
+        self.api.messages.clear()
+        self.app._handle_update(
+            self.update(456, "/status", "supergroup", chat_id=group_id)
+        )
+        self.assertEqual(self.api.messages, [])
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.assertTrue(task.ephemeral)
+        self.assertTrue(task.restricted)
+        self.assertEqual(task.source, "telegram-group")
+        self.assertEqual(self.api.messages, [])
+
+    def test_group_task_has_no_admin_context_session_learning_or_write_access(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.memory.add("Private administrator memory")
+        result = RunResult(
+            exit_code=0,
+            message=(
+                "public answer\n<learning_candidate>"
+                '{"kind":"memory","title":"Guest","content":"Do not store"}'
+                "</learning_candidate>"
+            ),
+            thread_id="must-not-persist",
+            stderr="",
+        )
+        runner = FakeCodexRunner(result)
+        self.app.runner = runner
+        self.app._handle_update(
+            self.update(
+                456,
+                "Explain Python @Codex_codeshark_bot",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        prompt, thread_id, ephemeral, restricted = runner.prompts[0]
+        self.assertNotIn("Private administrator memory", prompt)
+        self.assertIn("non-privileged", prompt)
+        self.assertIsNone(thread_id)
+        self.assertTrue(ephemeral)
+        self.assertTrue(restricted)
+        self.assertIsNone(self.app.state.snapshot().codex_thread_id)
+        self.assertEqual(self.app.learning.list_pending(), [])
+        self.assertEqual(self.api.messages[-1], (group_id, "public answer"))
+
+    def test_group_risky_request_is_denied_without_queuing(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot deploy to production",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        self.assertEqual(self.app.store.pending_count(), 0)
+        self.assertIn("administrator privileges", self.api.messages[-1][1])
+
+    def test_only_paired_admin_can_manage_group_access(self) -> None:
+        group_id = -100123
+        self.app._handle_update(
+            self.update(456, "/enable_group", "group", chat_id=group_id)
+        )
+        self.assertFalse(self.app.store.is_group_enabled(group_id))
+        self.assertEqual(self.api.messages, [])
+
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app._handle_update(
+            self.update(456, "/disable_group", "group", chat_id=group_id)
+        )
+        self.assertTrue(self.app.store.is_group_enabled(group_id))
+
+        self.app._handle_update(self.update(123, "/groups"))
+        self.assertIn("Engineering", self.api.messages[-1][1])
+        self.app._handle_update(self.update(123, f"/disable_group {group_id}"))
+        self.assertFalse(self.app.store.is_group_enabled(group_id))
 
     def test_queues_authorized_private_message(self) -> None:
         self.app._handle_update(self.update(123, "do work"))

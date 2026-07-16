@@ -11,9 +11,14 @@ from pathlib import Path
 
 from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
 from .codex_runner import CodexRunner, RunResult
-from .config import Config
+from .config import Config, configured_codex_runtime, prepare_group_runtime
 from .learning import LearningStore, SkillStore, extract_learning_candidate
-from .memory import FeedbackStore, MemoryStore, compose_prompt
+from .memory import (
+    FeedbackStore,
+    MemoryStore,
+    compose_prompt,
+    compose_restricted_group_prompt,
+)
 from .recall import RecallStore
 from .state import StateStore
 from .telegram_api import TelegramAPI, TelegramError
@@ -36,6 +41,7 @@ Plain text: submit a task to the current Codex session
 /skills, /forget_skill ID: manage approved skills
 /tasks: show recent persistent tasks
 /deliveries, /retry_delivery ID: inspect or retry failed replies
+/groups, /disable_group CHAT_ID: manage administrator-enabled groups
 /remind MINUTES REQUEST: create a one-time job
 /cron EXPRESSION | REQUEST: create a recurring cron job
 /heartbeat MINUTES REQUEST: create a periodic check
@@ -45,7 +51,15 @@ Plain text: submit a task to the current Codex session
 /cancel: cancel the active task or next queued task
 /help: show this message
 
-Remote file operations are confined to the server-controlled workspace."""
+Writes are confined to the workspace and server-controlled delegated project roots."""
+
+GROUP_HELP_TEXT = """Group access is restricted.
+
+@BotUsername REQUEST: run one read-only, ephemeral request
+
+Group requests cannot access administrator memories, custom skills, sessions, attachments,
+projects, network, MCP tools, file writes, or external actions. Full administrative access remains
+private-chat only."""
 
 
 @dataclass(frozen=True)
@@ -94,11 +108,21 @@ class AgentApp:
         self.recall = RecallStore(database_path)
         self.store = AgentStore(database_path)
         self.risk_policy = RiskPolicy()
+        prepare_group_runtime(config)
+        model, reasoning_effort = configured_codex_runtime(
+            config.codex_profile,
+            codex_home=config.codex_home,
+        )
         self.runner = CodexRunner(
             binary=config.codex_binary,
             profile=config.codex_profile,
             workdir=config.workdir,
+            restricted_workdir=config.group_workdir,
+            restricted_codex_home=config.group_codex_home,
             timeout_seconds=config.task_timeout_seconds,
+            model=model,
+            model_reasoning_effort=reasoning_effort,
+            additional_write_roots=config.delegated_roots,
             mcp_known_servers=config.mcp_known_servers,
             mcp_allowed_tools=config.mcp_allowed_tools,
             network_access=config.codex_network_access,
@@ -107,10 +131,13 @@ class AgentApp:
         self._active_task: TaskRecord | None = None
         self._last_completed_task: CompletedTask | None = None
         self._wake_worker = threading.Event()
+        self._bot_username: str | None = None
         self._sync_recall_index()
 
     def run_forever(self) -> None:
         identity = self.api.get_me()
+        username = identity.get("username")
+        self._bot_username = username.lower() if isinstance(username, str) else None
         self.api.delete_webhook(drop_pending_updates=False)
         self.api.set_commands()
         LOGGER.info("starting @%s", identity.get("username", "unknown"))
@@ -140,10 +167,16 @@ class AgentApp:
             return
         user_id = sender.get("id")
         chat_id = chat.get("id")
+        if not isinstance(user_id, int) or not isinstance(chat_id, int):
+            return
+        chat_type = chat.get("type")
+        if chat_type in {"group", "supergroup"}:
+            self._handle_group_message(message, chat, user_id, chat_id)
+            return
+        if chat_type != "private":
+            return
         if user_id not in self.config.allowed_user_ids:
             LOGGER.warning("ignored unauthorized Telegram user id=%s", user_id)
-            return
-        if chat.get("type") != "private" or not isinstance(chat_id, int):
             return
 
         text = message.get("text")
@@ -202,6 +235,12 @@ class AgentApp:
         if command == "/tasks":
             self._send_chunks(chat_id, self._tasks_text())
             return
+        if command == "/groups":
+            self._send_chunks(chat_id, self._groups_text())
+            return
+        if command in {"/disable-group", "/disable_group"}:
+            self._disable_group_from_private(chat_id, argument)
+            return
         if command == "/deliveries":
             self._send_chunks(chat_id, self._deliveries_text())
             return
@@ -243,6 +282,121 @@ class AgentApp:
             return
 
         self._enqueue_user_task(chat_id, text)
+
+    def _parse_group_command(self, text: str) -> tuple[str, str] | None:
+        parts = text.strip().split(maxsplit=1)
+        if not parts or not parts[0].startswith("/"):
+            return None
+        raw_command = parts[0].lower()
+        if "@" in raw_command:
+            command, target = raw_command.split("@", 1)
+            if self._bot_username is None or target != self._bot_username:
+                return None
+        else:
+            command = raw_command
+        argument = parts[1].strip() if len(parts) == 2 else ""
+        return command, argument
+
+    def _handle_group_message(
+        self,
+        message: dict,
+        chat: dict,
+        user_id: int,
+        chat_id: int,
+    ) -> None:
+        text = message.get("text")
+        if not isinstance(text, str):
+            return
+        parsed = self._parse_group_command(text)
+        command, argument = parsed if parsed is not None else ("", "")
+        is_admin = user_id in self.config.allowed_user_ids
+
+        if command == "/enable_group":
+            if not is_admin:
+                return
+            title = chat.get("title") if isinstance(chat.get("title"), str) else str(chat_id)
+            try:
+                self.store.enable_group(chat_id, title, user_id)
+            except ValueError as exc:
+                self._send_message(chat_id, f"Could not enable this group: {exc}")
+                return
+            self._send_message(
+                chat_id,
+                f"Group access enabled. Members may mention @{self._bot_username or 'bot'} "
+                "with a natural-language request. "
+                "All group requests are ephemeral and isolated from projects and administrator data.",
+            )
+            return
+
+        if command == "/disable_group":
+            if not is_admin:
+                return
+            if self.store.disable_group(chat_id):
+                self._send_message(chat_id, "Group access disabled. Queued group requests were cancelled.")
+            else:
+                self._send_message(chat_id, "This group was not enabled.")
+            return
+
+        if command == "/group_status":
+            if not is_admin:
+                return
+            state = "enabled" if self.store.is_group_enabled(chat_id) else "disabled"
+            self._send_message(chat_id, f"Group access is {state}.")
+            return
+
+        enabled = self.store.is_group_enabled(chat_id)
+        if not enabled:
+            if is_admin and self._extract_group_mention(text) is not None:
+                self._send_message(
+                    chat_id,
+                    "Group access is disabled. The paired administrator must run /enable_group.",
+                )
+            return
+
+        if parsed is not None and command == "/help":
+            self._send_message(chat_id, GROUP_HELP_TEXT)
+            return
+        request = self._extract_group_mention(text)
+        if request is None:
+            return
+        if not request:
+            self._send_message(chat_id, "Mention this bot and include a request.")
+            return
+        self._enqueue_group_task(chat_id, request)
+
+    def _extract_group_mention(self, text: str) -> str | None:
+        if self._bot_username is None:
+            return None
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_])@{re.escape(self._bot_username)}(?![A-Za-z0-9_])",
+            flags=re.IGNORECASE,
+        )
+        match = pattern.search(text)
+        if match is None:
+            return None
+        return (text[: match.start()] + text[match.end() :]).strip()
+
+    def _enqueue_group_task(self, chat_id: int, prompt: str) -> None:
+        if self.risk_policy.requires_approval(prompt):
+            self._send_message(
+                chat_id,
+                "That request requires administrator privileges. Ask the administrator privately.",
+            )
+            return
+        if self.store.restricted_pending_count() >= 1:
+            self._send_message(chat_id, "A group request is already running. Try again later.")
+            return
+        if self.store.pending_count() >= self.config.queue_size:
+            self._send_message(chat_id, "The task queue is full. Try again later.")
+            return
+        self.store.enqueue_task(
+            chat_id,
+            prompt,
+            source="telegram-group",
+            ephemeral=True,
+            restricted=True,
+        )
+        self._wake_worker.set()
 
     @staticmethod
     def _safe_attachment_name(name: str, fallback: str) -> str:
@@ -355,25 +509,41 @@ class AgentApp:
 
     def _execute_task(self, task: TaskRecord) -> RunResult:
         rotation_notice = None
-        if not task.ephemeral:
+        if not task.ephemeral and not task.restricted:
             rotation_notice = self._rotate_session_if_needed()
-        selected_skills = self.skills.select(
-            task.prompt,
-            quality_scores=self.recall.quality_scores("skill"),
-        )
-        prompt, memory_ids, skill_ids = compose_prompt(
-            task.prompt,
-            self.memory.list(),
-            selected_skills,
-            external_action_approved=task.approved,
-            task_id=task.id,
-        )
-        self.recall.mark_used("memory", memory_ids)
-        self.recall.mark_used("skill", skill_ids)
+        if task.restricted:
+            prompt = compose_restricted_group_prompt(task.prompt, task_id=task.id)
+            memory_ids: tuple[str, ...] = ()
+            skill_ids: tuple[str, ...] = ()
+        else:
+            selected_skills = self.skills.select(
+                task.prompt,
+                quality_scores=self.recall.quality_scores("skill"),
+            )
+            prompt, memory_ids, skill_ids = compose_prompt(
+                task.prompt,
+                self.memory.list(),
+                selected_skills,
+                external_action_approved=task.approved,
+                task_id=task.id,
+                read_only_roots=self.config.read_only_roots,
+                delegated_roots=self.config.delegated_roots,
+            )
+            self.recall.mark_used("memory", memory_ids)
+            self.recall.mark_used("skill", skill_ids)
         thread_id = None if task.ephemeral else self.state.snapshot().codex_thread_id
-        result = self.runner.run(prompt, thread_id, ephemeral=task.ephemeral)
+        result = self.runner.run(
+            prompt,
+            thread_id,
+            ephemeral=task.ephemeral,
+            restricted=task.restricted,
+        )
         successful = result.exit_code == 0 and not result.cancelled and not result.timed_out
-        clean_message, proposed = extract_learning_candidate(result.message)
+        if task.restricted:
+            clean_message, _ignored_proposal = extract_learning_candidate(result.message)
+            proposed = None
+        else:
+            clean_message, proposed = extract_learning_candidate(result.message)
         learning_notice = None
         if proposed and successful:
             try:
@@ -397,19 +567,20 @@ class AgentApp:
             clean_message = "\n".join(notices)
         result = replace(result, message=clean_message)
         self._deliver_result(task.chat_id, result, persist_session=not task.ephemeral)
-        with self._status_lock:
-            self._last_completed_task = (
-                CompletedTask(
-                    id=task.id,
-                    thread_id=result.thread_id,
-                    memory_ids=memory_ids,
-                    skill_ids=skill_ids,
-                    prompt=task.prompt,
-                    response=clean_message,
+        if not task.restricted:
+            with self._status_lock:
+                self._last_completed_task = (
+                    CompletedTask(
+                        id=task.id,
+                        thread_id=result.thread_id,
+                        memory_ids=memory_ids,
+                        skill_ids=skill_ids,
+                        prompt=task.prompt,
+                        response=clean_message,
+                    )
+                    if successful
+                    else None
                 )
-                if successful
-                else None
-            )
         return result
 
     def _rotate_session_if_needed(self) -> str | None:
@@ -768,14 +939,18 @@ class AgentApp:
             [
                 f"Active task: {'yes' if active else 'no'}",
                 f"Persistent queue: {self.store.pending_count()}",
+                f"Codex model: {self.runner.model or 'Codex default'}",
                 f"Codex session: {session}",
                 f"Session turns: {snapshot.session_turn_count}/{self.config.max_session_turns}",
                 f"Long-term memories: {len(self.memory.list())}",
                 f"Approved skills: {len(self.skills.list())}",
                 f"Learning proposals: {len(self.learning.list_pending())}",
                 f"Scheduled jobs: {len(self.store.list_schedules())}",
+                f"Enabled groups: {len(self.store.list_groups())}",
                 f"Failed deliveries: {len(self.store.list_failed_deliveries())}",
                 f"Codex network access: {'enabled' if self.config.codex_network_access else 'disabled'}",
+                f"Read-only project roots: {len(self.config.read_only_roots)}",
+                f"Delegated project roots: {len(self.config.delegated_roots)}",
                 f"Workspace: {self.config.workdir}",
             ]
         )
@@ -889,6 +1064,29 @@ class AgentApp:
         lines = ["Recent tasks:"]
         lines.extend(f"{item.id} [{item.status}] {item.source}" for item in tasks)
         return "\n".join(lines)
+
+    def _groups_text(self) -> str:
+        groups = self.store.list_groups()
+        if not groups:
+            return "No Telegram groups are enabled."
+        lines = ["Administrator-enabled Telegram groups:"]
+        lines.extend(f"{item.chat_id}: {item.title}" for item in groups)
+        lines.append("\nDisable one with /disable_group CHAT_ID.")
+        return "\n".join(lines)
+
+    def _disable_group_from_private(self, chat_id: int, argument: str) -> None:
+        try:
+            group_id = int(argument)
+        except ValueError:
+            self._send_message(chat_id, "Usage: /disable_group CHAT_ID")
+            return
+        if self.store.disable_group(group_id):
+            self._send_message(
+                chat_id,
+                f"Disabled Telegram group {group_id} and cancelled its queued requests.",
+            )
+        else:
+            self._send_message(chat_id, "No enabled group was found for that chat ID.")
 
     def _deliveries_text(self) -> str:
         deliveries = self.store.list_failed_deliveries()
