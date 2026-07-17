@@ -22,12 +22,10 @@
   </p>
 </div>
 
-Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a persistent personal agent. Give it an outcome, not a sequence of button clicks: it can inspect and modify approved projects, run commands, work from attached files, keep context across tasks, and follow up later on a schedule.
-
-Telegram is the current remote inbox, not the product itself. The reasoning, tools, project access, memory, and automation live in the local agent runtime.
+Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a persistent local agent. Give it an outcome, not a sequence of button clicks: it can inspect and modify approved projects, run commands, work from attached files, keep context across tasks, and follow up later on a schedule. Telegram provides the current remote chat interface; reasoning, tools, project access, memory, and automation run in the local agent runtime.
 
 > [!IMPORTANT]
-> Codex-codeshark is deliberately built for one administrator on one Mac. It is not a hosted bot service, a shared shell, or a multi-agent framework.
+> Codex-codeshark is tuned for one administrator and one Mac, with local runtime state and server-controlled project access.
 
 ## What it can do
 

@@ -1,6 +1,6 @@
 # Telegram interface guide
 
-Telegram is Codex-codeshark's authenticated remote inbox. The agent itself runs locally through the Codex CLI; this document covers only setup, commands, group access, and delivery troubleshooting for the chat interface.
+Telegram is Codex-codeshark's authenticated remote chat interface. This guide covers setup, commands, group access, and delivery troubleshooting for that interface; the local Codex runtime provides the agent's reasoning, tools, memory, and project access.
 
 ## Setup and pairing
 

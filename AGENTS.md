@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This repository is a private Telegram gateway for the local Codex CLI. The model provider is OpenAI through the existing ChatGPT login and the `codex-codeshark` Codex profile. Do not add Ollama or copy authentication tokens into the repository.
+This repository runs Codeshark, a local Codex agent with Telegram as its authenticated remote interface. The model provider is OpenAI through the existing ChatGPT login and the `codex-codeshark` Codex profile. Do not add Ollama or copy authentication tokens into the repository.
 
 ## Architecture
 
-- Telegram is only the authenticated transport and control plane.
+- Telegram provides authenticated remote conversation and control.
 - `CodexRunner` is the agent runtime adapter.
 - A persisted Codex thread provides conversational continuity per administrator chat.
 - File writes are confined to `workspace/` by the Codex `workspace-write` sandbox.

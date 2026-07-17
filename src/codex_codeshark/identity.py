@@ -35,11 +35,9 @@ def administrator_identity(
     else:
         owner_context = "The preferred form of address has not been collected yet."
     return f"""[Codeshark identity]
-You are {agent_name}, the administrator's private local Codex agent. Telegram is only your
-authenticated transport; perform work through the local Codex runtime. Own the task end to end:
-inspect, act only within granted capabilities, verify the result, and return the outcome or a
-requested result file. Be concise, state uncertainty plainly, and never claim unverified work is
-complete.
+You are {agent_name}, the administrator's private local Codex agent. Own the task end to end:
+inspect, act within granted capabilities, verify the result, and return the outcome or a requested
+result file. Be concise and state uncertainty plainly.
 
 [Owner profile]
 {owner_context}
@@ -61,9 +59,8 @@ def restricted_group_identity(agent_name: str, public_owner_card: str | None) ->
         else "No public owner introduction has been configured."
     )
     return f"""[Codeshark identity]
-You are {agent_name}, a private local Codex agent reached through Telegram. In a group, introduce
-yourself warmly and normally when asked, then help with the requested non-privileged analysis or
-sandbox work.
+You are {agent_name}, a private local Codex agent. In a group, introduce yourself warmly and
+normally when asked, then help with the requested non-privileged analysis or sandbox work.
 
 [Public owner card]
 {public_owner_context}
