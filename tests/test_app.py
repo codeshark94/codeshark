@@ -115,6 +115,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         message_id: int | None = 10,
         title: str | None = None,
         reply_to_bot: bool = False,
+        reply_to_message_id: int | None = None,
     ) -> dict:
         chat = {"id": user_id if chat_id is None else chat_id, "type": chat_type}
         if title is not None:
@@ -129,6 +130,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         if reply_to_bot:
             message["reply_to_message"] = {
                 "from": {"username": "codex_codeshark_bot", "is_bot": True}
+            }
+        if reply_to_message_id is not None:
+            message["reply_to_message"] = {
+                "message_id": reply_to_message_id,
+                "from": {"id": 456},
             }
         return {
             "update_id": 1,
@@ -279,6 +285,79 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.assertIsNotNone(task)
         self.assertEqual(task.prompt, "Explain Python")
+
+    def test_group_member_can_reply_to_a_codeshark_conversation_reply(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+                message_id=77,
+            )
+        )
+        first = self.app.store.claim_next_task()
+        self.assertIsNotNone(first)
+        self.app.store.finish_task(first.id, "completed")
+
+        self.app._handle_update(
+            self.update(
+                789,
+                "Can you give a short example too?",
+                "supergroup",
+                chat_id=group_id,
+                message_id=88,
+                reply_to_message_id=77,
+            )
+        )
+        second = self.app.store.claim_next_task()
+        self.assertIsNotNone(second)
+        self.assertEqual(second.prompt, "Can you give a short example too?")
+        self.assertEqual(second.requester_id, 789)
+        self.assertEqual(second.reply_to_message_id, 88)
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "Now make it Korean",
+                "supergroup",
+                chat_id=group_id,
+                message_id=89,
+                reply_to_message_id=88,
+            )
+        )
+        third = self.app.store.claim_next_task()
+        self.assertIsNotNone(third)
+        self.assertEqual(third.prompt, "Now make it Korean")
+
+    def test_group_reply_to_unaddressed_member_message_is_ignored(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "Do not wake the bot",
+                "supergroup",
+                chat_id=group_id,
+                message_id=77,
+            )
+        )
+        self.app._handle_update(
+            self.update(
+                789,
+                "Still not addressed",
+                "supergroup",
+                chat_id=group_id,
+                message_id=88,
+                reply_to_message_id=77,
+            )
+        )
+
+        self.assertIsNone(self.app.store.claim_next_task())
 
     def test_task_result_replies_to_original_telegram_message(self) -> None:
         self.app.runner = FakeCodexRunner()
@@ -826,6 +905,26 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             self.api.messages[-1],
             (group_id, "The restricted Codex task failed. Ask the administrator to check local logs."),
         )
+        self.assertNotIn("sensitive", self.api.messages[-1][1])
+
+    def test_administrator_failure_does_not_disclose_codex_stderr(self) -> None:
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=1,
+                message="",
+                thread_id=None,
+                stderr="sensitive internal diagnostic",
+            )
+        )
+        self.app._handle_update(self.update(123, "do work", message_id=73))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(
+            self.api.messages[-1],
+            (123, "Codeshark could not complete this task. Check the local logs and retry."),
+        )
+        self.assertEqual(self.api.message_replies[-1], 73)
         self.assertNotIn("sensitive", self.api.messages[-1][1])
 
     def test_task_sends_only_the_final_result(self) -> None:

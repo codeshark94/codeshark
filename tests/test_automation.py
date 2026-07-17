@@ -266,6 +266,19 @@ class AgentStoreTests(unittest.TestCase):
             self.assertTrue(store.disable_group(-100123))
             self.assertEqual(store.group_context(-100123, 456, now=1007), [])
 
+    def test_group_addressed_messages_are_bounded_and_deleted_with_group(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.enable_group(-100123, "Engineering", 123)
+
+            store.remember_group_addressed_message(-100123, 10, now=1000)
+            self.assertTrue(store.is_group_addressed_message(-100123, 10, now=1001))
+            self.assertFalse(store.is_group_addressed_message(-100123, 10, now=1000 + 31 * 86400))
+
+            store.remember_group_addressed_message(-100123, 11, now=1002)
+            self.assertTrue(store.disable_group(-100123))
+            self.assertFalse(store.is_group_addressed_message(-100123, 11, now=1003))
+
 
 class CronTests(unittest.TestCase):
     def test_next_cron_time_supports_steps_and_exact_values(self) -> None:

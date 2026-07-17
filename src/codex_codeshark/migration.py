@@ -87,6 +87,8 @@ def _sanitize_database(path: Path) -> None:
                 connection.execute("DELETE FROM group_chats")
             if "group_context" in tables:
                 connection.execute("DELETE FROM group_context")
+            if "group_addressed_messages" in tables:
+                connection.execute("DELETE FROM group_addressed_messages")
     except sqlite3.Error as exc:
         raise MigrationError(f"invalid personal-data database: {exc}") from exc
 
@@ -178,6 +180,7 @@ def export_personal_data(
                 "failed Telegram deliveries",
                 "enabled Telegram group IDs",
                 "Telegram group participant context",
+                "Telegram group reply-chain state",
                 "workspace/inbox attachments",
             ],
         }

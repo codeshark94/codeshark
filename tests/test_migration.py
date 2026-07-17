@@ -40,6 +40,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
         store.record_delivery_failure(123, "private final result", "offline")
         store.enable_group(-100123, "Private group", 123)
         store.append_group_context(-100123, 456, "private question", "private answer")
+        store.remember_group_addressed_message(-100123, 77)
         store.enqueue_task(
             -100123,
             "guest question",
@@ -110,6 +111,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
             self.assertEqual(store.list_failed_deliveries(), [])
             self.assertEqual(store.list_groups(), [])
             self.assertEqual(store.group_context(-100123, 456), [])
+            self.assertFalse(store.is_group_addressed_message(-100123, 77))
             self.assertFalse(any(item.restricted for item in store.list_tasks()))
             recalled = RecallStore(target / "agent.db").search("English")[0]
             self.assertEqual(recalled.source_task_id, "t-complete")

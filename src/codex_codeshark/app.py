@@ -78,7 +78,7 @@ Writes are confined to the workspace and server-controlled delegated project roo
 
 GROUP_HELP_TEXT = """Group access is enabled.
 
-@BotUsername REQUEST or reply to a Codeshark message: submit a request
+@BotUsername REQUEST or reply in a Codeshark conversation: submit a request
 
 The paired administrator keeps the same session, capabilities, and approval flow as in a private
 chat. Other members receive an ephemeral, MCP-disabled agent that can research on the network and
@@ -440,7 +440,7 @@ class AgentApp:
             self._send_message(
                 chat_id,
                 f"Group access enabled. Members may mention @{self._bot_username or 'bot'} "
-                "or reply to a Codeshark message with a natural-language request. "
+                "or reply in a Codeshark conversation with a natural-language request. "
                 "The paired administrator retains private-chat authority; other members get "
                 "separate bounded conversations isolated from projects and administrator data.",
             )
@@ -469,7 +469,7 @@ class AgentApp:
         reply_to_message_id = message_id if isinstance(message_id, int) else None
         enabled = self.store.is_group_enabled(chat_id)
         if not enabled:
-            if is_admin and self._extract_group_request(message) is not None:
+            if is_admin and self._extract_group_request(message, chat_id) is not None:
                 self._send_message(
                     chat_id,
                     "Group access is disabled. The paired administrator must run /enable_group.",
@@ -483,9 +483,11 @@ class AgentApp:
         if parsed is not None and command == "/help":
             self._send_message(chat_id, GROUP_HELP_TEXT)
             return
-        request = self._extract_group_request(message)
+        request = self._extract_group_request(message, chat_id)
         if request is None:
             return
+        if reply_to_message_id is not None:
+            self.store.remember_group_addressed_message(chat_id, reply_to_message_id)
         if not request:
             self._send_message(
                 chat_id,
@@ -507,7 +509,7 @@ class AgentApp:
             reply_to_message_id=reply_to_message_id,
         )
 
-    def _extract_group_request(self, message: dict) -> str | None:
+    def _extract_group_request(self, message: dict, chat_id: int) -> str | None:
         text = message.get("text")
         if not isinstance(text, str):
             return None
@@ -529,6 +531,12 @@ class AgentApp:
             self._bot_username is not None
             and isinstance(username, str)
             and username.casefold() == self._bot_username.casefold()
+        ):
+            return text.strip()
+        reply_message_id = reply.get("message_id") if isinstance(reply, dict) else None
+        if (
+            isinstance(reply_message_id, int)
+            and self.store.is_group_addressed_message(chat_id, reply_message_id)
         ):
             return text.strip()
         return None
@@ -696,6 +704,7 @@ class AgentApp:
                 self._send_message(
                     task.chat_id,
                     "The task stopped because of an internal error. Check the local logs.",
+                    reply_to_message_id=task.reply_to_message_id,
                 )
             finally:
                 with self._status_lock:
@@ -964,10 +973,9 @@ class AgentApp:
                     reply_to_message_id=reply_to_message_id,
                 )
                 return
-            details = result.stderr[-1500:] if result.stderr else "No error details were returned."
             self._send_message(
                 chat_id,
-                f"Codex failed (exit {result.exit_code})\n\n{details}",
+                "Codeshark could not complete this task. Check the local logs and retry.",
                 reply_to_message_id=reply_to_message_id,
             )
             return

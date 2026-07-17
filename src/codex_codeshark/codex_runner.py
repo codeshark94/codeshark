@@ -92,12 +92,11 @@ class CodexRunner:
         self,
         *,
         restricted: bool = False,
-        full_access: bool = False,
     ) -> list[str]:
         args: list[str] = []
         for server in self.mcp_known_servers:
-            tools = None if restricted or full_access else self.mcp_allowed_tools.get(server)
-            enabled = full_access or tools is not None
+            tools = None if restricted else self.mcp_allowed_tools.get(server)
+            enabled = tools is not None
             args.extend(["-c", f"mcp_servers.{server}.enabled={str(enabled).lower()}"])
             if tools:
                 encoded_tools = json.dumps(list(tools), separators=(",", ":"))
@@ -205,7 +204,7 @@ class CodexRunner:
             "features.multi_agent=true",
             "-c",
             "features.tool_suggest=true",
-            *self._mcp_config_args(full_access=True),
+            *self._mcp_config_args(),
         ]
 
     def build_command(

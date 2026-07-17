@@ -324,6 +324,14 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS group_context_requester
                     ON group_context(chat_id, user_id, created_at);
+                CREATE TABLE IF NOT EXISTS group_addressed_messages (
+                    chat_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (chat_id, message_id)
+                );
+                CREATE INDEX IF NOT EXISTS group_addressed_messages_recent
+                    ON group_addressed_messages(chat_id, created_at);
                 """
             )
             task_columns = {
@@ -672,6 +680,7 @@ class AgentStore:
                 (time.time(), chat_id),
             )
             connection.execute("DELETE FROM group_context WHERE chat_id = ?", (chat_id,))
+            connection.execute("DELETE FROM group_addressed_messages WHERE chat_id = ?", (chat_id,))
             return cursor.rowcount == 1
 
     def group_context(
@@ -726,6 +735,50 @@ class AgentStore:
                 "DELETE FROM group_context WHERE id NOT IN "
                 "(SELECT id FROM group_context ORDER BY created_at DESC, id DESC LIMIT 1000)"
             )
+
+    def remember_group_addressed_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        *,
+        now: float | None = None,
+    ) -> None:
+        created_at = time.time() if now is None else now
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO group_addressed_messages (chat_id, message_id, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    created_at = excluded.created_at
+                """,
+                (chat_id, message_id, created_at),
+            )
+            connection.execute(
+                "DELETE FROM group_addressed_messages WHERE created_at < ?",
+                (created_at - 30 * 86400,),
+            )
+            connection.execute(
+                "DELETE FROM group_addressed_messages WHERE rowid NOT IN "
+                "(SELECT rowid FROM group_addressed_messages "
+                "ORDER BY created_at DESC, chat_id, message_id LIMIT 2000)"
+            )
+
+    def is_group_addressed_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        cutoff = (time.time() if now is None else now) - 30 * 86400
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM group_addressed_messages "
+                "WHERE chat_id = ? AND message_id = ? AND created_at >= ?",
+                (chat_id, message_id, cutoff),
+            ).fetchone()
+        return row is not None
 
     def is_group_enabled(self, chat_id: int) -> bool:
         with self._connect() as connection:
