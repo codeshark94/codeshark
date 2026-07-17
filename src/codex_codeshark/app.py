@@ -332,7 +332,7 @@ class AgentApp:
         if self._handle_admin_command(chat_id, command, argument):
             return
 
-        if self._steer_active_private_task(chat_id, text, reply_to_message_id):
+        if self._steer_active_private_task(chat_id, text):
             return
         self._request_owner_onboarding(chat_id)
         self._enqueue_user_task(chat_id, text, reply_to_message_id=reply_to_message_id)
@@ -1049,7 +1049,6 @@ class AgentApp:
         self,
         chat_id: int,
         prompt: str,
-        reply_to_message_id: int | None,
     ) -> bool:
         if self._requires_admin_approval(prompt):
             return False
@@ -1066,14 +1065,7 @@ class AgentApp:
                 ),
                 None,
             )
-        if active is None or not active.runner.steer(prompt):
-            return False
-        self._send_message(
-            chat_id,
-            "Steering the active task.",
-            reply_to_message_id=reply_to_message_id,
-        )
-        return True
+        return active is not None and active.runner.steer(prompt)
 
     def _agent_name(self) -> str:
         item = self.memory.find_by_title(AGENT_NAME_TITLE)

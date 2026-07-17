@@ -641,7 +641,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(runner.steers, ["also report the likely root cause"])
         self.assertEqual(self.app.store.pending_count(), 1)
-        self.assertEqual(self.api.messages[-1][1], "Steering the active task.")
+        self.assertEqual(self.api.messages, [])
 
     def test_risky_private_follow_up_is_queued_for_its_own_approval(self) -> None:
         runner = FakeCodexRunner()
