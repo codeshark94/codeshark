@@ -36,7 +36,7 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 
 ## Private-chat commands
 
-Plain text queues a task in the current interactive Codex session. If a private-chat task is already running, a safe follow-up message is injected into that active Codex turn, so instructions such as "also check the failing test" keep the same working context instead of creating another queue item. A follow-up that independently requires approval remains a separate approval-gated task. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction. Up to three independent tasks may run in parallel, while tasks in the same persistent chat remain ordered to protect that chat's session.
+Plain text queues a task in the active project's interactive Codex session. Use `/project NAME` to create or switch a project context; sessions, long-term memories, and assistant assets do not cross project boundaries. If a private-chat task in that same project is already running, a safe follow-up message is injected into that active Codex turn, so instructions such as "also check the failing test" keep the same working context instead of creating another queue item. A follow-up that independently requires approval remains a separate approval-gated task. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction. Up to three independent tasks may run in parallel, while tasks in the same persistent chat remain ordered to protect that chat's session.
 
 On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information. To introduce the owner in groups, set a separate explicit public card; private owner context is never shared there.
 
@@ -51,7 +51,8 @@ To receive a generated or existing result file, ask naturally (for example, `작
 | `/status` | Show active work, queue depth, session capacity, model, and stored item counts. |
 | `/tasks` | List recent persistent task records. |
 | `/cancel` | Cancel the active process or the oldest queued task. |
-| `/new` | Delete the current Codex session and start fresh. |
+| `/project [NAME]` | Show or switch the active project. Projects start empty and default to `General`. |
+| `/new`, `/clear_temp` | Delete only the active project's temporary Codex session and start fresh; long-term memories remain. |
 | `/name NAME` | Change Codeshark's self-introduction name. This does not change the Telegram bot's display name. |
 | `/owner_public TEXT` | Set the owner information Codeshark may share naturally in group introductions. Use `clear` to remove it. |
 
@@ -59,12 +60,12 @@ To receive a generated or existing result file, ask naturally (for example, `작
 
 | Command | Purpose |
 |---|---|
-| `/remember TEXT` | Store a long-term memory. |
-| `/memories` | List learned memories. |
-| `/forget ID` | Delete a memory. |
+| `/remember TEXT` | Store a long-term memory in the active project. |
+| `/memories` | List the active project's memories and global identity records. |
+| `/forget ID` | Delete a memory visible in the active project. |
 | `/recall QUERY` | Search approved memories and skills with provenance. |
-| `/save KIND \| TITLE \| CONTENT` | Store a structured assistant asset (`project`, `person`, `commitment`, `decision`, `preference`, or `knowledge`). |
-| `/vault [QUERY]` | List relevant assistant assets. |
+| `/save KIND \| TITLE \| CONTENT` | Store a structured assistant asset in the active project (`project`, `person`, `commitment`, `decision`, `preference`, or `knowledge`). |
+| `/vault [QUERY]` | List relevant assistant assets from the active project. |
 | `/forget_asset ID` | Delete one assistant asset. |
 | `/review_memories` | List unused, stale, or negatively rated memories. |
 | `/learn memory TEXT` | Add or update a memory immediately. |

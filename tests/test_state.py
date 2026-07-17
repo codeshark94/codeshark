@@ -63,6 +63,31 @@ class StateStoreTests(unittest.TestCase):
             self.assertFalse(store.migrate_legacy_session(123))
             self.assertEqual(StateStore(path).snapshot().last_update_id, 42)
 
+    def test_keeps_temporary_sessions_separate_by_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = StateStore(Path(directory) / "state.json")
+            store.set_session_thread_id(123, "general-thread", "General")
+            store.record_session_turn(123, "general-thread", "General")
+            store.set_active_project(123, "Research")
+            store.set_session_thread_id(123, "research-thread", "Research")
+            store.record_session_turn(123, "research-thread", "Research")
+
+            restored = StateStore(Path(directory) / "state.json")
+            self.assertEqual(restored.active_project(123), "Research")
+            self.assertEqual(
+                restored.session_snapshot(123, "General").codex_thread_id,
+                "general-thread",
+            )
+            self.assertEqual(
+                restored.session_snapshot(123, "Research").codex_thread_id,
+                "research-thread",
+            )
+            restored.set_session_thread_id(123, None, "Research")
+            self.assertEqual(
+                restored.session_snapshot(123, "General").session_turn_count,
+                1,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .projects import DEFAULT_PROJECT, normalize_project_name
 from .secure_io import atomic_write_text, ensure_private_directory, ensure_private_file, read_private_text
 
 
@@ -28,6 +29,7 @@ class AssetRecord:
     content: str
     created_at: str
     updated_at: str
+    scope: str = DEFAULT_PROJECT
 
 
 class VaultStore:
@@ -51,7 +53,10 @@ class VaultStore:
             return [], 1
         try:
             data = json.loads(read_private_text(self.path, max_bytes=2_000_000))
-            records = [AssetRecord(**item) for item in data.get("records", [])]
+            records = [
+                AssetRecord(**{**item, "scope": item.get("scope", DEFAULT_PROJECT)})
+                for item in data.get("records", [])
+            ]
             next_id = int(data.get("next_id", len(records) + 1))
         except (
             AttributeError,
@@ -68,6 +73,7 @@ class VaultStore:
             or not re.fullmatch(r"a[1-9][0-9]*", record.id)
             or not record.title.strip()
             or not record.content.strip()
+            or not _valid_scope(record.scope)
             for record in records
         ):
             raise RuntimeError("assistant vault contains an invalid record")
@@ -77,10 +83,18 @@ class VaultStore:
         with self._lock:
             return list(self._records)
 
-    def upsert(self, kind: str, title: str, content: str) -> AssetRecord:
+    def upsert(
+        self,
+        kind: str,
+        title: str,
+        content: str,
+        *,
+        scope: str = DEFAULT_PROJECT,
+    ) -> AssetRecord:
         normalized_kind = kind.strip().lower()
         normalized_title = " ".join(title.split())
         normalized_content = " ".join(content.split())
+        normalized_scope = normalize_project_name(scope)
         if normalized_kind not in ASSET_KINDS:
             raise ValueError("asset kind must be one of: " + ", ".join(ASSET_KINDS))
         if not normalized_title or not normalized_content:
@@ -94,6 +108,7 @@ class VaultStore:
                     for item in self._records
                     if item.kind == normalized_kind
                     and item.title.casefold() == normalized_title.casefold()
+                    and item.scope == normalized_scope
                 ),
                 None,
             )
@@ -115,6 +130,7 @@ class VaultStore:
                     content=normalized_content,
                     created_at=existing.created_at,
                     updated_at=now,
+                    scope=normalized_scope,
                 )
                 self._records = [item if record.id == item.id else record for record in self._records]
             else:
@@ -127,6 +143,7 @@ class VaultStore:
                     content=normalized_content,
                     created_at=now,
                     updated_at=now,
+                    scope=normalized_scope,
                 )
                 self._next_id += 1
                 self._records.append(item)
@@ -143,11 +160,18 @@ class VaultStore:
             self._write()
             return True
 
-    def select(self, query: str, *, max_chars: int = 6_000) -> list[AssetRecord]:
+    def select(
+        self,
+        query: str,
+        *,
+        scope: str = DEFAULT_PROJECT,
+        max_chars: int = 6_000,
+    ) -> list[AssetRecord]:
         tokens = set(re.findall(r"[0-9A-Za-z가-힣_+-]{2,}", query.casefold()))
+        normalized_scope = normalize_project_name(scope)
         with self._lock:
             ranked = sorted(
-                self._records,
+                [item for item in self._records if item.scope == normalized_scope],
                 key=lambda item: (
                     sum(
                         3 * (token in item.title.casefold())
@@ -186,3 +210,10 @@ class VaultStore:
             )
             + "\n",
         )
+
+
+def _valid_scope(value: str) -> bool:
+    try:
+        return normalize_project_name(value) == value
+    except (TypeError, ValueError):
+        return False

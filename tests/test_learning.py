@@ -27,6 +27,18 @@ class LearningStoreTests(unittest.TestCase):
             self.assertTrue(store.set_status("l1", "approved"))
             self.assertEqual(store.list_pending(), [])
 
+    def test_records_the_project_scope_for_memory_learning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LearningStore(Path(directory) / "agent.db")
+            candidate = store.propose(
+                kind="memory",
+                title="Research preference",
+                content="Use public datasets",
+                source_task_id="t1",
+                scope="Research",
+            )
+            self.assertEqual(store.get(candidate.id).scope, "Research")
+
     def test_marks_preexisting_automatic_approval_as_legacy_for_review(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "agent.db"

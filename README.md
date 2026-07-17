@@ -32,9 +32,9 @@ Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a 
 | Capability | What you get |
 |---|---|
 | Project work | Inspect, edit, test, and diagnose code inside a private workspace, explicitly delegated project roots, or Codeshark's own checked-out repository. |
-| Persistent context | Continue the same Codex session across requests and process restarts without re-explaining the project every time. |
-| Durable memory | Recall useful preferences and project conventions, then load only the relevant memories and skills for the current task. |
-| Assistant vault | Keep structured projects, decisions, commitments, people, preferences, and knowledge; inject only records relevant to the task. |
+| Project-scoped context | Continue a separate Codex session for each named project across requests and process restarts. |
+| Durable memory | Keep long-term memories and assistant assets scoped to the active project; load only that project's records. |
+| Global identity and skills | Keep Codeshark's name, owner profile, and reusable skills available across projects without mixing project facts. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. |
@@ -75,7 +75,7 @@ and allowlisted tools     feedback, and bounded state
               Final result
 ```
 
-Interactive work continues a persisted Codex thread. A safe private-chat follow-up sent during an active task steers that live Codex turn, retaining the same working context rather than adding another queue item. Scheduled work runs ephemerally so background checks do not pollute that conversation. Up to three independent tasks run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
+Interactive work continues a persisted Codex thread within the active project. Use `/project NAME` to switch: each project has its own temporary Codex session, long-term memories, and assistant assets. `/clear_temp` (or `/new`) deletes only the current project's temporary session; it never deletes long-term records. A safe private-chat follow-up sent during an active task steers that live Codex turn only when it belongs to the same active project. Scheduled work retains the project selected when it was created and runs ephemerally. Up to three independent tasks run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
 
 ## Quick start
 
@@ -222,10 +222,10 @@ The agent stores only what it needs to resume useful work:
 
 | Store | Bound |
 |---|---|
-| Interactive session | Rotated at `max_session_turns` after a durable summary proposal is persisted. |
+| Temporary project session | One persisted Codex session per chat and named project; rotated at `max_session_turns` after a durable summary proposal is persisted. |
 | Scheduled and guest runs | Ephemeral; their Codex sessions are not retained. |
 | Task history | Raw prompts are cleared at terminal status; 200 terminal records remain. |
-| Long-term memory | 12,000 characters by default, with 1,000 characters per item. |
+| Long-term memory | 12,000 characters by default across project-scoped records, with 1,000 characters per item. |
 | Skills | At most 100 approved skills, up to 8,000 characters each. |
 | Scheduled jobs | At most 100 active jobs and 200 terminal records. |
 | Attachments | The 50 newest gateway-managed files. |

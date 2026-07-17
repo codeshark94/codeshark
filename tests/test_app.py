@@ -748,6 +748,36 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn("Answer in English", runner.prompts[0][0])
         self.assertTrue(runner.prompts[0][0].endswith("do work"))
+
+    def test_project_switch_isolates_temporary_session_and_long_term_context(self) -> None:
+        self.app.state.set_session_thread_id(123, "general-thread", "General")
+        self.app.memory.add("General-only context", scope="General")
+        self.app.memory.add("Research-only context", scope="Research")
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(self.update(123, "/project Research"))
+        self.app._handle_update(self.update(123, "analyze the study"))
+        research_task = self.app.store.claim_next_task()
+        self.app._execute_task(research_task)
+        self.app.store.finish_task(research_task.id, "completed")
+
+        research_prompt, research_thread, *_ = runner.prompts[0]
+        self.assertEqual(research_thread, None)
+        self.assertIn("Project: Research", research_prompt)
+        self.assertIn("Research-only context", research_prompt)
+        self.assertNotIn("General-only context", research_prompt)
+
+        self.app._handle_update(self.update(123, "/project General"))
+        self.app._handle_update(self.update(123, "continue general work"))
+        general_task = self.app.store.claim_next_task()
+        self.app._execute_task(general_task)
+
+        general_prompt, general_thread, *_ = runner.prompts[1]
+        self.assertEqual(general_thread, "general-thread")
+        self.assertIn("Project: General", general_prompt)
+        self.assertIn("General-only context", general_prompt)
+        self.assertNotIn("Research-only context", general_prompt)
         self.app._handle_update(self.update(123, "/good accurate"))
         feedback_path = self.app.config.state_path.parent / "feedback.jsonl"
         event = json.loads(feedback_path.read_text(encoding="utf-8"))

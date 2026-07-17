@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .projects import DEFAULT_PROJECT, normalize_project_name
 from .secure_io import (
     atomic_write_text,
     ensure_private_directory,
@@ -34,6 +35,7 @@ class LearningCandidate:
     status: str
     source_task_id: str | None
     created_at: str
+    scope: str = DEFAULT_PROJECT
 
 
 @dataclass(frozen=True)
@@ -143,7 +145,8 @@ class LearningStore:
                     status TEXT NOT NULL,
                     approval_basis TEXT NOT NULL DEFAULT 'pending',
                     source_task_id TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    scope TEXT NOT NULL DEFAULT 'General'
                 )
                 """
             )
@@ -157,6 +160,11 @@ class LearningStore:
                 connection.execute(
                     "ALTER TABLE learning_candidates ADD COLUMN approval_basis "
                     "TEXT NOT NULL DEFAULT 'legacy'"
+                )
+            if "scope" not in columns:
+                connection.execute(
+                    "ALTER TABLE learning_candidates ADD COLUMN scope "
+                    "TEXT NOT NULL DEFAULT 'General'"
                 )
             self._prune(connection)
         ensure_private_file(self.path)
@@ -195,6 +203,7 @@ class LearningStore:
             status=row["status"],
             source_task_id=row["source_task_id"],
             created_at=row["created_at"],
+            scope=row["scope"] if "scope" in row.keys() else DEFAULT_PROJECT,
         )
 
     def propose(
@@ -204,11 +213,13 @@ class LearningStore:
         title: str,
         content: str,
         source_task_id: str | None,
+        scope: str = DEFAULT_PROJECT,
     ) -> LearningCandidate:
         if kind not in {"memory", "skill"}:
             raise ValueError("learning proposal kind must be memory or skill")
         normalized_title = " ".join(title.split())
         normalized_content = content.strip()
+        normalized_scope = normalize_project_name(scope)
         if not normalized_title or not normalized_content:
             raise ValueError("learning proposals require a title and content")
         maximum = 1000 if kind == "memory" else 8000
@@ -219,10 +230,10 @@ class LearningStore:
             existing = connection.execute(
                 """
                 SELECT * FROM learning_candidates
-                WHERE kind = ? AND content = ? AND status = 'pending'
+                WHERE kind = ? AND content = ? AND scope = ? AND status = 'pending'
                 ORDER BY id DESC LIMIT 1
                 """,
-                (kind, normalized_content),
+                (kind, normalized_content, normalized_scope),
             ).fetchone()
             if existing is not None:
                 return self._candidate(existing)
@@ -237,8 +248,8 @@ class LearningStore:
             cursor = connection.execute(
                 """
                 INSERT INTO learning_candidates
-                    (kind, title, content, status, approval_basis, source_task_id, created_at)
-                VALUES (?, ?, ?, 'pending', 'pending', ?, ?)
+                    (kind, title, content, status, approval_basis, source_task_id, created_at, scope)
+                VALUES (?, ?, ?, 'pending', 'pending', ?, ?, ?)
                 """,
                 (
                     kind,
@@ -246,6 +257,7 @@ class LearningStore:
                     normalized_content,
                     source_task_id,
                     created_at,
+                    normalized_scope,
                 ),
             )
             row = connection.execute(

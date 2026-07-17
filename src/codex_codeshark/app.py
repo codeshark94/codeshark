@@ -39,6 +39,7 @@ from .memory import (
     compose_restricted_group_prompt,
 )
 from .personal_sync import PersonalDataSync, PersonalSyncError
+from .projects import DEFAULT_PROJECT, GLOBAL_SCOPE, normalize_project_name
 from .recall import RecallStore
 from .state import StateStore
 from .telegram_api import TelegramAPI, TelegramError
@@ -51,10 +52,11 @@ HELP_TEXT = """Codex-codeshark
 
 Plain text: submit a task or steer active private work
 /status: show the active task, queue, and session
-/new: delete the current session and start fresh
+/project [NAME]: show or switch the active project (default: General)
+/new, /clear_temp: delete this project's temporary session and start fresh
 /name NAME: set Codeshark's self-introduction name
 /owner_public TEXT: set the public owner card for group introductions
-/remember TEXT: explicitly store a long-term memory
+/remember TEXT: explicitly store a long-term memory for this project
 /memories, /forget ID: manage long-term memories
 /recall QUERY: search learned memories and skills with provenance
 /save KIND | TITLE | CONTENT: store an assistant asset
@@ -117,6 +119,9 @@ _FINAL_ARTIFACT_REQUEST = re.compile(
     flags=re.IGNORECASE,
 )
 _MAX_DELIVERY_FILES = 5
+_PROJECT_TASK_MARKER = re.compile(
+    r"\A\[\[CODESHARK_PROJECT:\s*(?P<project>[^\]\r\n]{1,80})\]\]\r?\n"
+)
 
 @dataclass(frozen=True)
 class CompletedTask:
@@ -126,6 +131,7 @@ class CompletedTask:
     skill_ids: tuple[str, ...]
     prompt: str
     response: str
+    project: str
 
 
 @dataclass(frozen=True)
@@ -174,6 +180,21 @@ def extract_markdown_file_links(text: str) -> tuple[str, tuple[str, ...]]:
 
     clean = _MARKDOWN_FILE_LINK.sub(remove_safe_link, text).strip()
     return clean, tuple(dict.fromkeys(paths))[:_MAX_DELIVERY_FILES]
+
+
+def scope_task_prompt(project: str, prompt: str) -> str:
+    return f"[[CODESHARK_PROJECT: {normalize_project_name(project)}]]\n{prompt}"
+
+
+def unpack_project_task(prompt: str) -> tuple[str, str]:
+    match = _PROJECT_TASK_MARKER.match(prompt)
+    if match is None:
+        return DEFAULT_PROJECT, prompt
+    try:
+        project = normalize_project_name(match.group("project"))
+    except ValueError:
+        return DEFAULT_PROJECT, prompt
+    return project, prompt[match.end() :]
 
 
 class AgentApp:
@@ -348,7 +369,9 @@ class AgentApp:
             self._send_message(chat_id, HELP_TEXT)
         elif command == "/status":
             self._send_message(chat_id, self._status_text(chat_id))
-        elif command == "/new":
+        elif command == "/project":
+            self._set_project(chat_id, argument)
+        elif command in {"/new", "/clear_temp"}:
             self._start_new_session(chat_id)
         elif command == "/name":
             self._set_agent_name(chat_id, argument)
@@ -357,23 +380,23 @@ class AgentApp:
         elif command == "/remember":
             self._remember(chat_id, argument)
         elif command == "/memories":
-            self._send_chunks(chat_id, self._memories_text())
+            self._send_chunks(chat_id, self._memories_text(chat_id))
         elif command == "/recall":
-            self._send_chunks(chat_id, self._recall_text(argument))
+            self._send_chunks(chat_id, self._recall_text(chat_id, argument))
         elif command == "/save":
             self._save_asset(chat_id, argument)
         elif command == "/vault":
-            self._send_chunks(chat_id, self._vault_text(argument))
+            self._send_chunks(chat_id, self._vault_text(chat_id, argument))
         elif command in {"/forget-asset", "/forget_asset"}:
             self._forget_asset(chat_id, argument)
         elif command in {"/review-memories", "/review_memories"}:
-            self._send_chunks(chat_id, self._review_memories_text())
+            self._send_chunks(chat_id, self._review_memories_text(chat_id))
         elif command == "/forget":
             self._forget_memory(chat_id, argument)
         elif command == "/learn":
             self._learn(chat_id, argument)
         elif command == "/learning":
-            self._send_chunks(chat_id, self._learning_text())
+            self._send_chunks(chat_id, self._learning_text(chat_id))
         elif command == "/approve":
             self._approve(chat_id, argument)
         elif command == "/reject":
@@ -736,11 +759,15 @@ class AgentApp:
         runner: CodexRunner | None = None,
     ) -> RunResult:
         runner = runner or self.runner
+        project, request = unpack_project_task(task.prompt) if not task.restricted else (
+            DEFAULT_PROJECT,
+            task.prompt,
+        )
         full_access = self.config.admin_full_access and not task.restricted
         effective_approval = task.approved or full_access
-        file_delivery_requested = not task.restricted and self._file_delivery_requested(task.prompt)
+        file_delivery_requested = not task.restricted and self._file_delivery_requested(request)
         if not task.ephemeral and not task.restricted:
-            self._rotate_session_if_needed(task.chat_id, runner)
+            self._rotate_session_if_needed(task.chat_id, project, runner)
         if task.restricted:
             context = (
                 self.store.group_context(task.chat_id, task.requester_id)
@@ -748,7 +775,7 @@ class AgentApp:
                 else []
             )
             prompt = compose_restricted_group_prompt(
-                task.prompt,
+                request,
                 task_id=task.id,
                 agent_name=self._agent_name(),
                 public_owner_card=self._public_owner_card(),
@@ -758,14 +785,14 @@ class AgentApp:
             skill_ids: tuple[str, ...] = ()
         else:
             selected_skills = self.skills.select(
-                task.prompt,
+                request,
                 quality_scores=self.recall.quality_scores("skill"),
             )
             prompt, memory_ids, skill_ids = compose_prompt(
-                task.prompt,
-                self.memory.list(),
+                request,
+                self.memory.list_for_project(project),
                 selected_skills,
-                assets=self.vault.select(task.prompt),
+                assets=self.vault.select(request, scope=project),
                 external_action_approved=effective_approval,
                 task_id=task.id,
                 read_only_roots=(
@@ -778,12 +805,17 @@ class AgentApp:
                 agent_name=self._agent_name(),
                 owner_profile=self._owner_profile(),
                 owner_onboarding_requested=self.state.owner_onboarding_requested(),
+                project_name=project,
             )
             if file_delivery_requested:
                 prompt += self._file_delivery_prompt()
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
-        thread_id = None if task.ephemeral else self.state.session_snapshot(task.chat_id).codex_thread_id
+        thread_id = (
+            None
+            if task.ephemeral
+            else self.state.session_snapshot(task.chat_id, project).codex_thread_id
+        )
         result = runner.run(
             prompt,
             thread_id,
@@ -815,7 +847,8 @@ class AgentApp:
             self._auto_apply_learning(
                 proposed,
                 source_task_id=task.id,
-                source_prompt=task.prompt,
+                source_prompt=request,
+                scope=project,
             )
         result = replace(result, message=clean_message)
         if (
@@ -827,7 +860,7 @@ class AgentApp:
             self.store.append_group_context(
                 task.chat_id,
                 task.requester_id,
-                task.prompt,
+                request,
                 clean_message,
             )
         self._deliver_result(
@@ -835,6 +868,7 @@ class AgentApp:
             result,
             persist_session=not task.ephemeral,
             restricted=task.restricted,
+            project=project,
             reply_to_message_id=task.reply_to_message_id,
             documents=delivery_files,
         )
@@ -846,8 +880,9 @@ class AgentApp:
                         thread_id=result.thread_id,
                         memory_ids=memory_ids,
                         skill_ids=skill_ids,
-                        prompt=task.prompt,
+                        prompt=request,
                         response=clean_message,
+                        project=project,
                     )
                     if successful
                     else None
@@ -856,8 +891,13 @@ class AgentApp:
                 self._backup_personal_data()
         return result
 
-    def _rotate_session_if_needed(self, chat_id: int, runner: CodexRunner) -> None:
-        snapshot = self.state.session_snapshot(chat_id)
+    def _rotate_session_if_needed(
+        self,
+        chat_id: int,
+        project: str,
+        runner: CodexRunner,
+    ) -> None:
+        snapshot = self.state.session_snapshot(chat_id, project)
         if not snapshot.codex_thread_id or snapshot.session_turn_count < self.config.max_session_turns:
             return None
         summary_prompt = (
@@ -887,6 +927,7 @@ class AgentApp:
                 title=proposed_title,
                 content=proposed_content,
                 source_task_id=None,
+                scope=project,
             )
         except (OSError, RuntimeError, ValueError):
             LOGGER.exception("session rotation learning could not be queued; keeping current session")
@@ -896,16 +937,21 @@ class AgentApp:
         except Exception:
             LOGGER.exception("failed to delete session during automatic rotation")
             return None
-        self.state.set_session_thread_id(chat_id, None)
+        self.state.set_session_thread_id(chat_id, None, project)
         LOGGER.info(
-            "rotated session for chat_id=%s and queued durable summary %s",
+            "rotated session for chat_id=%s project=%s and queued durable summary %s",
             chat_id,
+            project,
             candidate.id,
         )
 
     def _apply_learning_candidate(self, candidate: LearningCandidate) -> str:
         if candidate.kind == "memory":
-            item = self.memory.upsert(candidate.title, candidate.content)
+            item = self.memory.upsert(
+                candidate.title,
+                candidate.content,
+                scope=candidate.scope,
+            )
             self.recall.upsert(
                 kind="memory",
                 source_id=item.id,
@@ -932,6 +978,7 @@ class AgentApp:
         *,
         source_task_id: str | None,
         source_prompt: str,
+        scope: str,
     ) -> str | None:
         try:
             candidate = self.learning.propose(
@@ -939,6 +986,7 @@ class AgentApp:
                 title=proposed.title,
                 content=proposed.content,
                 source_task_id=source_task_id,
+                scope=scope,
             )
             if not can_auto_approve_learning(proposed, source_prompt):
                 LOGGER.info(
@@ -969,11 +1017,12 @@ class AgentApp:
         *,
         persist_session: bool,
         restricted: bool,
+        project: str = DEFAULT_PROJECT,
         reply_to_message_id: int | None = None,
         documents: tuple[Path, ...] = (),
     ) -> None:
         if persist_session and result.thread_id:
-            self.state.record_session_turn(chat_id, result.thread_id)
+            self.state.record_session_turn(chat_id, result.thread_id, project)
         if result.cancelled:
             self._send_message(
                 chat_id,
@@ -1034,7 +1083,7 @@ class AgentApp:
         requires_approval = self._requires_admin_approval(prompt)
         task = self.store.enqueue_task(
             chat_id,
-            prompt,
+            scope_task_prompt(self.state.active_project(chat_id), prompt),
             source="telegram",
             ephemeral=False,
             requires_approval=requires_approval,
@@ -1059,6 +1108,7 @@ class AgentApp:
         if self._requires_admin_approval(prompt):
             return False
         with self._status_lock:
+            project = self.state.active_project(chat_id)
             active = next(
                 (
                     item
@@ -1067,6 +1117,7 @@ class AgentApp:
                         item.task.chat_id == chat_id
                         and not item.task.restricted
                         and not item.task.ephemeral
+                        and unpack_project_task(item.task.prompt)[0] == project
                     )
                 ),
                 None,
@@ -1074,17 +1125,17 @@ class AgentApp:
         return active is not None and active.runner.steer(prompt)
 
     def _agent_name(self) -> str:
-        item = self.memory.find_by_title(AGENT_NAME_TITLE)
+        item = self.memory.find_by_title(AGENT_NAME_TITLE, scope=GLOBAL_SCOPE)
         if item is None or not item.text.startswith("Name: "):
             return DEFAULT_AGENT_NAME
         return item.text.removeprefix("Name: ").strip() or DEFAULT_AGENT_NAME
 
     def _owner_profile(self) -> str | None:
-        item = self.memory.find_by_title(OWNER_PROFILE_TITLE)
+        item = self.memory.find_by_title(OWNER_PROFILE_TITLE, scope=GLOBAL_SCOPE)
         return item.text if item is not None else None
 
     def _public_owner_card(self) -> str | None:
-        item = self.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE)
+        item = self.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE, scope=GLOBAL_SCOPE)
         return item.text if item is not None else None
 
     def _request_owner_onboarding(self, chat_id: int) -> None:
@@ -1105,7 +1156,7 @@ class AgentApp:
             )
             return
         try:
-            self.memory.upsert(AGENT_NAME_TITLE, f"Name: {name}")
+            self.memory.upsert(AGENT_NAME_TITLE, f"Name: {name}", scope=GLOBAL_SCOPE)
         except ValueError as exc:
             self._send_message(chat_id, f"Could not change the agent name: {exc}")
             return
@@ -1115,7 +1166,7 @@ class AgentApp:
     def _set_public_owner_card(self, chat_id: int, argument: str) -> None:
         card = " ".join(argument.split())
         if card.casefold() in {"clear", "none", "off"}:
-            existing = self.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE)
+            existing = self.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE, scope=GLOBAL_SCOPE)
             if existing is not None:
                 self.memory.forget(existing.id)
             self._send_message(chat_id, "Public owner card cleared.")
@@ -1131,7 +1182,7 @@ class AgentApp:
             )
             return
         try:
-            self.memory.upsert(PUBLIC_OWNER_CARD_TITLE, card)
+            self.memory.upsert(PUBLIC_OWNER_CARD_TITLE, card, scope=GLOBAL_SCOPE)
         except ValueError as exc:
             self._send_message(chat_id, f"Could not update the public owner card: {exc}")
             return
@@ -1232,16 +1283,39 @@ class AgentApp:
         if self._send_document(chat_id, document):
             self._send_message(chat_id, f"Sent {document.name}.")
 
+    def _set_project(self, chat_id: int, argument: str) -> None:
+        if not argument:
+            self._send_message(
+                chat_id,
+                "Active project: " + self.state.active_project(chat_id)
+                + "\nUse /project NAME to switch projects.",
+            )
+            return
+        try:
+            project = self.state.set_active_project(chat_id, argument)
+        except ValueError as exc:
+            self._send_message(chat_id, f"Could not switch project: {exc}")
+            return
+        snapshot = self.state.session_snapshot(chat_id, project)
+        session = "resumed" if snapshot.codex_thread_id else "new temporary session"
+        self._send_message(
+            chat_id,
+            f"Active project switched to {project}. {session}; long-term memories and assets are scoped to this project.",
+        )
+
     def _start_new_session(self, chat_id: int) -> None:
+        project = self.state.active_project(chat_id)
         with self._status_lock:
             active = any(
-                item.task.chat_id == chat_id and not item.task.restricted
+                item.task.chat_id == chat_id
+                and not item.task.restricted
+                and unpack_project_task(item.task.prompt)[0] == project
                 for item in self._active_tasks.values()
             )
         if active:
             self._send_message(chat_id, "A task is running. Use /cancel before resetting the session.")
             return
-        thread_id = self.state.session_snapshot(chat_id).codex_thread_id
+        thread_id = self.state.session_snapshot(chat_id, project).codex_thread_id
         if thread_id:
             try:
                 self.runner.delete_session(thread_id)
@@ -1252,10 +1326,10 @@ class AgentApp:
                     "The current Codex session could not be deleted and was kept unchanged.",
                 )
                 return
-        self.state.set_session_thread_id(chat_id, None)
+        self.state.set_session_thread_id(chat_id, None, project)
         self._send_message(
             chat_id,
-            "The current Codex session was deleted. The next request will start a new session.",
+            f"The temporary Codex session for {project} was deleted. Long-term memories were kept.",
         )
 
     def _remember(self, chat_id: int, argument: str) -> None:
@@ -1263,7 +1337,10 @@ class AgentApp:
             self._send_message(chat_id, "Usage: /remember TEXT")
             return
         try:
-            item = self.memory.add(argument)
+            item = self.memory.add(
+                argument,
+                scope=self.state.active_project(chat_id),
+            )
         except ValueError as exc:
             self._send_message(chat_id, f"Could not store the memory: {exc}")
             return
@@ -1275,12 +1352,20 @@ class AgentApp:
             source_task_id=None,
             created_at=item.created_at,
         )
-        self._send_message(chat_id, f"Stored long-term memory {item.id}.")
+        self._send_message(
+            chat_id,
+            f"Stored long-term memory {item.id} for {item.scope}.",
+        )
         self._backup_personal_data()
 
     def _forget_memory(self, chat_id: int, argument: str) -> None:
         if not argument:
             self._send_message(chat_id, "Usage: /forget MEMORY_ID")
+        elif not any(
+            item.id.casefold() == argument.strip().casefold()
+            for item in self.memory.list_for_project(self.state.active_project(chat_id))
+        ):
+            self._send_message(chat_id, f"Long-term memory {argument} was not found in this project.")
         elif self.memory.forget(argument):
             self.recall.delete("memory", argument)
             self._send_message(chat_id, f"Deleted long-term memory {argument}.")
@@ -1298,7 +1383,12 @@ class AgentApp:
             )
             return
         try:
-            asset = self.vault.upsert(kind, title, content)
+            asset = self.vault.upsert(
+                kind,
+                title,
+                content,
+                scope=self.state.active_project(chat_id),
+            )
         except ValueError as exc:
             self._send_message(chat_id, f"Could not save the assistant asset: {exc}")
             return
@@ -1308,6 +1398,15 @@ class AgentApp:
     def _forget_asset(self, chat_id: int, argument: str) -> None:
         if not argument:
             self._send_message(chat_id, "Usage: /forget_asset ASSET_ID")
+        elif not any(
+            item.id.casefold() == argument.strip().casefold()
+            for item in self.vault.select(
+                "",
+                scope=self.state.active_project(chat_id),
+                max_chars=20_000,
+            )
+        ):
+            self._send_message(chat_id, f"Assistant asset {argument} was not found in this project.")
         elif self.vault.forget(argument):
             self._send_message(chat_id, f"Deleted assistant asset {argument}.")
             self._backup_personal_data()
@@ -1336,6 +1435,7 @@ class AgentApp:
                 title=title,
                 content=body,
                 source_task_id=None,
+                scope=self.state.active_project(chat_id),
             )
             source_id = self._apply_learning_candidate(candidate)
             self.learning.set_status(
@@ -1358,6 +1458,9 @@ class AgentApp:
             if candidate is None or candidate.status != "pending":
                 self._send_message(chat_id, "No pending learning proposal was found for that ID.")
                 return
+            if candidate.scope != self.state.active_project(chat_id):
+                self._send_message(chat_id, "That learning proposal belongs to another project.")
+                return
             try:
                 self._apply_learning_candidate(candidate)
             except (OSError, RuntimeError, ValueError) as exc:
@@ -1375,7 +1478,12 @@ class AgentApp:
 
     def _reject(self, chat_id: int, item_id: str) -> None:
         if item_id.startswith("l"):
-            changed = self.learning.set_status(item_id, "rejected")
+            candidate = self.learning.get(item_id)
+            changed = bool(
+                candidate is not None
+                and candidate.scope == self.state.active_project(chat_id)
+                and self.learning.set_status(item_id, "rejected")
+            )
         else:
             changed = self.store.reject(item_id)
         if changed:
@@ -1409,7 +1517,7 @@ class AgentApp:
                 chat_id,
                 kind=kind,
                 expression="" if kind == "once" else str(minutes * 60),
-                prompt=prompt.strip(),
+                prompt=scope_task_prompt(self.state.active_project(chat_id), prompt.strip()),
                 next_run_at=time.time() + minutes * 60,
                 requires_approval=requires_approval,
             )
@@ -1439,7 +1547,7 @@ class AgentApp:
                 chat_id,
                 kind="cron",
                 expression=expression.strip(),
-                prompt=prompt.strip(),
+                prompt=scope_task_prompt(self.state.active_project(chat_id), prompt.strip()),
                 next_run_at=next_run.timestamp(),
                 requires_approval=requires_approval,
             )
@@ -1492,57 +1600,66 @@ class AgentApp:
                 message = "There is no completed task available to rate."
             else:
                 completed = self._last_completed_task
-                try:
-                    self.feedback.record(
-                        task_id=completed.id,
-                        rating=rating,
-                        note=note,
-                        thread_id=completed.thread_id,
-                        memory_ids=completed.memory_ids,
-                        skill_ids=completed.skill_ids,
+                if completed.project != self.state.active_project(chat_id):
+                    message = (
+                        f"The last completed task belongs to {completed.project}. "
+                        "Switch to that project before rating it."
                     )
-                    self.recall.record_feedback(
-                        memory_ids=completed.memory_ids,
-                        skill_ids=completed.skill_ids,
-                        rating=rating,
-                    )
-                    if note:
-                        self._auto_apply_learning(
-                            ProposedLearning(
-                                kind="memory",
-                                title=(
-                                    "User correction"
-                                    if rating == "bad"
-                                    else "User confirmation"
-                                ),
-                                content=note,
-                                evidence=note,
-                            ),
-                            source_task_id=completed.id,
-                            source_prompt=note,
-                        )
-                except ValueError as exc:
-                    message = f"Could not store the rating: {exc}"
                 else:
-                    self._last_completed_task = None
-                    message = "Stored the rating for the last completed task."
+                    try:
+                        self.feedback.record(
+                            task_id=completed.id,
+                            rating=rating,
+                            note=note,
+                            thread_id=completed.thread_id,
+                            memory_ids=completed.memory_ids,
+                            skill_ids=completed.skill_ids,
+                        )
+                        self.recall.record_feedback(
+                            memory_ids=completed.memory_ids,
+                            skill_ids=completed.skill_ids,
+                            rating=rating,
+                        )
+                        if note:
+                            self._auto_apply_learning(
+                                ProposedLearning(
+                                    kind="memory",
+                                    title=(
+                                        "User correction"
+                                        if rating == "bad"
+                                        else "User confirmation"
+                                    ),
+                                    content=note,
+                                    evidence=note,
+                                ),
+                                source_task_id=completed.id,
+                                source_prompt=note,
+                                scope=completed.project,
+                            )
+                    except ValueError as exc:
+                        message = f"Could not store the rating: {exc}"
+                    else:
+                        self._last_completed_task = None
+                        message = "Stored the rating for the last completed task."
         self._send_message(chat_id, message)
 
     def _status_text(self, chat_id: int) -> str:
         with self._status_lock:
             active = len(self._active_tasks)
-        snapshot = self.state.session_snapshot(chat_id)
+        project = self.state.active_project(chat_id)
+        snapshot = self.state.session_snapshot(chat_id, project)
         session_id = snapshot.codex_thread_id
         session = session_id[:12] + "…" if session_id else "none"
         return "\n".join(
             [
                 f"Active tasks: {active}/{self.config.worker_count}",
                 f"Persistent queue: {self.store.pending_count()}",
+                f"Active project: {project}",
                 f"Codex model: {self.runner.model or 'Codex default'}",
-                f"Codex session: {session}",
-                f"Session turns: {snapshot.session_turn_count}/{self.config.max_session_turns}",
-                f"Long-term memories: {len(self.memory.list())}",
-                f"Assistant assets: {len(self.vault.list())}",
+                f"Temporary project session: {session}",
+                f"Temporary session turns: {snapshot.session_turn_count}/{self.config.max_session_turns}",
+                f"Project long-term memories: {len(self.memory.list_for_project(project))}",
+                f"Project assistant assets: {len(self.vault.select('', scope=project, max_chars=20_000))}",
                 f"Approved skills: {len(self.skills.list())}",
                 "Automatic learning: enabled",
                 f"Pending learning proposals: {len(self.learning.list_pending())}",
@@ -1559,12 +1676,13 @@ class AgentApp:
             ]
         )
 
-    def _memories_text(self) -> str:
-        memories = self.memory.list()
+    def _memories_text(self, chat_id: int) -> str:
+        project = self.state.active_project(chat_id)
+        memories = self.memory.list_for_project(project)
         if not memories:
-            return "No long-term memories are stored."
+            return f"No long-term memories are stored for {project}."
         lines = [
-            "Approved long-term memories "
+            f"Approved long-term memories for {project} "
             f"({sum(len(item.text) for item in memories)}/{self.config.memory_max_chars} chars):"
         ]
         for item in memories:
@@ -1575,13 +1693,21 @@ class AgentApp:
                 else "not indexed"
             )
             title = f"{item.title}: " if item.title else ""
-            lines.append(f"{item.id}. {title}{item.text}\n  {usage}")
+            lines.append(f"{item.id} [{item.scope}]. {title}{item.text}\n  {usage}")
         return "\n".join(lines)
 
-    def _recall_text(self, query: str) -> str:
+    def _recall_text(self, chat_id: int, query: str) -> str:
         if not query:
             return "Usage: /recall QUERY"
-        matches = self.recall.search(query)
+        project = self.state.active_project(chat_id)
+        allowed_memory_ids = {
+            item.id for item in self.memory.list_for_project(project)
+        }
+        matches = [
+            item
+            for item in self.recall.search(query)
+            if item.kind != "memory" or item.source_id in allowed_memory_ids
+        ]
         if not matches:
             return "No learned memories or skills matched that query."
         lines = [f'Recall results for "{query}":']
@@ -1597,11 +1723,20 @@ class AgentApp:
             )
         return "\n".join(lines)
 
-    def _vault_text(self, query: str) -> str:
-        assets = self.vault.select(query, max_chars=20_000)
+    def _vault_text(self, chat_id: int, query: str) -> str:
+        project = self.state.active_project(chat_id)
+        assets = self.vault.select(query, scope=project, max_chars=20_000)
         if not assets:
-            return "No assistant assets matched that query." if query else "No assistant assets are stored."
-        heading = f'Assistant assets for "{query}":' if query else "Assistant assets:"
+            return (
+                "No assistant assets matched that query."
+                if query
+                else f"No assistant assets are stored for {project}."
+            )
+        heading = (
+            f'Assistant assets for {project}, "{query}":'
+            if query
+            else f"Assistant assets for {project}:"
+        )
         return "\n".join(
             [heading, *[f"{item.id} [{item.kind}] {item.title}: {item.content}" for item in assets]]
         )
@@ -1612,8 +1747,13 @@ class AgentApp:
         except (OSError, RuntimeError, PersonalSyncError) as exc:
             LOGGER.warning("personal data backup failed: %s", exc)
 
-    def _review_memories_text(self) -> str:
-        memories = self.recall.stale_memories()
+    def _review_memories_text(self, chat_id: int) -> str:
+        allowed_memory_ids = {
+            item.id for item in self.memory.list_for_project(self.state.active_project(chat_id))
+        }
+        memories = [
+            item for item in self.recall.stale_memories() if item.source_id in allowed_memory_ids
+        ]
         if not memories:
             return "No memories currently need review."
         lines = ["Memories to review:"]
@@ -1627,8 +1767,11 @@ class AgentApp:
             lines.append(f"{item.source_id}. {item.title} — {reason} (/forget {item.source_id})")
         return "\n".join(lines)
 
-    def _learning_text(self) -> str:
-        candidates = self.learning.list_recent()
+    def _learning_text(self, chat_id: int) -> str:
+        project = self.state.active_project(chat_id)
+        candidates = [
+            item for item in self.learning.list_recent() if item.scope == project
+        ]
         if not candidates:
             return "Automatic learning is enabled. No learning events are recorded yet."
         lines = ["Automatic learning is enabled. Recent learning events:"]
@@ -1684,7 +1827,10 @@ class AgentApp:
         if not tasks:
             return "There are no recorded tasks."
         lines = ["Recent tasks:"]
-        lines.extend(f"{item.id} [{item.status}] {item.source}" for item in tasks)
+        lines.extend(
+            f"{item.id} [{item.status}] {item.source} project={unpack_project_task(item.prompt)[0]}"
+            for item in tasks
+        )
         return "\n".join(lines)
 
     def _groups_text(self) -> str:

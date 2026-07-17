@@ -14,6 +14,7 @@ from .identity import (
     restricted_group_identity,
 )
 from .learning import LEARNING_PROTOCOL, SkillRecord
+from .projects import DEFAULT_PROJECT, GLOBAL_SCOPE, normalize_scope
 from .secure_io import (
     atomic_write_bytes,
     atomic_write_text,
@@ -31,6 +32,7 @@ class MemoryRecord:
     text: str
     created_at: str
     title: str = ""
+    scope: str = DEFAULT_PROJECT
 
 
 class MemoryStore:
@@ -48,7 +50,7 @@ class MemoryStore:
         try:
             data = json.loads(read_private_text(self.path, max_bytes=1_000_000))
             raw_memories = data.get("memories", [])
-            memories = [MemoryRecord(**item) for item in raw_memories]
+            memories = [self._memory_record(item) for item in raw_memories]
             next_id = int(data.get("next_id", len(memories) + 1))
         except (
             AttributeError,
@@ -62,32 +64,63 @@ class MemoryStore:
             raise RuntimeError(f"cannot read memory file {self.path}: {exc}") from exc
         return memories, next_id
 
+    @staticmethod
+    def _memory_record(item: object) -> MemoryRecord:
+        if not isinstance(item, dict):
+            raise ValueError("memory record must be an object")
+        payload = dict(item)
+        if "scope" not in payload:
+            payload["scope"] = (
+                GLOBAL_SCOPE
+                if payload.get("title") in {
+                    AGENT_NAME_TITLE,
+                    OWNER_PROFILE_TITLE,
+                    PUBLIC_OWNER_CARD_TITLE,
+                }
+                else DEFAULT_PROJECT
+            )
+        payload["scope"] = normalize_scope(str(payload["scope"]))
+        return MemoryRecord(**payload)
+
     def list(self) -> list[MemoryRecord]:
         with self._lock:
             return list(self._memories)
 
-    def find_by_title(self, title: str) -> MemoryRecord | None:
+    def list_for_project(self, project: str) -> list[MemoryRecord]:
+        scope = normalize_scope(project)
+        with self._lock:
+            return [
+                item for item in self._memories if item.scope in {scope, GLOBAL_SCOPE}
+            ]
+
+    def find_by_title(self, title: str, *, scope: str | None = None) -> MemoryRecord | None:
         normalized = " ".join(title.split()).casefold()
         if not normalized:
             return None
+        normalized_scope = normalize_scope(scope) if scope is not None else None
         with self._lock:
             return next(
                 (
                     item
                     for item in self._memories
                     if item.title and item.title.casefold() == normalized
+                    and (normalized_scope is None or item.scope == normalized_scope)
                 ),
                 None,
             )
 
-    def add(self, text: str) -> MemoryRecord:
+    def add(self, text: str, *, scope: str = DEFAULT_PROJECT) -> MemoryRecord:
         normalized = " ".join(text.split())
+        normalized_scope = normalize_scope(scope)
         if not normalized:
             raise ValueError("memory text must not be empty")
         if len(normalized) > 1000:
             raise ValueError("memory text must not exceed 1,000 characters")
         with self._lock:
-            if any(item.text == normalized for item in self._memories):
+            if any(
+                item.text == normalized and item.scope == normalized_scope
+                for item in self._memories
+            ):
                 raise ValueError("the same memory is already stored")
             total_chars = sum(len(item.text) for item in self._memories) + len(normalized)
             if total_chars > self.max_total_chars:
@@ -99,15 +132,29 @@ class MemoryStore:
                 id=f"m{self._next_id}",
                 text=normalized,
                 created_at=datetime.now(timezone.utc).isoformat(),
+                scope=normalized_scope,
             )
             self._next_id += 1
             self._memories.append(item)
             self._write()
             return item
 
-    def upsert(self, title: str, text: str) -> MemoryRecord:
+    def upsert(
+        self,
+        title: str,
+        text: str,
+        *,
+        scope: str = DEFAULT_PROJECT,
+    ) -> MemoryRecord:
         normalized_title = " ".join(title.split())
         normalized_text = " ".join(text.split())
+        normalized_scope = normalize_scope(scope)
+        if normalized_title in {
+            AGENT_NAME_TITLE,
+            OWNER_PROFILE_TITLE,
+            PUBLIC_OWNER_CARD_TITLE,
+        }:
+            normalized_scope = GLOBAL_SCOPE
         if not normalized_title or not normalized_text:
             raise ValueError("automatic memories require a title and text")
         if len(normalized_title) > 100 or len(normalized_text) > 1000:
@@ -118,11 +165,16 @@ class MemoryStore:
                     item
                     for item in self._memories
                     if item.title and item.title.casefold() == normalized_title.casefold()
+                    and item.scope == normalized_scope
                 ),
                 None,
             )
             duplicate = next(
-                (item for item in self._memories if item.text == normalized_text),
+                (
+                    item
+                    for item in self._memories
+                    if item.text == normalized_text and item.scope == normalized_scope
+                ),
                 None,
             )
             target = existing or duplicate
@@ -144,6 +196,7 @@ class MemoryStore:
                     text=normalized_text,
                     created_at=created_at,
                     title=normalized_title,
+                    scope=normalized_scope,
                 )
                 self._memories = [
                     updated if item.id == target.id else item for item in self._memories
@@ -155,6 +208,7 @@ class MemoryStore:
                 text=normalized_text,
                 created_at=created_at,
                 title=normalized_title,
+                scope=normalized_scope,
             )
             self._next_id += 1
             self._memories.append(item)
@@ -171,9 +225,16 @@ class MemoryStore:
             self._write()
             return True
 
-    def forget_matching(self, title: str, text: str) -> str | None:
+    def forget_matching(
+        self,
+        title: str,
+        text: str,
+        *,
+        scope: str = DEFAULT_PROJECT,
+    ) -> str | None:
         normalized_title = " ".join(title.split())
         normalized_text = " ".join(text.split())
+        normalized_scope = normalize_scope(scope)
         with self._lock:
             found = next(
                 (
@@ -181,6 +242,7 @@ class MemoryStore:
                     for item in self._memories
                     if item.title.casefold() == normalized_title.casefold()
                     and item.text == normalized_text
+                    and item.scope == normalized_scope
                 ),
                 None,
             )
@@ -264,6 +326,7 @@ def compose_prompt(
     agent_name: str = "Codeshark",
     owner_profile: str | None = None,
     owner_onboarding_requested: bool = False,
+    project_name: str = DEFAULT_PROJECT,
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     lines: list[str] = []
     memory_ids: list[str] = []
@@ -289,6 +352,13 @@ def compose_prompt(
             owner_onboarding_requested=owner_onboarding_requested,
         )
     ]
+    context_blocks.append(
+        "[Active project]\n"
+        f"Project: {normalize_scope(project_name)}\n"
+        "Temporary working context is limited to this project's persisted Codex session. "
+        "Only this project's long-term memories and assistant assets are supplied below.\n"
+        "[/Active project]"
+    )
     if agent_repository_root is not None:
         context_blocks.append(
             "[Codeshark source repository]\n"

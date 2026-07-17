@@ -79,6 +79,23 @@ class MemoryStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.add("b" * 6)
 
+    def test_scopes_long_term_memories_by_project_but_keeps_identity_global(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = MemoryStore(Path(directory) / "memory.json")
+            research = store.add("Use public datasets", scope="Research")
+            trading = store.add("Use market-close prices", scope="Trading")
+            owner = store.upsert(OWNER_PROFILE_TITLE, "Call the owner Sona")
+
+            self.assertEqual(
+                [item.id for item in store.list_for_project("Research")],
+                [research.id, owner.id],
+            )
+            self.assertEqual(
+                [item.id for item in store.list_for_project("Trading")],
+                [trading.id, owner.id],
+            )
+            self.assertEqual(owner.scope, "global")
+
     def test_compose_prompt_includes_approved_memory_and_current_request(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = MemoryStore(Path(directory) / "memory.json")
@@ -90,6 +107,11 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertTrue(prompt.endswith("Current request"))
             self.assertEqual(memory_ids, (item.id,))
             self.assertEqual(skill_ids, ())
+
+    def test_compose_prompt_identifies_the_active_project(self) -> None:
+        prompt, _, _ = compose_prompt("Current request", [], project_name="Research")
+        self.assertIn("Project: Research", prompt)
+        self.assertIn("Temporary working context", prompt)
 
     def test_compose_prompt_lists_server_controlled_read_only_roots(self) -> None:
         prompt, _, _ = compose_prompt(

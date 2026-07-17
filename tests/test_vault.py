@@ -24,3 +24,14 @@ class VaultStoreTests(unittest.TestCase):
             store = VaultStore(Path(directory) / "vault.json")
             with self.assertRaisesRegex(ValueError, "asset kind"):
                 store.upsert("credential", "Token", "do not store this")
+
+    def test_scopes_assets_by_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = VaultStore(Path(directory) / "vault.json")
+            research = store.upsert("project", "Plan", "Research plan", scope="Research")
+            store.upsert("project", "Plan", "Trading plan", scope="Trading")
+
+            self.assertEqual(
+                [item.id for item in store.select("plan", scope="Research")],
+                [research.id],
+            )
