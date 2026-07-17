@@ -181,6 +181,16 @@ docs = ["search", "fetch"]
 
 Startup fails when the live MCP inventory and local policy do not match. No server or tool is enabled automatically. See [config.example.toml](config.example.toml) for the full schema.
 
+### Administrator full access
+
+The secure default keeps unapproved private work read-only. Set the following only when the paired administrator deliberately wants the bot to act as a full local delegate:
+
+```toml
+admin_full_access = true
+```
+
+In this mode, the paired administrator's private-chat tasks use Codex `danger-full-access` with no approval pause. The agent can create files outside delegated roots, use live network access, install Codex plugins, and enable configured MCP servers. Enabled Telegram groups remain isolated, mention-only, and read-only. Do not enable this mode for a shared account or a bot exposed to untrusted private users.
+
 ## Bounded state and migration
 
 The agent stores only what it needs to resume useful work:

@@ -31,8 +31,9 @@ Do not include real Telegram tokens, Codex credentials, personal data, or unrela
 The intended boundaries are:
 
 - One explicitly paired Telegram administrator in a private chat
-- Unapproved administrator tasks forced into a read-only Codex sandbox with network, MCP, apps, browser/computer control, and additional writable roots disabled
-- State-changing administrator requests held for explicit approval before receiving the configured `workspace-write`, network, MCP, and `delegated_roots` capabilities
+- With the default `admin_full_access = false`, unapproved administrator tasks are forced into a read-only Codex sandbox with network, MCP, apps, browser/computer control, and additional writable roots disabled
+- With the default configuration, state-changing administrator requests wait for explicit approval before receiving the configured `workspace-write`, network, MCP, and `delegated_roots` capabilities
+- Optional `admin_full_access = true` for the paired administrator only: private tasks use Codex `danger-full-access`, including plugin installation, live network access, and configured MCP servers without a task-level approval pause
 - Optional administrator-configured read-only roots and writable delegated project roots for trusted private-chat work
 - Group access denied by default and enabled only by the paired administrator
 - Group members limited to explicit bot mentions in an enabled group, with no attachments or control commands
@@ -46,7 +47,7 @@ The intended boundaries are:
 - Size-limited Telegram attachments stored only in the server-controlled workspace
 - A versioned owner-only LaunchAgent source snapshot outside delegated project roots, with owner-only runtime storage and atomic private-file replacement
 
-The administrator-side risk classifier and model instructions are defense-in-depth controls. Guest isolation additionally relies on Codex permission profiles and therefore requires Codex CLI 0.138.0 or newer; startup rejects older versions.
+The administrator-side risk classifier and model instructions are defense-in-depth controls. `admin_full_access = true` intentionally removes the private-chat sandbox and approval boundary; use it only for a single trusted paired administrator. Guest isolation additionally relies on Codex permission profiles and therefore requires Codex CLI 0.138.0 or newer; startup rejects older versions.
 
 The Codex child receives only basic process, locale, temporary-directory, certificate, and Codex-home variables. Parent API keys, Telegram credentials, cloud credentials, and SSH-agent sockets are not forwarded. Credential-bearing MCP tools remain a separate trust boundary and should stay disabled unless required.
 

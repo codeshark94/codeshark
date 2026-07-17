@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from codex_codeshark.app import HELP_TEXT, AgentApp
@@ -45,8 +46,9 @@ class FakeCodexRunner:
         ephemeral=False,
         restricted=False,
         approved=False,
+        full_access=False,
     ) -> RunResult:
-        self.prompts.append((prompt, thread_id, ephemeral, restricted, approved))
+        self.prompts.append((prompt, thread_id, ephemeral, restricted, approved, full_access))
         if len(self.results) > 1:
             return self.results.pop(0)
         return self.results[0]
@@ -212,13 +214,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        prompt, thread_id, ephemeral, restricted, approved = runner.prompts[0]
+        prompt, thread_id, ephemeral, restricted, approved, full_access = runner.prompts[0]
         self.assertNotIn("Private administrator memory", prompt)
         self.assertIn("non-privileged", prompt)
         self.assertIsNone(thread_id)
         self.assertTrue(ephemeral)
         self.assertTrue(restricted)
         self.assertFalse(approved)
+        self.assertFalse(full_access)
         self.assertIsNone(self.app.state.snapshot().codex_thread_id)
         self.assertEqual(self.app.learning.list_pending(), [])
         self.assertEqual(self.api.messages[-1], (group_id, "public answer"))
@@ -352,6 +355,17 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(approved)
         self.assertIn("explicitly approved", runner.prompts[0][0])
         self.assertTrue(runner.prompts[0][4])
+
+    def test_full_access_admin_runs_private_mutation_without_approval(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        runner = FakeCodexRunner()
+        app.runner = runner
+        app._handle_update(self.update(123, "Install a plugin and create a file"))
+        task = app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        app._execute_task(task)
+        self.assertTrue(runner.prompts[0][4])
+        self.assertTrue(runner.prompts[0][5])
 
     def test_schedule_commands_and_telegram_safe_aliases(self) -> None:
         self.app._handle_update(self.update(123, "/remind 5 check status"))

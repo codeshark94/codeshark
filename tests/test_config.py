@@ -73,6 +73,7 @@ class ConfigTests(unittest.TestCase):
                         f'workdir = "{workspace}"',
                         f'codex_binary = "{binary}"',
                         "max_session_turns = 25",
+                        "admin_full_access = true",
                         f'read_only_roots = ["{read_only}"]',
                         f'delegated_roots = ["{delegated}"]',
                         '[mcp_policy]',
@@ -89,6 +90,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.max_session_turns, 25)
             self.assertEqual(loaded.codex_model, "gpt-5.5")
             self.assertFalse(loaded.codex_network_access)
+            self.assertTrue(loaded.admin_full_access)
             self.assertEqual(loaded.attachment_max_bytes, 10_000_000)
             self.assertEqual(loaded.read_only_roots, (read_only.resolve(),))
             self.assertEqual(loaded.delegated_roots, (delegated.resolve(),))

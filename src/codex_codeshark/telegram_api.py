@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -158,6 +159,82 @@ class TelegramAPI:
             },
             retry_network=False,
         )
+
+    def send_document(self, chat_id: int, document: Path, *, max_bytes: int) -> None:
+        try:
+            size = document.stat().st_size
+            if size > max_bytes:
+                raise TelegramError(f"The document exceeds the {max_bytes}-byte limit")
+            content = document.read_bytes()
+        except TelegramError:
+            raise
+        except OSError as exc:
+            raise TelegramError("The document could not be read safely") from exc
+        if len(content) > max_bytes:
+            raise TelegramError(f"The document exceeds the {max_bytes}-byte limit")
+
+        filename = "".join(
+            "_" if character in {"\r", "\n", '"', "\\"} else character
+            for character in document.name
+        )[:120] or "document.bin"
+        boundary = f"----codeshark-{uuid.uuid4().hex}"
+        delimiter = boundary.encode("ascii")
+        body = b"".join(
+            (
+                b"--" + delimiter + b"\r\n"
+                + b'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+                + str(chat_id).encode("ascii")
+                + b"\r\n",
+                b"--" + delimiter + b"\r\n"
+                + (
+                    'Content-Disposition: form-data; name="document"; filename="'
+                    f"{filename}\"\r\n"
+                ).encode("utf-8")
+                + b"Content-Type: application/octet-stream\r\n\r\n"
+                + content
+                + b"\r\n",
+                b"--" + delimiter + b"--\r\n",
+            )
+        )
+        request = urllib.request.Request(
+            f"{self._base_url}/sendDocument",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=60,
+                context=self._ssl_context,
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            description, retry_after = self._http_error_detail(exc)
+            detail = f": {description}" if description else ""
+            raise TelegramError(
+                f"Telegram sendDocument failed with HTTP {exc.code}{detail}",
+                retry_after=retry_after,
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise TelegramError(
+                f"Telegram sendDocument connection failed: {exc.reason}",
+                ambiguous_delivery=True,
+            ) from exc
+        except TimeoutError as exc:
+            raise TelegramError(
+                "Telegram sendDocument timed out",
+                ambiguous_delivery=True,
+            ) from exc
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TelegramError("Telegram sendDocument returned invalid data") from exc
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            description = (
+                payload.get("description", "unknown Telegram error")
+                if isinstance(payload, dict)
+                else "invalid response"
+            )
+            raise TelegramError(f"Telegram sendDocument failed: {description}")
 
     def get_file(self, file_id: str) -> dict[str, Any]:
         result = self.call("getFile", {"file_id": file_id})

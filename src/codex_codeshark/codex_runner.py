@@ -88,11 +88,16 @@ class CodexRunner:
         self._process: subprocess.Popen[str] | None = None
         self._cancel_requested = False
 
-    def _mcp_config_args(self, *, restricted: bool = False) -> list[str]:
+    def _mcp_config_args(
+        self,
+        *,
+        restricted: bool = False,
+        full_access: bool = False,
+    ) -> list[str]:
         args: list[str] = []
         for server in self.mcp_known_servers:
-            tools = None if restricted else self.mcp_allowed_tools.get(server)
-            enabled = tools is not None
+            tools = None if restricted or full_access else self.mcp_allowed_tools.get(server)
+            enabled = full_access or tools is not None
             args.extend(["-c", f"mcp_servers.{server}.enabled={str(enabled).lower()}"])
             if tools:
                 encoded_tools = json.dumps(list(tools), separators=(",", ":"))
@@ -178,6 +183,31 @@ class CodexRunner:
             *self._mcp_config_args(restricted=True),
         ]
 
+    def _full_access_config_args(self) -> list[str]:
+        return [
+            "-c",
+            'sandbox_mode="danger-full-access"',
+            "-c",
+            'approval_policy="never"',
+            "-c",
+            'web_search="live"',
+            "-c",
+            "features.apps=true",
+            "-c",
+            "features.browser_use=true",
+            "-c",
+            "features.computer_use=true",
+            "-c",
+            "features.image_generation=true",
+            "-c",
+            "features.memories=true",
+            "-c",
+            "features.multi_agent=true",
+            "-c",
+            "features.tool_suggest=true",
+            *self._mcp_config_args(full_access=True),
+        ]
+
     def build_command(
         self,
         prompt: str,
@@ -186,6 +216,7 @@ class CodexRunner:
         ephemeral: bool = False,
         restricted: bool = False,
         approved: bool = False,
+        full_access: bool = False,
     ) -> list[str]:
         if restricted:
             if thread_id is not None:
@@ -213,7 +244,7 @@ class CodexRunner:
             "-C",
             str(self.workdir),
         ]
-        if approved:
+        if approved or full_access:
             for root in self.additional_write_roots:
                 base.extend(["--add-dir", str(root)])
         if self.model:
@@ -221,7 +252,9 @@ class CodexRunner:
         if self.model_reasoning_effort:
             encoded = json.dumps(self.model_reasoning_effort)
             base.extend(["-c", f"model_reasoning_effort={encoded}"])
-        if approved:
+        if full_access:
+            base.extend(self._full_access_config_args())
+        elif approved:
             base.extend(
                 [
                     "-c",
@@ -279,6 +312,7 @@ class CodexRunner:
         ephemeral: bool = False,
         restricted: bool = False,
         approved: bool = False,
+        full_access: bool = False,
     ) -> RunResult:
         command = self.build_command(
             prompt,
@@ -286,6 +320,7 @@ class CodexRunner:
             ephemeral=ephemeral,
             restricted=restricted,
             approved=approved,
+            full_access=full_access,
         )
         env = self._child_env(restricted=restricted)
         run_workdir = self.restricted_workdir if restricted else self.workdir

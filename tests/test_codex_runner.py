@@ -143,6 +143,22 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertTrue(any("mutate_repository" in argument for argument in approved))
         self.assertIn("--add-dir", approved)
 
+    def test_full_access_command_allows_plugins_and_host_operations(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            mcp_known_servers=("computer-use",),
+        )
+        command = runner.build_command("install a plugin", None, full_access=True)
+        self.assertIn('sandbox_mode="danger-full-access"', command)
+        self.assertIn('approval_policy="never"', command)
+        self.assertIn('web_search="live"', command)
+        self.assertIn("features.computer_use=true", command)
+        self.assertIn("mcp_servers.computer-use.enabled=true", command)
+        self.assertNotIn('sandbox_mode="read-only"', command)
+
     def test_restricted_group_command_uses_isolated_permission_profile(self) -> None:
         runner = CodexRunner(
             binary=Path("/tmp/codex"),

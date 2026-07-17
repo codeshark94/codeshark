@@ -10,6 +10,10 @@ queue_size = 3
 max_session_turns = 30
 memory_max_chars = 12000
 codex_network_access = false
+# Set true only for a paired administrator who intentionally wants unrestricted
+# local Codex access, including file creation and `codex plugin` installation.
+# Group requests remain isolated and restricted.
+admin_full_access = false
 attachment_max_bytes = 10000000
 # Private administrator tasks may inspect, but never write, under these server-controlled roots.
 # Restricted group tasks cannot see these paths.

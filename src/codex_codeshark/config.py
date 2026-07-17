@@ -53,6 +53,7 @@ class Config:
     max_session_turns: int = 30
     memory_max_chars: int = 12000
     codex_network_access: bool = False
+    admin_full_access: bool = False
     attachment_max_bytes: int = 10_000_000
     read_only_roots: tuple[Path, ...] = ()
     delegated_roots: tuple[Path, ...] = ()
@@ -115,6 +116,7 @@ def load_config(path: Path | None = None) -> Config:
     max_session_turns = _require_int(data, "max_session_turns", 30)
     memory_max_chars = _require_int(data, "memory_max_chars", 12000)
     codex_network_access = _require_bool(data, "codex_network_access", False)
+    admin_full_access = _require_bool(data, "admin_full_access", False)
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
         raise ConfigError("poll_timeout_seconds must be between 1 and 50")
@@ -214,6 +216,7 @@ def load_config(path: Path | None = None) -> Config:
         max_session_turns=max_session_turns,
         memory_max_chars=memory_max_chars,
         codex_network_access=codex_network_access,
+        admin_full_access=admin_full_access,
         attachment_max_bytes=attachment_max_bytes,
         read_only_roots=tuple(read_only_roots),
         delegated_roots=tuple(delegated_roots),
@@ -462,6 +465,7 @@ def write_local_config(
             "max_session_turns = 30",
             "memory_max_chars = 12000",
             "codex_network_access = false",
+            "admin_full_access = false",
             "attachment_max_bytes = 10000000",
             "read_only_roots = []",
             "delegated_roots = []",
