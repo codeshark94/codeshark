@@ -573,17 +573,29 @@ class AgentStore:
         with self._connect() as connection:
             return self._task(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
 
-    def finish_task(self, task_id: str, status: str, error: str = "") -> bool:
+    def finish_task(
+        self,
+        task_id: str,
+        status: str,
+        error: str = "",
+        *,
+        attempt: int | None = None,
+    ) -> bool:
         if status not in {"completed", "failed", "cancelled"}:
             raise ValueError("invalid terminal task status")
+        attempt_clause = "AND attempts = ?" if attempt is not None else ""
+        parameters: tuple[object, ...] = (status, time.time(), error[-1000:], task_id)
+        if attempt is not None:
+            parameters += (attempt,)
         with self._lock, self._connect() as connection:
             cursor = connection.execute(
-                """
+                f"""
                 UPDATE tasks
                 SET status = ?, prompt = '', finished_at = ?, error = ?
                 WHERE id = ? AND status = 'running'
+                {attempt_clause}
                 """,
-                (status, time.time(), error[-1000:], task_id),
+                parameters,
             )
             self._prune_tasks(connection)
             return cursor.rowcount == 1

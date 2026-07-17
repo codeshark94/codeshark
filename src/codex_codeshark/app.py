@@ -799,11 +799,21 @@ class AgentApp:
                     status = "failed"
                 else:
                     status = "completed"
-                self.store.finish_task(task.id, status, result.stderr)
+                self.store.finish_task(
+                    task.id,
+                    status,
+                    result.stderr,
+                    attempt=task.attempts,
+                )
             except Exception as exc:
                 with self._status_lock:
                     self._last_completed_task = None
-                self.store.finish_task(task.id, "failed", str(exc))
+                self.store.finish_task(
+                    task.id,
+                    "failed",
+                    str(exc),
+                    attempt=task.attempts,
+                )
                 LOGGER.exception("worker failed")
                 self._send_message(
                     task.chat_id,

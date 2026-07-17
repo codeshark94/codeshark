@@ -48,6 +48,22 @@ class AgentStoreTests(unittest.TestCase):
             recovered = restored.claim_next_task(now=task.created_at + 2)
             self.assertEqual(recovered.id, task.id)
 
+    def test_stale_attempt_cannot_finish_a_recovered_task(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            task = store.enqueue_task(123, "do work", source="telegram", ephemeral=False)
+            first = store.claim_next_task(now=task.created_at + 1)
+            store.recover_interrupted_tasks()
+            second = store.claim_next_task(now=task.created_at + 2)
+
+            self.assertFalse(
+                store.finish_task(first.id, "cancelled", attempt=first.attempts)
+            )
+            self.assertTrue(
+                store.finish_task(second.id, "completed", attempt=second.attempts)
+            )
+            self.assertEqual(store.get_task(task.id).status, "completed")
+
     def test_task_approval_and_prompt_purge_on_completion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")
