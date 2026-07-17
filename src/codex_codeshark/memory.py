@@ -9,6 +9,7 @@ from pathlib import Path
 from .identity import (
     AGENT_NAME_TITLE,
     OWNER_PROFILE_TITLE,
+    PUBLIC_OWNER_CARD_TITLE,
     administrator_identity,
     restricted_group_identity,
 )
@@ -268,6 +269,7 @@ def compose_prompt(
         if item.title.casefold() in {
             AGENT_NAME_TITLE.casefold(),
             OWNER_PROFILE_TITLE.casefold(),
+            PUBLIC_OWNER_CARD_TITLE.casefold(),
         }:
             continue
         label = f"{item.title}: " if item.title else ""
@@ -358,6 +360,7 @@ def compose_restricted_group_prompt(
     *,
     task_id: str,
     agent_name: str = "Codeshark",
+    public_owner_card: str | None = None,
     context: list[tuple[str, str]] | None = None,
 ) -> str:
     context_lines: list[str] = []
@@ -378,7 +381,7 @@ def compose_restricted_group_prompt(
         if history
         else ""
     )
-    return f"""{restricted_group_identity(agent_name)}
+    return f"""{restricted_group_identity(agent_name, public_owner_card)}
 
 [Restricted Telegram group policy]
 Task ID: {task_id}

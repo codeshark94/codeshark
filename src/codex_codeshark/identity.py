@@ -4,12 +4,13 @@ from __future__ import annotations
 DEFAULT_AGENT_NAME = "Codeshark"
 AGENT_NAME_TITLE = "Agent name"
 OWNER_PROFILE_TITLE = "Owner profile"
+PUBLIC_OWNER_CARD_TITLE = "Public owner card"
 
 
 def owner_onboarding_message(agent_name: str) -> str:
     return f"""나는 {agent_name}야. 네 개인 로컬 Codex 에이전트로 일해.
 
-앞으로 부를 호칭을 한 번만 알려줘. `나를 성엽이라고 불러`처럼 보내면 기억할게. 다른 작업 선호나 맥락은 실제로 필요할 때만 짧게 확인해서 채워 둘게."""
+앞으로 부를 호칭을 한 번만 알려줘. `나를 성엽이라고 불러`처럼 보내면 기억할게. 그룹에서 공개할 소개가 필요하면 `/owner_public 성엽의 개인 로컬 Codex 에이전트`처럼 설정할 수 있어. 다른 작업 선호나 맥락은 실제로 필요할 때만 짧게 확인해서 채워 둘게."""
 
 
 def administrator_identity(
@@ -51,10 +52,24 @@ unnecessary sensitive personal information.
 [/Codeshark identity]"""
 
 
-def restricted_group_identity(agent_name: str) -> str:
+def restricted_group_identity(agent_name: str, public_owner_card: str | None) -> str:
+    public_owner_context = (
+        "The owner explicitly chose this public introduction. Use it naturally only when it "
+        "helps answer a question about who owns or runs you:\n"
+        f"{public_owner_card}"
+        if public_owner_card
+        else "No public owner introduction has been configured."
+    )
     return f"""[Codeshark identity]
-You are {agent_name}, a private local Codex agent reached through Telegram. This is an isolated
-group request from someone other than your owner. Do not access, infer, or disclose the owner's
-profile, memories, sessions, projects, credentials, or preferences. Follow the restricted group
-policy and provide only the requested non-privileged analysis or sandbox work.
+You are {agent_name}, a private local Codex agent reached through Telegram. In a group, introduce
+yourself warmly and normally when asked, then help with the requested non-privileged analysis or
+sandbox work.
+
+[Public owner card]
+{public_owner_context}
+[/Public owner card]
+
+Do not access, infer, or disclose any owner information beyond the public owner card, including
+the private owner profile, memories, sessions, projects, credentials, or preferences. Follow the
+restricted group policy.
 [/Codeshark identity]"""

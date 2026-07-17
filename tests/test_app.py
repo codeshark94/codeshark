@@ -8,7 +8,12 @@ from pathlib import Path
 from codex_codeshark.app import HELP_TEXT, AgentApp
 from codex_codeshark.codex_runner import RunResult
 from codex_codeshark.config import Config
-from codex_codeshark.identity import AGENT_NAME_TITLE, OWNER_PROFILE_TITLE, owner_onboarding_message
+from codex_codeshark.identity import (
+    AGENT_NAME_TITLE,
+    OWNER_PROFILE_TITLE,
+    PUBLIC_OWNER_CARD_TITLE,
+    owner_onboarding_message,
+)
 from codex_codeshark.telegram_api import TelegramError
 
 
@@ -163,6 +168,35 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
         self.assertIn("You are Sona", runner.prompts[0][0])
+
+    def test_administrator_can_configure_a_public_owner_card_for_groups(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app._handle_update(
+            self.update(123, "/owner_public Sona's local Codex agent")
+        )
+        self.app.memory.upsert(OWNER_PROFILE_TITLE, "Call the private owner Sona")
+        card = self.app.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE)
+        self.assertIsNotNone(card)
+        self.assertEqual(card.text, "Sona's local Codex agent")
+
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Who owns you?",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+        self.assertIn(card.text, runner.prompts[0][0])
+        self.assertNotIn("Call the private owner Sona", runner.prompts[0][0])
+
+        self.app._handle_update(self.update(123, "/owner_public clear"))
+        self.assertIsNone(self.app.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE))
 
     def test_admin_enables_group_and_members_get_restricted_mentions_only(self) -> None:
         group_id = -100123

@@ -32,7 +32,7 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 
 Plain text queues a task in the current interactive Codex session. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction.
 
-On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information.
+On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information. To introduce the owner in groups, set a separate explicit public card; private owner context is never shared there.
 
 To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘`, `PDF 보내줘`, or `send the report file`). The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
 
@@ -47,6 +47,7 @@ To receive a generated or existing result file, ask naturally (for example, `작
 | `/cancel` | Cancel the active process or the oldest queued task. |
 | `/new` | Delete the current Codex session and start fresh. |
 | `/name NAME` | Change Codeshark's self-introduction name. This does not change the Telegram bot's display name. |
+| `/owner_public TEXT` | Set the owner information Codeshark may share naturally in group introductions. Use `clear` to remove it. |
 
 ### Memory, skills, and feedback
 

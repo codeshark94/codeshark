@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_codeshark.learning import SkillStore
-from codex_codeshark.identity import OWNER_PROFILE_TITLE
+from codex_codeshark.identity import OWNER_PROFILE_TITLE, PUBLIC_OWNER_CARD_TITLE
 from codex_codeshark.memory import (
     FeedbackStore,
     MemoryStore,
@@ -31,6 +31,15 @@ class MemoryStoreTests(unittest.TestCase):
         )
         self.assertIn("My topic is Python", prompt)
         self.assertIn("belongs only to the current Telegram requester", prompt)
+
+    def test_restricted_group_prompt_includes_only_the_public_owner_card(self) -> None:
+        prompt = compose_restricted_group_prompt(
+            "Who owns you?",
+            task_id="t1",
+            public_owner_card="Sona's local Codex agent",
+        )
+        self.assertIn("Sona's local Codex agent", prompt)
+        self.assertIn("beyond the public owner card", prompt)
 
     def test_persists_lists_and_forgets_memories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -120,6 +129,7 @@ class MemoryStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = MemoryStore(Path(directory) / "memory.json")
             owner = store.upsert(OWNER_PROFILE_TITLE, "Call the owner Sona")
+            public_card = store.upsert(PUBLIC_OWNER_CARD_TITLE, "Sona's local Codex agent")
             store.add("a" * 20)
             prompt, memory_ids, _ = compose_prompt(
                 "Current request",
@@ -131,6 +141,7 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertIn("You are Codeshark", prompt)
             self.assertIn(owner.text, prompt)
             self.assertNotIn(owner.id, memory_ids)
+            self.assertNotIn(public_card.id, memory_ids)
 
     def test_compose_prompt_includes_only_selected_skill(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

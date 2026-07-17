@@ -16,6 +16,7 @@ from .identity import (
     AGENT_NAME_TITLE,
     DEFAULT_AGENT_NAME,
     OWNER_PROFILE_TITLE,
+    PUBLIC_OWNER_CARD_TITLE,
     owner_onboarding_message,
 )
 from .learning import (
@@ -45,6 +46,7 @@ Plain text: submit a task to the current Codex session
 /status: show the active task, queue, and session
 /new: delete the current session and start fresh
 /name NAME: set Codeshark's self-introduction name
+/owner_public TEXT: set the public owner card for group introductions
 /remember TEXT: explicitly store a long-term memory
 /memories, /forget ID: manage long-term memories
 /recall QUERY: search learned memories and skills with provenance
@@ -281,6 +283,8 @@ class AgentApp:
             self._start_new_session(chat_id)
         elif command == "/name":
             self._set_agent_name(chat_id, argument)
+        elif command == "/owner_public":
+            self._set_public_owner_card(chat_id, argument)
         elif command == "/remember":
             self._remember(chat_id, argument)
         elif command == "/memories":
@@ -592,6 +596,7 @@ class AgentApp:
                 task.prompt,
                 task_id=task.id,
                 agent_name=self._agent_name(),
+                public_owner_card=self._public_owner_card(),
                 context=context,
             )
             memory_ids: tuple[str, ...] = ()
@@ -863,6 +868,10 @@ class AgentApp:
         item = self.memory.find_by_title(OWNER_PROFILE_TITLE)
         return item.text if item is not None else None
 
+    def _public_owner_card(self) -> str | None:
+        item = self.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE)
+        return item.text if item is not None else None
+
     def _request_owner_onboarding(self, chat_id: int) -> None:
         if self._owner_profile() is not None or self.state.owner_onboarding_requested():
             return
@@ -886,6 +895,30 @@ class AgentApp:
             self._send_message(chat_id, f"Could not change the agent name: {exc}")
             return
         self._send_message(chat_id, f"Agent name changed to {name}.")
+
+    def _set_public_owner_card(self, chat_id: int, argument: str) -> None:
+        card = " ".join(argument.split())
+        if card.casefold() in {"clear", "none", "off"}:
+            existing = self.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE)
+            if existing is not None:
+                self.memory.forget(existing.id)
+            self._send_message(chat_id, "Public owner card cleared.")
+            return
+        if not card:
+            self._send_message(chat_id, "Usage: /owner_public TEXT (or /owner_public clear)")
+            return
+        if len(card) > 500 or any(ord(character) < 32 for character in card):
+            self._send_message(
+                chat_id,
+                "The public owner card must be a single line of at most 500 characters.",
+            )
+            return
+        try:
+            self.memory.upsert(PUBLIC_OWNER_CARD_TITLE, card)
+        except ValueError as exc:
+            self._send_message(chat_id, f"Could not update the public owner card: {exc}")
+            return
+        self._send_message(chat_id, "Public owner card updated.")
 
     def _requires_admin_approval(self, prompt: str) -> bool:
         return not self.config.admin_full_access and self.risk_policy.requires_approval(prompt)
