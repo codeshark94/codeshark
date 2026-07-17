@@ -830,6 +830,7 @@ class AgentApp:
             if task.ephemeral
             else self.state.session_snapshot(task.chat_id, project).codex_thread_id
         )
+        delivery_started_at_ns = time.time_ns() if file_delivery_requested else None
         result = runner.run(
             prompt,
             thread_id,
@@ -857,6 +858,10 @@ class AgentApp:
             delivery_files, unavailable_files = self._resolve_delivery_files(
                 marked_paths, min_modified_at_ns=None
             )
+            if not delivery_files and not marked_paths:
+                fallback = self._latest_deliverable_file(delivery_started_at_ns)
+                if fallback is not None:
+                    delivery_files = (fallback,)
             if not delivery_files:
                 clean_message = (
                     "The task completed, but no requested file was attached. "
@@ -1261,6 +1266,27 @@ class AgentApp:
             elif document not in files:
                 files.append(document)
         return tuple(files), rejected
+
+    def _latest_deliverable_file(self, min_modified_at_ns: int | None) -> Path | None:
+        deliverables = self.config.workdir / "deliverables"
+        try:
+            candidates = [path for path in deliverables.iterdir() if path.is_file()]
+        except OSError:
+            return None
+        resolved: list[tuple[int, Path]] = []
+        for candidate in candidates:
+            document = self._resolve_delivery_file(str(candidate), None)
+            if document is None:
+                continue
+            try:
+                modified_at_ns = document.stat().st_mtime_ns
+            except OSError:
+                continue
+            resolved.append((modified_at_ns, document))
+        if not resolved:
+            return None
+        fresh = [item for item in resolved if min_modified_at_ns is not None and item[0] >= min_modified_at_ns]
+        return max(fresh or resolved, key=lambda item: item[0])[1]
 
     def _resolve_delivery_file(
         self,
@@ -1981,4 +2007,5 @@ class AgentApp:
                 reply_to_message_id=reply_to_message_id,
             )
             return False
+        LOGGER.info("delivered Telegram document %s to chat_id=%s", document.name, chat_id)
         return True

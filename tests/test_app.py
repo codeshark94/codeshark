@@ -1152,6 +1152,28 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             ],
         )
 
+    def test_file_request_falls_back_to_the_latest_safe_deliverable(self) -> None:
+        deliverables = self.app.config.workdir / "deliverables"
+        deliverables.mkdir()
+        report = deliverables / "completed-report.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="The report is complete.",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "PDF 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(self.api.events[0][0], "document")
+        self.assertEqual(self.api.messages, [(123, "The report is complete.")])
+
     def test_final_artifact_request_delivers_the_completed_file_in_one_response(self) -> None:
         report = self.app.config.workdir / "completed-manuscript.pdf"
         report.write_bytes(b"%PDF-1.4")
