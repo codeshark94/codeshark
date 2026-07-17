@@ -686,6 +686,26 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.documents, [(123, report.resolve(), self.app.config.attachment_max_bytes)])
         self.assertEqual(self.api.messages, [])
 
+    def test_pdf_request_delivers_a_markdown_linked_result_file(self) -> None:
+        report = self.app.config.workdir / "simulation_campaign_plan.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"PDF here is the latest result.\n\n- [{report.name}]({report})",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "Pdf 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
+        self.assertEqual(self.api.documents, [(123, report.resolve(), self.app.config.attachment_max_bytes)])
+        self.assertEqual(self.api.messages, [(123, "PDF here is the latest result.")])
+
     def test_document_is_saved_inside_workspace_and_queued_without_progress(self) -> None:
         update = self.update(123, "unused")
         update["message"].pop("text")
