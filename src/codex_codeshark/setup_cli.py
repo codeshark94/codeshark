@@ -5,10 +5,13 @@ import subprocess
 import time
 
 from .config import (
+    DEFAULT_CODEX_BINARY,
     DEFAULT_CODEX_PROFILE,
+    ConfigError,
     load_config,
     prepare_group_runtime,
     prompt_and_store_bot_token,
+    validate_codex_version,
     write_codex_profile,
     write_local_config,
 )
@@ -16,8 +19,17 @@ from .telegram_api import TelegramAPI
 
 
 def interactive_setup() -> int:
+    if not DEFAULT_CODEX_BINARY.is_file():
+        print("Codex desktop is not installed. Install it in /Applications and sign in first.")
+        return 1
+    try:
+        validate_codex_version(DEFAULT_CODEX_BINARY)
+    except ConfigError as exc:
+        print(f"Codex CLI is not ready: {exc}")
+        return 1
+
     login = subprocess.run(
-        ["/Applications/Codex.app/Contents/Resources/codex", "login", "status"],
+        [str(DEFAULT_CODEX_BINARY), "login", "status"],
         capture_output=True,
         text=True,
         check=False,

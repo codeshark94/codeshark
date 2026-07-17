@@ -25,6 +25,7 @@ PROJECT_ROOT = Path(
 DEFAULT_CODEX_HOME = Path(
     os.environ.get("CODEX_HOME", Path.home() / ".codex")
 ).expanduser().resolve()
+DEFAULT_CODEX_BINARY = Path("/Applications/Codex.app/Contents/Resources/codex")
 _DEFAULT_GROUP_RUNTIME_ROOT = Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "group"
 GROUP_RUNTIME_ROOT = Path(
     os.environ.get("CODEX_CODESHARK_GROUP_HOME", _DEFAULT_GROUP_RUNTIME_ROOT)
@@ -480,7 +481,7 @@ def write_local_config(
     workdir.mkdir(parents=True, exist_ok=True)
     workdir.chmod(0o700)
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    codex_binary = Path("/Applications/Codex.app/Contents/Resources/codex")
+    codex_binary = DEFAULT_CODEX_BINARY
     known_mcp_servers = sorted(
         configured_mcp_servers(DEFAULT_CODEX_PROFILE, codex_home=codex_home)
     )

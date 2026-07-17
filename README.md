@@ -86,14 +86,27 @@ Interactive work continues a persisted Codex thread. Scheduled work runs ephemer
 - An active Codex login
 - A bot token created with [BotFather](https://t.me/BotFather)
 
-### 1. Clone
+### 1. Install
+
+Run this one command in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Younghegalian/codeshark/main/scripts/install.sh | sh
+```
+
+It installs or fast-forwards Codeshark in `~/.codeshark`, then runs guided setup, the live diagnostic, and the background service. The only interactive steps are intentionally private: enter the BotFather token at a hidden prompt and send the displayed `/pair` command from your Telegram account. The token is stored only in macOS Keychain.
+
+To use another installation directory, set `CODESHARK_INSTALL_DIR` before running the command. If an existing checkout has local edits, the installer stops rather than overwriting them.
+
+For a source checkout instead, clone the repository and run the same installer from its root:
 
 ```bash
 git clone https://github.com/Younghegalian/codeshark.git Codex-codeshark
 cd Codex-codeshark
+CODESHARK_INSTALL_DIR="$PWD" ./scripts/install.sh
 ```
 
-### 2. Configure the agent
+### 2. Manual setup (optional)
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark setup
@@ -103,7 +116,7 @@ The guided setup verifies Codex, stores the bot token in macOS Keychain, pairs o
 
 See the [chat interface guide](docs/telegram.md) for pairing, commands, optional group access, and delivery troubleshooting.
 
-### 3. Verify and start
+### 3. Manual verify and start (optional)
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark doctor

@@ -10,6 +10,12 @@ Create a bot with [BotFather](https://t.me/BotFather), then run:
 PYTHONPATH=src python3 -m codex_codeshark setup
 ```
 
+For a fresh installation, the one-command installer runs this setup, `doctor`, and the background service in sequence:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Younghegalian/codeshark/main/scripts/install.sh | sh
+```
+
 The guided setup:
 
 1. Verifies the existing Codex login.
