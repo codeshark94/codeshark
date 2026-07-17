@@ -92,6 +92,67 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIn('"expectedTurnId":"turn-1"', payload)
         self.assertIn('focus on tests', payload)
 
+    def test_retries_app_server_after_rejected_tool_timeout(self) -> None:
+        rejected = SimpleNamespace(
+            exit_code=1,
+            message="",
+            thread_id="thread-1",
+            stderr="Codex turn did not complete\ntimeout_ms must be at least 10000",
+            cancelled=False,
+            timed_out=False,
+        )
+        completed = SimpleNamespace(
+            exit_code=0,
+            message="done",
+            thread_id="thread-1",
+            stderr="",
+            cancelled=False,
+            timed_out=False,
+        )
+        with patch.object(
+            self.runner,
+            "_run_app_server",
+            side_effect=[rejected, completed],
+        ) as run:
+            result = self.runner.run("repair the figure", None)
+
+        self.assertEqual(result, completed)
+        self.assertEqual(run.call_count, 2)
+        retry_prompt, retry_thread_id = run.call_args.args[:2]
+        self.assertEqual(retry_thread_id, "thread-1")
+        self.assertIn("timeout_ms", retry_prompt)
+        self.assertIn("10000", retry_prompt)
+
+    def test_retries_ephemeral_run_after_rejected_tool_timeout(self) -> None:
+        rejected = SimpleNamespace(
+            exit_code=1,
+            message="",
+            thread_id="thread-1",
+            stderr="timeout_ms must be at least 10000",
+            cancelled=False,
+            timed_out=False,
+        )
+        completed = SimpleNamespace(
+            exit_code=0,
+            message="done",
+            thread_id="thread-1",
+            stderr="",
+            cancelled=False,
+            timed_out=False,
+        )
+        with patch.object(
+            self.runner,
+            "_run_exec",
+            side_effect=[rejected, completed],
+        ) as run:
+            result = self.runner.run("validate", None, ephemeral=True)
+
+        self.assertEqual(result, completed)
+        self.assertEqual(run.call_count, 2)
+        retry_prompt, retry_thread_id = run.call_args.args[:2]
+        self.assertEqual(retry_thread_id, "thread-1")
+        self.assertIn("timeout_ms", retry_prompt)
+
     def test_app_server_reader_keeps_buffered_protocol_messages(self) -> None:
         read_descriptor, write_descriptor = os.pipe()
         stream = os.fdopen(read_descriptor, "r", encoding="utf-8")

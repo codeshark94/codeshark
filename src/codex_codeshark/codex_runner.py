@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import select
 import shutil
 import signal
@@ -44,6 +45,9 @@ def parse_codex_events(output: str) -> tuple[str, str | None]:
 
 
 class CodexRunner:
+    _TOOL_TIMEOUT_VALIDATION_ERROR = re.compile(
+        r"timeout_ms must be at least 10000", re.IGNORECASE
+    )
     _CHILD_ENV_ALLOWLIST = {
         "CODEX_HOME",
         "HOME",
@@ -344,13 +348,21 @@ class CodexRunner:
         full_access: bool = False,
     ) -> RunResult:
         if not ephemeral and not restricted:
-            return self._run_app_server(
+            result = self._run_app_server(
                 prompt,
                 thread_id,
                 approved=approved,
                 full_access=full_access,
             )
-        return self._run_exec(
+            if not self._requires_timeout_retry(result):
+                return result
+            return self._run_app_server(
+                self._timeout_retry_prompt(prompt, resumed=result.thread_id is not None),
+                result.thread_id,
+                approved=approved,
+                full_access=full_access,
+            )
+        result = self._run_exec(
             prompt,
             thread_id,
             ephemeral=ephemeral,
@@ -358,6 +370,38 @@ class CodexRunner:
             approved=approved,
             full_access=full_access,
         )
+        if not self._requires_timeout_retry(result):
+            return result
+        retry_thread_id = None if restricted else result.thread_id
+        return self._run_exec(
+            self._timeout_retry_prompt(prompt, resumed=retry_thread_id is not None),
+            retry_thread_id,
+            ephemeral=ephemeral,
+            restricted=restricted,
+            approved=approved,
+            full_access=full_access,
+        )
+
+    @classmethod
+    def _requires_timeout_retry(cls, result: RunResult) -> bool:
+        return (
+            result.exit_code != 0
+            and not result.cancelled
+            and not result.timed_out
+            and bool(cls._TOOL_TIMEOUT_VALIDATION_ERROR.search(result.stderr))
+        )
+
+    @staticmethod
+    def _timeout_retry_prompt(prompt: str, *, resumed: bool) -> str:
+        recovery = (
+            "[Codeshark recovery]\n"
+            "The preceding turn stopped because a tool call used timeout_ms below the 10000 ms "
+            "minimum. That rejected call did not run. Continue from the existing workspace and "
+            "thread state without repeating completed work or an external side effect. When using a "
+            "tool, omit timeout_ms or set it to at least 10000. Complete the requested task.\n"
+            "[/Codeshark recovery]"
+        )
+        return recovery if resumed else f"{prompt}\n\n{recovery}"
 
     def _run_exec(
         self,
