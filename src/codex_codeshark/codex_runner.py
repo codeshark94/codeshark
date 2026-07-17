@@ -120,7 +120,7 @@ class CodexRunner:
         return env
 
     def _restricted_config_args(self) -> list[str]:
-        filesystem = '{":minimal"="read",":workspace_roots"={"."="read"}}'
+        filesystem = '{":minimal"="read",":workspace_roots"={"."="write"}}'
         args = [
             "-c",
             'default_permissions="codeshark_group"',
@@ -129,11 +129,11 @@ class CodexRunner:
             "-c",
             f"permissions.codeshark_group.filesystem={filesystem}",
             "-c",
-            "permissions.codeshark_group.network.enabled=false",
+            "permissions.codeshark_group.network.enabled=true",
             "-c",
             'approval_policy="never"',
             "-c",
-            'web_search="disabled"',
+            'web_search="live"',
             "-c",
             "features.apps=false",
             "-c",
@@ -350,6 +350,7 @@ class CodexRunner:
                 self._process = None
             if restricted:
                 self._cleanup_restricted_home()
+                self._cleanup_restricted_workspace()
 
         message, returned_thread_id = parse_codex_events(stdout)
         return RunResult(
@@ -368,6 +369,18 @@ class CodexRunner:
         for path in self.restricted_codex_home.iterdir():
             if path.name in retained:
                 continue
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _cleanup_restricted_workspace(self) -> None:
+        if not self.restricted_workdir.is_dir():
+            return
+        for path in self.restricted_workdir.iterdir():
             try:
                 if path.is_dir() and not path.is_symlink():
                     shutil.rmtree(path)

@@ -89,8 +89,33 @@ class RiskPolicy:
         re.IGNORECASE,
     )
 
+    _GROUP_ADMIN_PATTERN = re.compile(
+        r"(?:\b(?:delete|remove|erase|overwrite|wipe|shred|truncate|rmdir|drop|format|purge)\b|"
+        r"\brm\s+(?:-[A-Za-z]*r|--recursive)|\bgit\s+(?:reset\s+--hard|clean\s+-[A-Za-z]*f)|"
+        r"삭제|제거|지워|덮어쓰|초기화|파기|"
+        r"\b(?:install|uninstall)\b.{0,60}\b(?:dependency|package|plugin)|"
+        r"\b(?:dependency|package|plugin)\b.{0,60}\b(?:install|uninstall)|"
+        r"(?:의존성|패키지|플러그인).{0,30}(?:설치|제거)|"
+        r"\b(?:read|show|reveal|export|use|access|list|change|modify|edit|disable|enable|bypass|override)\b"
+        r".{0,60}\b(?:credential|credentials|secret|password|token|api[ _-]?key|auth(?:entication)?|"
+        r"ssh|keychain|identity|permission|policy|sandbox|allowlist|administrator|admin|"
+        r"workdir|workspace root|delegated root|read[ _-]?only root|codex[ _-]?home)\b|"
+        r"(?:자격증명|비밀|비밀번호|토큰|API\s*키|인증|키체인|권한|정책|샌드박스|"
+        r"관리자|루트).{0,30}(?:읽|보여|공개|내보내|사용|접근|변경|수정|비활성|활성|우회)|"
+        r"\b(?:deploy|publish|release|push|merge|post|send|email|pay|purchase|buy)\b|"
+        r"\b(?:create|close|comment|reply|invite)\b.{0,40}"
+        r"\b(?:issue|pull request|event|message|email)\b|"
+        r"(?:배포|게시|발행|릴리스|푸시|병합|전송|메일|결제|구매)|"
+        r"(?:이슈|풀 리퀘스트|PR|일정|메시지|메일).{0,20}"
+        r"(?:생성|만들|닫|댓글|답장|초대))",
+        re.IGNORECASE,
+    )
+
     def requires_approval(self, prompt: str) -> bool:
         return bool(self._PATTERN.search(prompt))
+
+    def requires_group_admin_privileges(self, prompt: str) -> bool:
+        return bool(self._GROUP_ADMIN_PATTERN.search(prompt))
 
 
 def _parse_cron_field(value: str, minimum: int, maximum: int) -> tuple[set[int], bool]:

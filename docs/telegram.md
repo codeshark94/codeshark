@@ -85,7 +85,7 @@ Plain text queues a task in the current interactive Codex session. A photo or do
 
 ## Optional group access
 
-Group access is disabled by default. Only the paired administrator can enable it, and group members receive an isolated, read-only agent with no access to administrator sessions, memories, skills, projects, attachments, network, MCP tools, or write access.
+Group access is disabled by default. Only the paired administrator can enable it. In an enabled group, the administrator retains the same capabilities and approval flow as in a private chat, while each private or group chat keeps an independent persistent Codex session. Other group members receive an isolated ephemeral agent with no access to administrator sessions, memories, skills, projects, attachments, credentials, or configured roots. They may perform ordinary network research and can inspect, create, or modify files only in the separate group sandbox; that sandbox is cleared after every request. MCP tools, dependency or plugin installation, destructive changes, policy/root changes, and external state-changing work remain unavailable to non-administrators.
 
 For natural-language mentions, disable Privacy Mode for the bot with BotFather's `/setprivacy` command. Telegram does not deliver ordinary mention messages to privacy-enabled bots. Codex-codeshark still discards every received group message that does not explicitly mention the bot username.
 
@@ -96,16 +96,17 @@ Add the bot to a group, then send:
 @YourBotUsername Explain what a Python context manager does
 ```
 
-Each member's six newest successful exchanges are retained only for that member in that group and expire after 30 days. Disabling a group deletes its participant context.
+Each non-administrator member's six newest successful exchanges are retained only for that member in that group and expire after 30 days. Disabling a group deletes its participant context. Administrator commands from an enabled group have the same effect as their private-chat equivalents.
 
 | Command | Who can use it | Purpose |
 |---|---|---|
-| `/enable_group` | Paired administrator, in the group | Enable restricted mention requests. |
+| `/enable_group` | Paired administrator, in the group | Enable mention requests. |
 | `/disable_group` | Paired administrator, in the group | Revoke access immediately. |
 | `/group_status` | Paired administrator, in the group | Show whether the group is enabled. |
-| `@BotUsername REQUEST` | Member of an enabled group | Continue that member's isolated conversation. |
-| `/groups` | Paired administrator, private chat | List enabled groups. |
-| `/disable_group CHAT_ID` | Paired administrator, private chat | Revoke a group remotely. |
+| `@BotUsername REQUEST` | Paired administrator | Continue the persistent Codex session for this chat with the same approval requirements and capabilities. |
+| `@BotUsername REQUEST` | Other member of an enabled group | Run an ephemeral network-capable analysis in the isolated group sandbox. |
+| `/groups` | Paired administrator, private chat or enabled group | List enabled groups. |
+| `/disable_group CHAT_ID` | Paired administrator, private chat or enabled group | Revoke a group remotely. |
 
 If you prefer Telegram not to deliver ordinary group messages to the bot process at all, keep Privacy Mode enabled and do not use group mention mode.
 

@@ -12,7 +12,9 @@ This repository is a private Telegram gateway for the local Codex CLI. The model
 - File writes are confined to `workspace/` by the Codex `workspace-write` sandbox.
 - Administrator tasks may inspect read-only roots and work in server-configured delegated roots.
 - One explicitly paired Telegram user is the administrator.
-- Group access must be enabled by that administrator and remains read-only, ephemeral, and isolated from administrator data.
+- Group access must be enabled by that administrator and is explicit-mention-only.
+- An administrator's authenticated identity, capabilities, and approval state carry into an enabled group. Maintain an independent persistent Codex session per administrator chat so private and group conversation context do not leak across chat boundaries.
+- Non-administrator group requests are ephemeral and isolated from administrator data, memories, sessions, credentials, and delegated/read-only roots. They may perform ordinary network research and exploration and may create or modify files only inside the server-configured group sandbox. Destructive changes, credential or identity access, policy/root changes, dependency or plugin installation, deployment or production control, and external state-changing actions remain administrator-only.
 
 ## Commands
 
@@ -33,8 +35,8 @@ PYTHONPATH=src python3 -m codex_codeshark run
 
 - Never log, print, commit, or send the Telegram bot token to Codex.
 - Keep writable, delegated, and read-only root paths server-controlled; never accept a new filesystem root from Telegram.
-- Keep the administrator allowlist mandatory and keep privileged controls private-chat-only.
-- Keep group requests administrator-enabled, explicit-mention-only, read-only, ephemeral, MCP-disabled, and isolated from private memory and sessions.
+- Keep the administrator allowlist mandatory. An administrator retains the same authorized capabilities and approval requirements in a private chat or an administrator-enabled group; do not make privileged controls private-chat-only solely because of chat type.
+- Keep group requests administrator-enabled and explicit-mention-only. Non-administrator requests must remain ephemeral, MCP-disabled, and isolated from administrator memory, sessions, credentials, and configured project roots; permit only ordinary network research/exploration and writes confined to the server-configured group sandbox.
 - Preserve cancellation, timeouts, single-worker execution, and Telegram message chunking.
 - Keep dependencies at zero unless a dependency solves a demonstrated problem.
 - Tests must not call Telegram or OpenAI networks.

@@ -117,7 +117,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_help_and_status_are_english(self) -> None:
         self.assertNotRegex(HELP_TEXT, r"[가-힣]")
-        self.assertNotRegex(self.app._status_text(), r"[가-힣]")
+        self.assertNotRegex(self.app._status_text(123), r"[가-힣]")
 
     def test_ignores_group_message(self) -> None:
         self.app._handle_update(self.update(123, "do work", chat_type="group"))
@@ -159,6 +159,111 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(task.source, "telegram-group")
         self.assertEqual(self.api.messages, [])
 
+    def test_administrator_group_request_keeps_its_own_session_and_approval_flow(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.state.set_session_thread_id(123, "private-thread")
+        self.app.state.set_session_thread_id(group_id, "group-thread")
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(
+            self.update(
+                123,
+                "@Codex_codeshark_bot deploy to production",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.list_tasks()[0]
+        self.assertEqual(task.status, "awaiting_approval")
+        self.assertFalse(task.ephemeral)
+        self.assertFalse(task.restricted)
+        self.assertEqual(task.source, "telegram")
+
+        self.app._handle_update(
+            self.update(
+                123,
+                f"/approve@Codex_codeshark_bot {task.id}",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        approved = self.app.store.claim_next_task()
+        self.assertEqual(approved.id, task.id)
+        self.assertTrue(approved.approved)
+        self.app._execute_task(approved)
+
+        _, thread_id, ephemeral, restricted, approved_flag, full_access = runner.prompts[0]
+        self.assertEqual(thread_id, "group-thread")
+        self.assertFalse(ephemeral)
+        self.assertFalse(restricted)
+        self.assertTrue(approved_flag)
+        self.assertFalse(full_access)
+        self.assertEqual(self.app.state.session_snapshot(123).codex_thread_id, "private-thread")
+        self.assertEqual(self.app.state.session_snapshot(group_id).codex_thread_id, "thread-new")
+
+    def test_administrator_group_status_and_new_apply_only_to_that_group_session(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.state.set_session_thread_id(123, "private-thread")
+        self.app.state.set_session_thread_id(group_id, "group-thread")
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(
+            self.update(123, "/status@Codex_codeshark_bot", "group", chat_id=group_id)
+        )
+        self.assertIn("group-thread", self.api.messages[-1][1])
+        self.assertNotIn("private-thread", self.api.messages[-1][1])
+
+        self.app._handle_update(
+            self.update(123, "/new@Codex_codeshark_bot", "group", chat_id=group_id)
+        )
+        self.assertEqual(runner.deleted_sessions, ["group-thread"])
+        self.assertIsNone(self.app.state.session_snapshot(group_id).codex_thread_id)
+        self.assertEqual(self.app.state.session_snapshot(123).codex_thread_id, "private-thread")
+
+    def test_administrator_group_rollover_does_not_reset_private_session(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.state.set_session_thread_id(123, "private-thread")
+        for _ in range(self.app.config.max_session_turns):
+            self.app.state.record_session_turn(group_id, "group-thread-old")
+        summary = RunResult(
+            exit_code=0,
+            message=(
+                "<learning_candidate>"
+                '{"kind":"memory","title":"Summary","content":"Durable group fact"}'
+                "</learning_candidate>"
+            ),
+            thread_id="group-thread-old",
+            stderr="",
+        )
+        runner = FakeCodexRunner(summary)
+        runner.results.append(
+            RunResult(exit_code=0, message="done", thread_id="group-thread-new", stderr="")
+        )
+        self.app.runner = runner
+
+        self.app._handle_update(
+            self.update(
+                123,
+                "@Codex_codeshark_bot do work",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(runner.deleted_sessions, ["group-thread-old"])
+        self.assertEqual(self.app.state.session_snapshot(123).codex_thread_id, "private-thread")
+        self.assertEqual(
+            self.app.state.session_snapshot(group_id).codex_thread_id,
+            "group-thread-new",
+        )
+
     def test_group_context_continues_per_requester_without_cross_user_leakage(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
@@ -187,7 +292,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("My topic is Python", same_prompt)
         self.assertIn("Recent conversation with this requester", same_prompt)
 
-    def test_group_task_has_no_admin_context_session_learning_or_write_access(self) -> None:
+    def test_group_task_has_no_admin_context_session_or_learning_access(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
         self.app.memory.add("Private administrator memory")
@@ -217,14 +322,33 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         prompt, thread_id, ephemeral, restricted, approved, full_access = runner.prompts[0]
         self.assertNotIn("Private administrator memory", prompt)
         self.assertIn("non-privileged", prompt)
+        self.assertIn("read-only network research", prompt)
+        self.assertIn("create, or modify files only", prompt)
         self.assertIsNone(thread_id)
         self.assertTrue(ephemeral)
         self.assertTrue(restricted)
         self.assertFalse(approved)
         self.assertFalse(full_access)
-        self.assertIsNone(self.app.state.snapshot().codex_thread_id)
+        self.assertIsNone(self.app.state.session_snapshot(123).codex_thread_id)
         self.assertEqual(self.app.learning.list_pending(), [])
         self.assertEqual(self.api.messages[-1], (group_id, "public answer"))
+
+    def test_group_member_can_request_network_research_and_sandbox_file_writes(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Research Python releases and write a summary to report.md",
+                "group",
+                chat_id=group_id,
+            )
+        )
+
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.assertTrue(task.ephemeral)
+        self.assertTrue(task.restricted)
 
     def test_group_risky_request_is_denied_without_queuing(self) -> None:
         group_id = -100123
@@ -278,19 +402,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
     def test_new_deletes_current_session_before_clearing_it(self) -> None:
         runner = FakeCodexRunner()
         self.app.runner = runner
-        self.app.state.set_codex_thread_id("thread-1")
+        self.app.state.set_session_thread_id(123, "thread-1")
         self.app._handle_update(self.update(123, "/new"))
         self.assertEqual(runner.deleted_sessions, ["thread-1"])
-        self.assertIsNone(self.app.state.snapshot().codex_thread_id)
+        self.assertIsNone(self.app.state.session_snapshot(123).codex_thread_id)
         self.assertIn("deleted", self.api.messages[-1][1])
 
     def test_new_keeps_current_session_when_delete_fails(self) -> None:
         runner = FakeCodexRunner()
         runner.delete_error = RuntimeError("delete failed")
         self.app.runner = runner
-        self.app.state.set_codex_thread_id("thread-1")
+        self.app.state.set_session_thread_id(123, "thread-1")
         self.app._handle_update(self.update(123, "/new"))
-        self.assertEqual(self.app.state.snapshot().codex_thread_id, "thread-1")
+        self.assertEqual(self.app.state.session_snapshot(123).codex_thread_id, "thread-1")
         self.assertIn("could not be deleted", self.api.messages[-1][1])
 
     def test_new_without_current_session_starts_fresh(self) -> None:
@@ -298,7 +422,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.runner = runner
         self.app._handle_update(self.update(123, "/new"))
         self.assertEqual(runner.deleted_sessions, [])
-        self.assertIsNone(self.app.state.snapshot().codex_thread_id)
+        self.assertIsNone(self.app.state.session_snapshot(123).codex_thread_id)
 
     def test_feedback_requires_a_successful_completed_task(self) -> None:
         self.app._handle_update(self.update(123, "/good"))
@@ -363,6 +487,29 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         app._handle_update(self.update(123, "Install a plugin and create a file"))
         task = app.store.claim_next_task()
         self.assertIsNotNone(task)
+        app._execute_task(task)
+        self.assertTrue(runner.prompts[0][4])
+        self.assertTrue(runner.prompts[0][5])
+
+    def test_full_access_admin_keeps_capabilities_in_enabled_group(self) -> None:
+        group_id = -100123
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app._bot_username = "codex_codeshark_bot"
+        app.store.enable_group(group_id, "Engineering", 123)
+        runner = FakeCodexRunner()
+        app.runner = runner
+
+        app._handle_update(
+            self.update(
+                123,
+                "@Codex_codeshark_bot Install a plugin and create a file",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = app.store.claim_next_task()
+        self.assertFalse(task.ephemeral)
+        self.assertFalse(task.restricted)
         app._execute_task(task)
         self.assertTrue(runner.prompts[0][4])
         self.assertTrue(runner.prompts[0][5])
@@ -597,11 +744,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.runner = runner
         self.app._execute_task(task)
         self.assertTrue(runner.prompts[0][2])
-        self.assertIsNone(self.app.state.snapshot().codex_thread_id)
+        self.assertIsNone(self.app.state.session_snapshot(123).codex_thread_id)
 
     def test_rotates_full_session_after_quarantining_summary(self) -> None:
         for _ in range(self.app.config.max_session_turns):
-            self.app.state.record_codex_turn("thread-old")
+            self.app.state.record_session_turn(123, "thread-old")
         summary = RunResult(
             exit_code=0,
             message=(
@@ -621,7 +768,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
         self.assertEqual(runner.deleted_sessions, ["thread-old"])
-        self.assertEqual(self.app.state.snapshot().codex_thread_id, "thread-new")
+        self.assertEqual(self.app.state.session_snapshot(123).codex_thread_id, "thread-new")
         self.assertEqual(self.app.memory.list(), [])
         self.assertEqual(self.app.learning.list_recent()[0].status, "pending")
         self.assertIn("queued", self.api.messages[-1][1])

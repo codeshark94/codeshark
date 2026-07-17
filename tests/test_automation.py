@@ -18,6 +18,19 @@ class RiskPolicyTests(unittest.TestCase):
         self.assertTrue(policy.requires_approval("이 코드 수정해"))
         self.assertFalse(policy.requires_approval("explain the code"))
 
+    def test_group_privilege_gate_allows_analysis_but_blocks_privileged_work(self) -> None:
+        policy = RiskPolicy()
+        self.assertFalse(
+            policy.requires_group_admin_privileges(
+                "research Python releases and write a summary to report.md"
+            )
+        )
+        self.assertTrue(policy.requires_group_admin_privileges("delete every file"))
+        self.assertTrue(policy.requires_group_admin_privileges("install a Python dependency"))
+        self.assertTrue(policy.requires_group_admin_privileges("read the API key"))
+        self.assertTrue(policy.requires_group_admin_privileges("create a GitHub issue"))
+        self.assertTrue(policy.requires_group_admin_privileges("deploy to production"))
+
 
 class AgentStoreTests(unittest.TestCase):
     def test_persists_and_recovers_running_task(self) -> None:

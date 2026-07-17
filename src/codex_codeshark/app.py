@@ -62,14 +62,16 @@ Plain text: submit a task to the current Codex session
 
 Writes are confined to the workspace and server-controlled delegated project roots."""
 
-GROUP_HELP_TEXT = """Group access is restricted.
+GROUP_HELP_TEXT = """Group access is enabled.
 
-@BotUsername REQUEST: continue your own bounded, read-only conversation
+@BotUsername REQUEST: submit a request
 
-Group requests cannot access administrator memories, custom skills, sessions, attachments,
-projects, network, MCP tools, file writes, or external actions. Full administrative access remains
-private-chat only. Each member's six most recent exchanges are kept for up to 30 days and are
-never shared with another member or included in personal-data migration."""
+The paired administrator keeps the same session, capabilities, and approval flow as in a private
+chat. Other members receive an ephemeral, MCP-disabled agent that can research on the network and
+inspect, create, or modify files only in the isolated group sandbox. It cannot access administrator
+data, projects, credentials, or configured roots, and it cannot perform destructive, privileged, or
+external state-changing work. Each member's six most recent exchanges are kept for up to 30 days
+and are never shared with another member or included in personal-data migration."""
 
 
 _FILE_DELIVERY_MARKER = re.compile(
@@ -126,6 +128,7 @@ class AgentApp:
         runtime_dir = config.state_path.parent
         database_path = runtime_dir / "agent.db"
         self.state = StateStore(config.state_path)
+        self.state.migrate_legacy_session(next(iter(config.allowed_user_ids)))
         self.memory = MemoryStore(
             runtime_dir / "memory.json",
             max_total_chars=config.memory_max_chars,
@@ -231,101 +234,77 @@ class AgentApp:
         command = command_parts[0].split("@", 1)[0].lower()
         argument = command_parts[1].strip() if len(command_parts) == 2 else ""
 
-        if command in {"/start", "/help"}:
-            self._send_message(chat_id, HELP_TEXT)
-            return
-        if command == "/status":
-            self._send_message(chat_id, self._status_text())
-            return
-        if command == "/new":
-            self._start_new_session(chat_id)
-            return
-        if command == "/remember":
-            self._remember(chat_id, argument)
-            return
-        if command == "/memories":
-            self._send_chunks(chat_id, self._memories_text())
-            return
-        if command == "/recall":
-            self._send_chunks(chat_id, self._recall_text(argument))
-            return
-        if command in {"/review-memories", "/review_memories"}:
-            self._send_chunks(chat_id, self._review_memories_text())
-            return
-        if command == "/forget":
-            self._forget_memory(chat_id, argument)
-            return
-        if command == "/learn":
-            self._learn(chat_id, argument)
-            return
-        if command == "/learning":
-            self._send_chunks(chat_id, self._learning_text())
-            return
-        if command == "/approve":
-            self._approve(chat_id, argument)
-            return
-        if command == "/reject":
-            self._reject(chat_id, argument)
-            return
-        if command == "/skills":
-            self._send_chunks(chat_id, self._skills_text())
-            return
-        if command in {"/forget-skill", "/forget_skill"}:
-            self._forget_skill(chat_id, argument)
-            return
-        if command == "/tasks":
-            self._send_chunks(chat_id, self._tasks_text())
-            return
-        if command == "/groups":
-            self._send_chunks(chat_id, self._groups_text())
-            return
-        if command in {"/disable-group", "/disable_group"}:
-            self._disable_group_from_private(chat_id, argument)
-            return
-        if command == "/deliveries":
-            self._send_chunks(chat_id, self._deliveries_text())
-            return
-        if command == "/send":
-            self._send_requested_file(chat_id, argument)
-            return
-        if command in {"/retry-delivery", "/retry_delivery"}:
-            self._retry_delivery(chat_id, argument)
-            return
-        if command == "/remind":
-            self._create_interval_job(chat_id, argument, kind="once")
-            return
-        if command == "/heartbeat":
-            self._create_interval_job(chat_id, argument, kind="heartbeat")
-            return
-        if command == "/cron":
-            self._create_cron_job(chat_id, argument)
-            return
-        if command == "/jobs":
-            self._send_chunks(chat_id, self._jobs_text())
-            return
-        if command == "/pause":
-            self._set_job_status(chat_id, argument, "paused")
-            return
-        if command in {"/resume-job", "/resume_job"}:
-            self._set_job_status(chat_id, argument, "enabled")
-            return
-        if command in {"/delete-job", "/delete_job"}:
-            self._delete_job(chat_id, argument)
-            return
-        if command == "/mcp":
-            self._send_message(chat_id, self._mcp_text())
-            return
-        if command in {"/good", "/bad"}:
-            self._record_feedback(chat_id, command.removeprefix("/"), argument)
-            return
-        if command == "/cancel":
-            self._cancel(chat_id)
-            return
-        if command.startswith("/"):
-            self._send_message(chat_id, "Unknown command. Use /help for the command list.")
+        if self._handle_admin_command(chat_id, command, argument):
             return
 
         self._enqueue_user_task(chat_id, text)
+
+    def _handle_admin_command(self, chat_id: int, command: str, argument: str) -> bool:
+        if command in {"/start", "/help"}:
+            self._send_message(chat_id, HELP_TEXT)
+        elif command == "/status":
+            self._send_message(chat_id, self._status_text(chat_id))
+        elif command == "/new":
+            self._start_new_session(chat_id)
+        elif command == "/remember":
+            self._remember(chat_id, argument)
+        elif command == "/memories":
+            self._send_chunks(chat_id, self._memories_text())
+        elif command == "/recall":
+            self._send_chunks(chat_id, self._recall_text(argument))
+        elif command in {"/review-memories", "/review_memories"}:
+            self._send_chunks(chat_id, self._review_memories_text())
+        elif command == "/forget":
+            self._forget_memory(chat_id, argument)
+        elif command == "/learn":
+            self._learn(chat_id, argument)
+        elif command == "/learning":
+            self._send_chunks(chat_id, self._learning_text())
+        elif command == "/approve":
+            self._approve(chat_id, argument)
+        elif command == "/reject":
+            self._reject(chat_id, argument)
+        elif command == "/skills":
+            self._send_chunks(chat_id, self._skills_text())
+        elif command in {"/forget-skill", "/forget_skill"}:
+            self._forget_skill(chat_id, argument)
+        elif command == "/tasks":
+            self._send_chunks(chat_id, self._tasks_text())
+        elif command == "/groups":
+            self._send_chunks(chat_id, self._groups_text())
+        elif command in {"/disable-group", "/disable_group"}:
+            self._disable_group_from_private(chat_id, argument)
+        elif command == "/deliveries":
+            self._send_chunks(chat_id, self._deliveries_text())
+        elif command == "/send":
+            self._send_requested_file(chat_id, argument)
+        elif command in {"/retry-delivery", "/retry_delivery"}:
+            self._retry_delivery(chat_id, argument)
+        elif command == "/remind":
+            self._create_interval_job(chat_id, argument, kind="once")
+        elif command == "/heartbeat":
+            self._create_interval_job(chat_id, argument, kind="heartbeat")
+        elif command == "/cron":
+            self._create_cron_job(chat_id, argument)
+        elif command == "/jobs":
+            self._send_chunks(chat_id, self._jobs_text())
+        elif command == "/pause":
+            self._set_job_status(chat_id, argument, "paused")
+        elif command in {"/resume-job", "/resume_job"}:
+            self._set_job_status(chat_id, argument, "enabled")
+        elif command in {"/delete-job", "/delete_job"}:
+            self._delete_job(chat_id, argument)
+        elif command == "/mcp":
+            self._send_message(chat_id, self._mcp_text())
+        elif command in {"/good", "/bad"}:
+            self._record_feedback(chat_id, command.removeprefix("/"), argument)
+        elif command == "/cancel":
+            self._cancel(chat_id)
+        elif command.startswith("/"):
+            self._send_message(chat_id, "Unknown command. Use /help for the command list.")
+        else:
+            return False
+        return True
 
     def _parse_group_command(self, text: str) -> tuple[str, str] | None:
         parts = text.strip().split(maxsplit=1)
@@ -368,13 +347,16 @@ class AgentApp:
                 chat_id,
                 f"Group access enabled. Members may mention @{self._bot_username or 'bot'} "
                 "with a natural-language request. "
-                "Each member gets a separate bounded conversation. Group requests remain "
-                "isolated from projects and administrator data.",
+                "The paired administrator retains private-chat authority; other members get "
+                "separate bounded conversations isolated from projects and administrator data.",
             )
             return
 
         if command == "/disable_group":
             if not is_admin:
+                return
+            if argument:
+                self._disable_group_from_private(chat_id, argument)
                 return
             if self.store.disable_group(chat_id):
                 self._send_message(chat_id, "Group access disabled. Queued group requests were cancelled.")
@@ -398,6 +380,9 @@ class AgentApp:
                 )
             return
 
+        if is_admin and parsed is not None and self._handle_admin_command(chat_id, command, argument):
+            return
+
         if parsed is not None and command == "/help":
             self._send_message(chat_id, GROUP_HELP_TEXT)
             return
@@ -406,6 +391,9 @@ class AgentApp:
             return
         if not request:
             self._send_message(chat_id, "Mention this bot and include a request.")
+            return
+        if is_admin:
+            self._enqueue_user_task(chat_id, request)
             return
         self._enqueue_group_task(chat_id, user_id, request)
 
@@ -422,7 +410,7 @@ class AgentApp:
         return (text[: match.start()] + text[match.end() :]).strip()
 
     def _enqueue_group_task(self, chat_id: int, user_id: int, prompt: str) -> None:
-        if self.risk_policy.requires_approval(prompt):
+        if self.risk_policy.requires_group_admin_privileges(prompt):
             self._send_message(
                 chat_id,
                 "That request requires administrator privileges. Ask the administrator privately.",
@@ -559,7 +547,7 @@ class AgentApp:
         effective_approval = task.approved or full_access
         file_delivery_requested = not task.restricted and self._file_delivery_requested(task.prompt)
         if not task.ephemeral and not task.restricted:
-            rotation_notice = self._rotate_session_if_needed()
+            rotation_notice = self._rotate_session_if_needed(task.chat_id)
         if task.restricted:
             context = (
                 self.store.group_context(task.chat_id, task.requester_id)
@@ -595,7 +583,7 @@ class AgentApp:
                 prompt += self._file_delivery_prompt()
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
-        thread_id = None if task.ephemeral else self.state.snapshot().codex_thread_id
+        thread_id = None if task.ephemeral else self.state.session_snapshot(task.chat_id).codex_thread_id
         task_started_at_ns = time.time_ns() if file_delivery_requested else None
         result = self.runner.run(
             prompt,
@@ -668,8 +656,8 @@ class AgentApp:
                 )
         return result
 
-    def _rotate_session_if_needed(self) -> str | None:
-        snapshot = self.state.snapshot()
+    def _rotate_session_if_needed(self, chat_id: int) -> str | None:
+        snapshot = self.state.session_snapshot(chat_id)
         if not snapshot.codex_thread_id or snapshot.session_turn_count < self.config.max_session_turns:
             return None
         summary_prompt = (
@@ -708,7 +696,7 @@ class AgentApp:
         except Exception:
             LOGGER.exception("failed to delete session during automatic rotation")
             return None
-        self.state.set_codex_thread_id(None)
+        self.state.set_session_thread_id(chat_id, None)
         return (
             f"The session reached its capacity and was rotated. "
             f"Its durable summary was queued as {candidate.id} for review."
@@ -783,7 +771,7 @@ class AgentApp:
         documents: tuple[Path, ...] = (),
     ) -> None:
         if persist_session and result.thread_id:
-            self.state.record_codex_turn(result.thread_id)
+            self.state.record_session_turn(chat_id, result.thread_id)
         if result.cancelled:
             self._send_message(chat_id, "The task was cancelled.")
             return
@@ -926,7 +914,7 @@ class AgentApp:
         if active:
             self._send_message(chat_id, "A task is running. Use /cancel before resetting the session.")
             return
-        thread_id = self.state.snapshot().codex_thread_id
+        thread_id = self.state.session_snapshot(chat_id).codex_thread_id
         if thread_id:
             try:
                 self.runner.delete_session(thread_id)
@@ -937,7 +925,7 @@ class AgentApp:
                     "The current Codex session could not be deleted and was kept unchanged.",
                 )
                 return
-        self.state.set_codex_thread_id(None)
+        self.state.set_session_thread_id(chat_id, None)
         self._send_message(
             chat_id,
             "The current Codex session was deleted. The next request will start a new session.",
@@ -1172,10 +1160,10 @@ class AgentApp:
                     message = "Stored the rating for the last completed task."
         self._send_message(chat_id, message)
 
-    def _status_text(self) -> str:
+    def _status_text(self, chat_id: int) -> str:
         with self._status_lock:
             active = self._active_task is not None
-        snapshot = self.state.snapshot()
+        snapshot = self.state.session_snapshot(chat_id)
         session_id = snapshot.codex_thread_id
         session = session_id[:12] + "…" if session_id else "none"
         return "\n".join(

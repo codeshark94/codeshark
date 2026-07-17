@@ -39,7 +39,7 @@ Telegram is the current remote inbox, not the product itself. The reasoning, too
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
-| Isolated guest answers | Offer bounded, mention-triggered group conversations without exposing private projects, tools, or administrator context. |
+| Isolated group analysis | Let mentioned group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
 | Service-grade operation | Persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
 
 The useful unit is a finished task:
@@ -138,15 +138,15 @@ Stable names update existing records rather than creating unbounded duplicates. 
 
 Connecting an agent to local projects deserves a small, inspectable trust boundary:
 
-- Exactly one paired administrator receives sessions, memory, tools, and control commands.
-- Unapproved requests run read-only with network, MCP, apps, browser control, and extra writable roots disabled.
-- Potentially mutating work waits for explicit approval; only the approved run receives configured write and tool capabilities.
+- Exactly one paired administrator receives the same memory, tools, and control commands in private chat or an enabled group. Each administrator chat retains its own persistent Codex session.
+- Non-administrator group requests are ephemeral, MCP-disabled, and confined to a separate sandbox; they may perform ordinary network research and create or modify only sandbox files.
+- Administrator mutations and external work wait for explicit approval; non-administrator writes are limited to the isolated group sandbox.
 - Project roots are fixed in local configuration and can never be supplied by a remote request.
 - The child process receives a strict environment allowlist; parent credentials and SSH-agent sockets are not forwarded.
 - Network access is disabled by default and set explicitly for every run.
 - MCP servers and tools are disabled unless represented in the local allowlist; inventory mismatches fail closed.
 - Attachments are size-limited, privately stored, and confined to the agent inbox.
-- Guest requests use a separate Codex home, an empty read-only workspace, an ephemeral session, and no personal context or tools.
+- Non-administrator group requests use a separate Codex home, an ephemeral session, no personal context or tools, and a workspace cleared after each run.
 - Queues, sessions, memories, skills, feedback, schedules, attachments, and failed deliveries all have retention bounds.
 - The background service runs a private versioned source snapshot instead of importing executable code from a delegated project tree.
 
@@ -189,7 +189,7 @@ The secure default keeps unapproved private work read-only. Set the following on
 admin_full_access = true
 ```
 
-In this mode, the paired administrator's private-chat tasks use Codex `danger-full-access` with no approval pause. The agent can create files outside delegated roots, use live network access, install Codex plugins, and enable configured MCP servers. Enabled Telegram groups remain isolated, mention-only, and read-only. Do not enable this mode for a shared account or a bot exposed to untrusted private users.
+In this mode, the paired administrator's tasks use Codex `danger-full-access` with no approval pause in private chat and administrator-enabled groups. The agent can create files outside delegated roots, use live network access, install Codex plugins, and enable configured MCP servers. Other group members remain mention-only, ephemeral, MCP-disabled, and confined to the separate group sandbox. Do not enable this mode for a shared account or a bot exposed to untrusted private users.
 
 ## Bounded state and migration
 

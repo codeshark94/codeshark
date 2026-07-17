@@ -13,11 +13,13 @@ from codex_codeshark.memory import (
 
 
 class MemoryStoreTests(unittest.TestCase):
-    def test_restricted_group_prompt_blocks_private_context_and_actions(self) -> None:
+    def test_restricted_group_prompt_blocks_private_context_and_privileged_actions(self) -> None:
         prompt = compose_restricted_group_prompt("Explain Python", task_id="t1")
         self.assertIn("non-privileged", prompt)
         self.assertIn("Do not use or disclose administrator memories", prompt)
-        self.assertIn("Do not modify files", prompt)
+        self.assertIn("read-only network research", prompt)
+        self.assertIn("modify files only", prompt)
+        self.assertIn("changes external state", prompt)
         self.assertNotIn("learning_candidate", prompt)
 
     def test_restricted_group_prompt_includes_only_supplied_requester_context(self) -> None:

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -181,7 +182,9 @@ class CodexRunnerTests(unittest.TestCase):
         )
         self.assertIn("/tmp/group-workspace", command)
         self.assertIn('default_permissions="codeshark_group"', command)
-        self.assertIn("permissions.codeshark_group.network.enabled=false", command)
+        self.assertIn('permissions.codeshark_group.filesystem={":minimal"="read",":workspace_roots"={"."="write"}}', command)
+        self.assertIn("permissions.codeshark_group.network.enabled=true", command)
+        self.assertIn('web_search="live"', command)
         self.assertIn("--ignore-user-config", command)
         self.assertIn("--ignore-rules", command)
         self.assertIn("--strict-config", command)
@@ -198,6 +201,26 @@ class CodexRunnerTests(unittest.TestCase):
     def test_restricted_child_environment_uses_isolated_codex_home(self) -> None:
         environment = self.runner._child_env(restricted=True)
         self.assertEqual(environment["CODEX_HOME"], "/tmp/group-codex-home")
+
+    def test_restricted_workspace_is_cleared_after_a_group_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "report.md").write_text("temporary", encoding="utf-8")
+            nested = workspace / "repository"
+            nested.mkdir()
+            (nested / "notes.txt").write_text("temporary", encoding="utf-8")
+            runner = CodexRunner(
+                binary=Path("/tmp/codex"),
+                profile="codex-codeshark",
+                workdir=Path("/tmp/workspace"),
+                restricted_workdir=workspace,
+                restricted_codex_home=Path("/tmp/group-codex-home"),
+                timeout_seconds=60,
+            )
+
+            runner._cleanup_restricted_workspace()
+
+            self.assertEqual(list(workspace.iterdir()), [])
 
     @patch("codex_codeshark.codex_runner.subprocess.run")
     def test_keeps_delete_failure_visible(self, run) -> None:
