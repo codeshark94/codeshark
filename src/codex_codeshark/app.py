@@ -73,7 +73,7 @@ Writes are confined to the workspace and server-controlled delegated project roo
 
 GROUP_HELP_TEXT = """Group access is enabled.
 
-@BotUsername REQUEST: submit a request
+@BotUsername REQUEST or reply to a Codeshark message: submit a request
 
 The paired administrator keeps the same session, capabilities, and approval flow as in a private
 chat. Other members receive an ephemeral, MCP-disabled agent that can research on the network and
@@ -385,7 +385,7 @@ class AgentApp:
             self._send_message(
                 chat_id,
                 f"Group access enabled. Members may mention @{self._bot_username or 'bot'} "
-                "with a natural-language request. "
+                "or reply to a Codeshark message with a natural-language request. "
                 "The paired administrator retains private-chat authority; other members get "
                 "separate bounded conversations isolated from projects and administrator data.",
             )
@@ -412,7 +412,7 @@ class AgentApp:
 
         enabled = self.store.is_group_enabled(chat_id)
         if not enabled:
-            if is_admin and self._extract_group_mention(text) is not None:
+            if is_admin and self._extract_group_request(message) is not None:
                 self._send_message(
                     chat_id,
                     "Group access is disabled. The paired administrator must run /enable_group.",
@@ -425,7 +425,7 @@ class AgentApp:
         if parsed is not None and command == "/help":
             self._send_message(chat_id, GROUP_HELP_TEXT)
             return
-        request = self._extract_group_mention(text)
+        request = self._extract_group_request(message)
         if request is None:
             return
         if not request:
@@ -436,7 +436,10 @@ class AgentApp:
             return
         self._enqueue_group_task(chat_id, user_id, request)
 
-    def _extract_group_mention(self, text: str) -> str | None:
+    def _extract_group_request(self, message: dict) -> str | None:
+        text = message.get("text")
+        if not isinstance(text, str):
+            return None
         if self._bot_username is None:
             return None
         pattern = re.compile(
@@ -444,9 +447,14 @@ class AgentApp:
             flags=re.IGNORECASE,
         )
         match = pattern.search(text)
-        if match is None:
-            return None
-        return (text[: match.start()] + text[match.end() :]).strip()
+        if match is not None:
+            return (text[: match.start()] + text[match.end() :]).strip()
+        reply = message.get("reply_to_message")
+        sender = reply.get("from") if isinstance(reply, dict) else None
+        username = sender.get("username") if isinstance(sender, dict) else None
+        if isinstance(username, str) and username.casefold() == self._bot_username.casefold():
+            return text.strip()
+        return None
 
     def _enqueue_group_task(self, chat_id: int, user_id: int, prompt: str) -> None:
         if self.risk_policy.requires_group_admin_privileges(prompt):

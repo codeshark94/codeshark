@@ -109,17 +109,23 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         *,
         chat_id: int | None = None,
         title: str | None = None,
+        reply_to_bot: bool = False,
     ) -> dict:
         chat = {"id": user_id if chat_id is None else chat_id, "type": chat_type}
         if title is not None:
             chat["title"] = title
+        message = {
+            "from": {"id": user_id},
+            "chat": chat,
+            "text": text,
+        }
+        if reply_to_bot:
+            message["reply_to_message"] = {
+                "from": {"username": "codex_codeshark_bot", "is_bot": True}
+            }
         return {
             "update_id": 1,
-            "message": {
-                "from": {"id": user_id},
-                "chat": chat,
-                "text": text,
-            },
+            "message": message,
         }
 
     def test_ignores_unauthorized_user(self) -> None:
@@ -198,7 +204,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, "/owner_public clear"))
         self.assertIsNone(self.app.memory.find_by_title(PUBLIC_OWNER_CARD_TITLE))
 
-    def test_admin_enables_group_and_members_get_restricted_mentions_only(self) -> None:
+    def test_admin_enables_group_and_members_get_restricted_direct_requests_only(self) -> None:
         group_id = -100123
         self.app._handle_update(
             self.update(
@@ -232,6 +238,26 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(task.requester_id, 456)
         self.assertEqual(task.source, "telegram-group")
         self.assertEqual(self.api.messages, [])
+
+    def test_group_member_can_reply_to_a_codeshark_message_without_a_mention(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "Explain Python",
+                "supergroup",
+                chat_id=group_id,
+                reply_to_bot=True,
+            )
+        )
+
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.assertTrue(task.ephemeral)
+        self.assertTrue(task.restricted)
+        self.assertEqual(task.prompt, "Explain Python")
 
     def test_administrator_group_request_keeps_its_own_session_and_approval_flow(self) -> None:
         group_id = -100123

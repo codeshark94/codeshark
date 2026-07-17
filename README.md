@@ -40,7 +40,7 @@ Telegram is the current remote inbox, not the product itself. The reasoning, too
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Result delivery | Ask for a result file to be shown or sent, and receive an allowed workspace or project file as a Telegram document. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
-| Isolated group analysis | Let mentioned group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
+| Isolated group analysis | Let directly addressed group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
 | Service-grade operation | Persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
 
 The useful unit is a finished task:
@@ -190,7 +190,7 @@ The secure default keeps unapproved private work read-only. Set the following on
 admin_full_access = true
 ```
 
-In this mode, the paired administrator's tasks use Codex `danger-full-access` with no approval pause in private chat and administrator-enabled groups. The agent can create files outside delegated roots, use live network access, install Codex plugins, and enable configured MCP servers. Other group members remain mention-only, ephemeral, MCP-disabled, and confined to the separate group sandbox. Do not enable this mode for a shared account or a bot exposed to untrusted private users.
+In this mode, the paired administrator's tasks use Codex `danger-full-access` with no approval pause in private chat and administrator-enabled groups. The agent can create files outside delegated roots, use live network access, install Codex plugins, and enable configured MCP servers. Other group members remain direct-address-only (mention or reply), ephemeral, MCP-disabled, and confined to the separate group sandbox. Do not enable this mode for a shared account or a bot exposed to untrusted private users.
 
 ## Bounded state and migration
 

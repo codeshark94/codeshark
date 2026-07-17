@@ -93,24 +93,25 @@ To receive a generated or existing result file, ask naturally (for example, `작
 
 Group access is disabled by default. Only the paired administrator can enable it. In an enabled group, the administrator retains the same capabilities and approval flow as in a private chat, while each private or group chat keeps an independent persistent Codex session. Other group members receive an isolated ephemeral agent with no access to administrator sessions, memories, skills, projects, attachments, credentials, or configured roots. They may perform ordinary network research and can inspect, create, or modify files only in the separate group sandbox; that sandbox is cleared after every request. MCP tools, dependency or plugin installation, destructive changes, policy/root changes, and external state-changing work remain unavailable to non-administrators.
 
-For natural-language mentions, disable Privacy Mode for the bot with BotFather's `/setprivacy` command. Telegram does not deliver ordinary mention messages to privacy-enabled bots. Codex-codeshark still discards every received group message that does not explicitly mention the bot username.
+For natural-language mentions, disable Privacy Mode for the bot with BotFather's `/setprivacy` command. Telegram does not deliver ordinary mention messages to privacy-enabled bots. Codeshark accepts only direct group requests: an explicit bot mention or a reply to one of its own messages. Replies are usable whenever Telegram delivers them to the bot.
 
 Add the bot to a group, then send:
 
 ```text
 /enable_group@YourBotUsername
 @YourBotUsername Explain what a Python context manager does
+Reply to a Codeshark message: Explain what a Python context manager does
 ```
 
 Each non-administrator member's six newest successful exchanges are retained only for that member in that group and expire after 30 days. Disabling a group deletes its participant context. Administrator commands from an enabled group have the same effect as their private-chat equivalents.
 
 | Command | Who can use it | Purpose |
 |---|---|---|
-| `/enable_group` | Paired administrator, in the group | Enable mention requests. |
+| `/enable_group` | Paired administrator, in the group | Enable direct group requests. |
 | `/disable_group` | Paired administrator, in the group | Revoke access immediately. |
 | `/group_status` | Paired administrator, in the group | Show whether the group is enabled. |
-| `@BotUsername REQUEST` | Paired administrator | Continue the persistent Codex session for this chat with the same approval requirements and capabilities. |
-| `@BotUsername REQUEST` | Other member of an enabled group | Run an ephemeral network-capable analysis in the isolated group sandbox. |
+| `@BotUsername REQUEST` or reply to Codeshark | Paired administrator | Continue the persistent Codex session for this chat with the same approval requirements and capabilities. |
+| `@BotUsername REQUEST` or reply to Codeshark | Other member of an enabled group | Run an ephemeral network-capable analysis in the isolated group sandbox. |
 | `/groups` | Paired administrator, private chat or enabled group | List enabled groups. |
 | `/disable_group CHAT_ID` | Paired administrator, private chat or enabled group | Revoke a group remotely. |
 
@@ -131,7 +132,7 @@ PYTHONPATH=src python3 -m codex_codeshark logs --lines 100
 | Invalid bot token | Rerun `setup` and paste only the token shown by BotFather. |
 | TLS verification failure | The client uses the verified macOS `/etc/ssl/cert.pem` fallback without disabling verification. |
 | Bot does not answer | Confirm the service is running and the message came from the paired private chat. |
-| Group mention is ignored | Confirm the group is enabled, Privacy Mode is disabled, and the message contains `@YourBotUsername`. |
+| Group request is ignored | Confirm the group is enabled and the message either mentions `@YourBotUsername` or replies to a Codeshark message. Disable Privacy Mode for natural-language mentions. |
 | Final result did not arrive | Check `/deliveries`, then use `/retry_delivery ID`. |
 
 The bot token must never be committed, logged, printed, or passed to Codex. It remains in macOS Keychain and is excluded from the Codex child environment.
