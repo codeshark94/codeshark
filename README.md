@@ -38,6 +38,7 @@ Telegram is the current remote inbox, not the product itself. The reasoning, too
 | Durable memory | Recall useful preferences and project conventions, then load only the relevant memories and skills for the current task. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
+| Result delivery | Ask for a result file to be shown or sent, and receive an allowed workspace or project file as a Telegram document. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
 | Isolated group analysis | Let mentioned group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
 | Service-grade operation | Persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |

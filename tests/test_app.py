@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -13,6 +14,7 @@ from codex_codeshark.telegram_api import TelegramError
 class FakeTelegramAPI:
     def __init__(self) -> None:
         self.messages = []
+        self.documents = []
 
     def send_message(self, chat_id, text) -> None:
         self.messages.append((chat_id, text))
@@ -20,6 +22,9 @@ class FakeTelegramAPI:
     def download_file(self, file_id, destination, *, max_bytes) -> int:
         destination.write_bytes(b"attachment")
         return 10
+
+    def send_document(self, chat_id, document, *, max_bytes) -> None:
+        self.documents.append((chat_id, document, max_bytes))
 
 
 class FakeCodexRunner:
@@ -660,6 +665,27 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(task)
         self.assertEqual(self.api.messages, [(123, "done")])
 
+    def test_korean_result_file_request_delivers_an_existing_output(self) -> None:
+        report = self.app.config.workdir / "result-report.txt"
+        report.write_text("completed", encoding="utf-8")
+        os.utime(report, (1, 1))
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"[[CODESHARK_SEND_FILE: {report}]]",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "작업한 결과파일 보여줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
+        self.assertEqual(self.api.documents, [(123, report.resolve(), self.app.config.attachment_max_bytes)])
+        self.assertEqual(self.api.messages, [])
+
     def test_document_is_saved_inside_workspace_and_queued_without_progress(self) -> None:
         update = self.update(123, "unused")
         update["message"].pop("text")
@@ -771,7 +797,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.state.session_snapshot(123).codex_thread_id, "thread-new")
         self.assertEqual(self.app.memory.list(), [])
         self.assertEqual(self.app.learning.list_recent()[0].status, "pending")
-        self.assertIn("queued", self.api.messages[-1][1])
+        self.assertEqual(self.api.messages[-1], (123, "done"))
 
 
 if __name__ == "__main__":

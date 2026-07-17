@@ -32,6 +32,8 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 
 Plain text queues a task in the current interactive Codex session. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction.
 
+To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘` or `send the report file`). The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
+
 ### Sessions and tasks
 
 | Command | Purpose |
