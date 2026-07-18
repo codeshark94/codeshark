@@ -35,13 +35,13 @@ Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a 
 | Project-scoped context | Continue a separate Codex session for each named project across requests and process restarts. |
 | Durable memory | Keep long-term memories and assistant assets scoped to the active project; load only that project's records. |
 | Global identity and skills | Keep Codeshark's name, owner profile, and reusable skills available across projects without mixing project facts. |
-| Independent cross-validation | For substantive code, analysis, research, document, or artifact work, run the primary task, validate it in a fresh read-only session, then resume the primary session to reconcile findings. |
+| Task-routed execution | Classify each request before execution: direct answers use one session, focused work uses the primary agent, substantive work adds independent validation, and complex or high-assurance work adds a read-only planning pass. Internal outputs never replace the primary agent's final response. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. Use `/file_delivery on` to attach new final files automatically for a chat. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
 | Isolated group analysis | Let directly addressed group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
-| Service-grade operation | Run up to three independent tasks concurrently, persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
+| Service-grade operation | Run the configured number of independent tasks concurrently, persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
 
 The useful unit is a finished task:
 
@@ -76,7 +76,7 @@ and allowlisted tools     feedback, and bounded state
               Final result
 ```
 
-Interactive work continues a persisted Codex thread within the active project. Use `/project NAME` to switch: each project has its own temporary Codex session, long-term memories, and assistant assets. `/clear_temp` (or `/new`) deletes only the current project's temporary session; it never deletes long-term records. A safe private-chat follow-up sent during an active task steers that live Codex turn only when it belongs to the same active project. Scheduled work retains the project selected when it was created and runs ephemerally. Up to three independent tasks run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
+Interactive work continues a persisted Codex thread within the active project. Use `/project NAME` to switch: each project has its own temporary Codex session, long-term memories, and assistant assets. `/clear_temp` (or `/new`) deletes only the current project's temporary session; it never deletes long-term records. A safe private-chat follow-up sent during an active task steers that live Codex turn only when it belongs to the same active project. Scheduled work retains the project selected when it was created and runs ephemerally. The configured number of independent tasks can run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
 
 ## Quick start
 
@@ -180,13 +180,21 @@ Delegate one or more local project roots:
 delegated_roots = ["/Users/yourname/workspace"]
 ```
 
-Set the local parallel execution limit from one to three workers:
+Set local task concurrency for this Mac. There is no gateway-imposed three-worker cap:
 
 ```toml
-worker_count = 3
+worker_count = 8
 ```
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
+
+Keep every stage on the same base model and reduce cost by lowering internal reasoning effort. The primary keeps its Codex-profile effort; only the internal stages selected by the request router use these settings:
+
+```toml
+codex_model = "gpt-5.5"
+subagent_reasoning_effort = "medium"
+preflight_reasoning_effort = "low"
+```
 
 Keep read-only inspection roots separate:
 

@@ -37,6 +37,6 @@ PYTHONPATH=src python3 -m codex_codeshark run
 - Keep writable, delegated, and read-only root paths server-controlled; never accept a new filesystem root from Telegram.
 - Keep the administrator allowlist mandatory. An administrator retains the same authorized capabilities and approval requirements in a private chat or an administrator-enabled group; do not make privileged controls private-chat-only solely because of chat type.
 - Keep group requests administrator-enabled and direct-address-only: an explicit mention, a reply to a Codeshark message, or a reply within an already addressed Codeshark conversation chain. Non-administrator requests must remain ephemeral, MCP-disabled, and isolated from administrator memory, sessions, credentials, and configured project roots; permit only ordinary network research/exploration and writes confined to the server-configured group sandbox.
-- Preserve cancellation, timeouts, per-session serialization, the three-worker execution limit, and Telegram message chunking.
+- Preserve cancellation, timeouts, per-session serialization, and Telegram message chunking.
 - Keep dependencies at zero unless a dependency solves a demonstrated problem.
 - Tests must not call Telegram or OpenAI networks.

@@ -4,12 +4,16 @@ workdir = "/Users/yourname/workspace/Codex-codeshark/workspace"
 codex_binary = "/Applications/Codex.app/Contents/Resources/codex"
 codex_profile = "codex-codeshark"
 codex_model = "gpt-5.5"
+# Keep every stage on the same base model, but lower the effort for internal work.
+# The primary user-facing task keeps the profile's reasoning effort.
+subagent_reasoning_effort = "medium"
+preflight_reasoning_effort = "low"
 poll_timeout_seconds = 30
 task_timeout_seconds = 1800
-queue_size = 3
-# Run up to three independent Codex tasks concurrently. Persistent sessions in the
-# same chat remain serialized so their conversational context cannot race.
-worker_count = 3
+queue_size = 20
+# Choose the local task concurrency that matches this Mac. Persistent sessions in
+# the same chat remain serialized so their conversational context cannot race.
+worker_count = 8
 max_session_turns = 30
 memory_max_chars = 12000
 codex_network_access = false

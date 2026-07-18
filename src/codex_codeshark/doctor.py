@@ -85,7 +85,12 @@ def run_doctor() -> int:
         effective_model = config.codex_model or model
         if effective_model is None:
             return "Codex default"
-        return effective_model + (f" ({effort})" if effort else "")
+        primary = effective_model + (f" ({effort})" if effort else "")
+        return (
+            f"primary {primary}; validators {effective_model} "
+            f"({config.subagent_reasoning_effort}); preflight {effective_model} "
+            f"({config.preflight_reasoning_effort})"
+        )
 
     check("Codex model", model_check)
 

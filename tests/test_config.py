@@ -88,8 +88,10 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.allowed_user_ids, frozenset({123}))
             self.assertEqual(loaded.workdir, workspace.resolve())
             self.assertEqual(loaded.max_session_turns, 25)
-            self.assertEqual(loaded.worker_count, 3)
+            self.assertEqual(loaded.worker_count, 8)
             self.assertEqual(loaded.codex_model, "gpt-5.5")
+            self.assertEqual(loaded.subagent_reasoning_effort, "medium")
+            self.assertEqual(loaded.preflight_reasoning_effort, "low")
             self.assertFalse(loaded.codex_network_access)
             self.assertTrue(loaded.admin_full_access)
             self.assertEqual(loaded.attachment_max_bytes, 10_000_000)
@@ -101,7 +103,7 @@ class ConfigTests(unittest.TestCase):
                 (("github", ("list_issues", "get_issue")),),
             )
 
-    def test_rejects_out_of_range_worker_count(self) -> None:
+    def test_rejects_non_positive_worker_count(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / "codex"
@@ -115,7 +117,7 @@ class ConfigTests(unittest.TestCase):
                         "allowed_user_ids = [123]",
                         f'workdir = "{workspace}"',
                         f'codex_binary = "{binary}"',
-                        "worker_count = 4",
+                        "worker_count = 0",
                     ]
                 ),
                 encoding="utf-8",
@@ -354,6 +356,14 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual((root / "workspace").stat().st_mode & 0o777, 0o700)
             self.assertIn("read_only_roots = []", path.read_text(encoding="utf-8"))
             self.assertIn("delegated_roots = []", path.read_text(encoding="utf-8"))
+            self.assertIn(
+                'subagent_reasoning_effort = "medium"',
+                path.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                'preflight_reasoning_effort = "low"',
+                path.read_text(encoding="utf-8"),
+            )
 
 
 if __name__ == "__main__":

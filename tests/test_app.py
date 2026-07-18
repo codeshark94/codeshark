@@ -912,12 +912,28 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertIn("Codeshark source repository", runner.prompts[0][0])
 
-    def test_creates_three_isolated_group_worker_runners_by_default(self) -> None:
-        self.assertEqual(len(self.app._worker_runners), 3)
+    def test_creates_configured_isolated_group_worker_runners(self) -> None:
+        self.assertEqual(len(self.app._worker_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         workdirs = {runner.restricted_workdir for runner in self.app._worker_runners}
         homes = {runner.restricted_codex_home for runner in self.app._worker_runners}
-        self.assertEqual(len(workdirs), 3)
-        self.assertEqual(len(homes), 3)
+        self.assertEqual(len(workdirs), self.config.worker_count)
+        self.assertEqual(len(homes), self.config.worker_count)
+        self.assertTrue(
+            all(
+                runner.model == self.config.codex_model
+                and runner.model_reasoning_effort == "medium"
+                for runner in self.app._subagent_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.codex_model
+                and runner.model_reasoning_effort == "low"
+                for runner in self.app._preflight_runners
+            )
+        )
 
     def test_model_learning_marker_is_hidden_and_applied_automatically(self) -> None:
         result = RunResult(
@@ -1246,6 +1262,77 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             )
         )
         self.assertFalse(self.app._cross_validation_requested("Push the existing branch."))
+
+    def test_task_router_selects_a_chain_by_request_weight(self) -> None:
+        def plan_for(request: str):
+            task = self.app.store.enqueue_task(
+                123,
+                request,
+                source="test",
+                ephemeral=False,
+            )
+            return self.app._workflow_plan(task, request)
+
+        self.assertEqual(plan_for("What is the current status?").tier, "direct")
+        self.assertEqual(plan_for("Fix the README typo.").tier, "focused")
+        self.assertEqual(
+            plan_for("Analyze the failure pattern and report the root cause.").tier,
+            "standard",
+        )
+        deep = plan_for("Run a multi-agent high-assurance review of this migration.")
+        self.assertEqual(deep.tier, "deep")
+        self.assertTrue(deep.uses_preflight)
+        self.assertEqual(deep.feedback_iterations, 2)
+
+    def test_deep_workflow_reworks_until_a_fresh_verifier_passes(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app.state.mark_owner_onboarding_requested()
+        primary = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Initial migration handoff.",
+                thread_id="primary-thread",
+                stderr="",
+            )
+        )
+        primary.results.extend(
+            [
+                RunResult(0, "First rework handoff.", "primary-thread", ""),
+                RunResult(0, "Second rework handoff.", "primary-thread", ""),
+                RunResult(0, "Verified migration is complete.", "primary-thread", ""),
+            ]
+        )
+        validator = FakeCodexRunner(
+            RunResult(0, "VERDICT: REWORK\n1. Add the missing check.", "v1", "")
+        )
+        validator.results.extend(
+            [
+                RunResult(0, "VERDICT: REWORK\n1. Fix the remaining edge case.", "v2", ""),
+                RunResult(0, "VERDICT: PASS\n1. Pass.", "v3", ""),
+            ]
+        )
+        preflight = FakeCodexRunner(
+            RunResult(0, "Objective: validate the migration.", "plan", "")
+        )
+        task = app.store.enqueue_task(
+            123,
+            "Run a multi-agent high-assurance migration review.",
+            source="test",
+            ephemeral=False,
+        )
+
+        app._execute_task(task, primary, validator, preflight)
+
+        self.assertEqual(len(preflight.prompts), 1)
+        self.assertIn("preflight", preflight.prompts[0][0])
+        self.assertEqual(len(validator.prompts), 3)
+        self.assertIn("validator phase", validator.prompts[0][0])
+        self.assertIn("feedback verifier", validator.prompts[1][0])
+        self.assertIn("feedback verifier", validator.prompts[2][0])
+        self.assertEqual(len(primary.prompts), 4)
+        self.assertIn("Internal planning brief", primary.prompts[0][0])
+        self.assertIn("finalization phase", primary.prompts[-1][0])
+        self.assertEqual(self.api.messages, [(123, "Verified migration is complete.")])
 
     def test_cross_validation_applies_to_substantive_read_only_analysis(self) -> None:
         runner = FakeCodexRunner(
