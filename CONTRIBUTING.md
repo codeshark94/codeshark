@@ -15,7 +15,7 @@ Participation is governed by the project's [Code of Conduct](CODE_OF_CONDUCT.md)
 ## Development setup
 
 ```bash
-git clone https://github.com/Younghegalian/codeshark.git Codex-codeshark
+git clone https://github.com/codeshark94/codeshark.git Codex-codeshark
 cd Codex-codeshark
 python3 -m venv .venv
 source .venv/bin/activate

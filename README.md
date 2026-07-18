@@ -7,7 +7,7 @@
     Codeshark runs on your Mac, learns how you work, and returns the finished result.
   </p>
   <p>
-    <a href="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml"><img src="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+    <a href="https://github.com/codeshark94/codeshark/actions/workflows/tests.yml"><img src="https://github.com/codeshark94/codeshark/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
     <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11+"></a>
     <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-000000?logo=apple&amp;logoColor=white" alt="macOS"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2ea44f" alt="MIT License"></a>
@@ -93,7 +93,7 @@ Interactive work continues a persisted Codex thread within the active project. U
 Run this one command in Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Younghegalian/codeshark/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/codeshark94/codeshark/main/scripts/install.sh | sh
 ```
 
 It installs or fast-forwards Codeshark in `~/.codeshark`, then runs guided setup, the live diagnostic, and the background service. The only interactive steps are intentionally private: enter the BotFather token at a hidden prompt and send the displayed `/pair` command from your Telegram account. The token is stored only in macOS Keychain.
@@ -103,7 +103,7 @@ To use another installation directory, set `CODESHARK_INSTALL_DIR` before runnin
 For a source checkout instead, clone the repository and run the same installer from its root:
 
 ```bash
-git clone https://github.com/Younghegalian/codeshark.git Codex-codeshark
+git clone https://github.com/codeshark94/codeshark.git Codex-codeshark
 cd Codex-codeshark
 CODESHARK_INSTALL_DIR="$PWD" ./scripts/install.sh
 ```

@@ -3,7 +3,7 @@
 # pairing interactive so neither value can leak into shell history or logs.
 set -eu
 
-REPOSITORY_URL="https://github.com/Younghegalian/codeshark.git"
+REPOSITORY_URL="https://github.com/codeshark94/codeshark.git"
 INSTALL_DIR="${CODESHARK_INSTALL_DIR:-$HOME/.codeshark}"
 CODEX_BINARY="/Applications/Codex.app/Contents/Resources/codex"
 
