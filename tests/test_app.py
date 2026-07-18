@@ -1292,7 +1292,54 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             [(123, "The independently validated analysis is complete.")],
         )
 
-    def test_cross_validation_failure_never_returns_an_unapplied_memo_as_final(self) -> None:
+    def test_cross_validation_retries_with_a_fresh_validator_session(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app.state.mark_owner_onboarding_requested()
+        runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Working output is ready.",
+                thread_id="primary-thread",
+                stderr="",
+            )
+        )
+        runner.results.extend(
+            [
+                RunResult(
+                    exit_code=-15,
+                    message="Raw validator audit must stay internal.",
+                    thread_id=None,
+                    stderr="HTTP 451: no_biscuit_no_service",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="1. Pass: output is correct.",
+                    thread_id="validator-thread",
+                    stderr="",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="Corrected final answer.",
+                    thread_id="primary-thread",
+                    stderr="",
+                ),
+            ]
+        )
+        app.runner = runner
+
+        app._handle_update(self.update(123, "Analyze this and cross validate it."))
+        task = app.store.claim_next_task()
+        app._execute_task(task)
+
+        self.assertEqual(len(runner.prompts), 4)
+        self.assertTrue(runner.prompts[1][2])
+        self.assertTrue(runner.prompts[2][2])
+        self.assertIsNone(runner.prompts[1][1])
+        self.assertIsNone(runner.prompts[2][1])
+        self.assertEqual(runner.prompts[3][1], "primary-thread")
+        self.assertEqual(self.api.messages, [(123, "Corrected final answer.")])
+
+    def test_cross_validation_failure_returns_primary_recovery_not_validator_output(self) -> None:
         app = AgentApp(replace(self.config, admin_full_access=True), self.api)
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
@@ -1303,13 +1350,33 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 stderr="",
             )
         )
-        runner.results.append(
-            RunResult(
-                exit_code=1,
-                message="1. This review was not applied.",
-                thread_id=None,
-                stderr="reviewer failure",
-            )
+        runner.results.extend(
+            [
+                RunResult(
+                    exit_code=1,
+                    message="Raw audit result 1.",
+                    thread_id=None,
+                    stderr="reviewer failure",
+                ),
+                RunResult(
+                    exit_code=1,
+                    message="Raw audit result 2.",
+                    thread_id=None,
+                    stderr="reviewer failure",
+                ),
+                RunResult(
+                    exit_code=1,
+                    message="Raw audit result 3.",
+                    thread_id=None,
+                    stderr="reviewer failure",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="Primary status: independent validation could not finish.",
+                    thread_id="author-thread",
+                    stderr="",
+                ),
+            ]
         )
         app.runner = runner
 
@@ -1322,10 +1389,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         app._execute_task(task)
 
-        self.assertEqual(len(runner.prompts), 2)
+        self.assertEqual(len(runner.prompts), 5)
+        self.assertIn("validation recovery", runner.prompts[-1][0])
+        self.assertEqual(runner.prompts[-1][1], "author-thread")
         self.assertEqual(
             self.api.messages,
-            [(123, "Codeshark could not complete this task. Check the local logs and retry.")],
+            [(123, "Primary status: independent validation could not finish.")],
         )
 
     def test_automatic_file_delivery_attaches_marked_result_without_a_file_request(self) -> None:
