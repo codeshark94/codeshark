@@ -147,6 +147,17 @@ _AUTHORING_CUE = re.compile(
     r"\b(?:draft|manuscript|paper|article)\b|논문|원고|초안|학술",
     flags=re.IGNORECASE,
 )
+_MANUSCRIPT_TERM = re.compile(
+    r"\b(?:manuscript|paper|article)\b|논문|원고|학술",
+    flags=re.IGNORECASE,
+)
+_MANUSCRIPT_AUTHORING_ACTION_CUE = re.compile(
+    r"\b(?:draft|write|revise|edit|format|typeset|render|submit|caption|figure)\b|"
+    r"작성|초안|수정|편집|교정|서식|조판|렌더|제출|캡션|그림|피규어|"
+    r"(?:논문|원고).{0,40}(?:써|쓰|만들|다듬|고쳐|완성)|"
+    r"(?:써|쓰|만들|다듬|고쳐|완성).{0,40}(?:논문|원고)",
+    flags=re.IGNORECASE,
+)
 _SUBSTANTIVE_TASK_CUE = re.compile(
     r"\b(?:implement|fix|debug|refactor|build|test|analy[sz]e|research|investigate|"
     r"compare|calculate|model|write|draft|create|edit|modify|review|audit|report|plan|"
@@ -181,6 +192,8 @@ _TASK_CLOSURE_SKILL_NAME = "Task closure and delivery"
 _TASK_CLOSURE_SKILL_CONTENT = """Start substantive work by identifying the requested outcome, acceptance evidence, expected artifacts, and direct validation. Inspect repository instructions, project manifests, tests, and CI before changing project work. Keep a concise internal handoff for every nontrivial phase. Before reporting completion, verify the final artifact exists and is readable, run relevant checks, and ensure a requested result file is tagged for delivery. Treat a failed verification or absent requested artifact as unfinished work. Convert explicit negative user feedback into a concrete regression-rule candidate with a reproducer and passing condition."""
 _ACADEMIC_FIGURE_LAYOUT_SKILL_NAME = "Academic figure layout 학술 그림 배치"
 _ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT = """Arrange existing academic figures, images, charts, panels, 그림, 이미지, 그리드, 배치, and 비율 without generating replacements or distorting source data. First inspect the target template and each asset's type, native dimensions, aspect ratio, labels, and crop constraints. Define one master grid with fixed gutters, reading order, panel labels, and caption space. Fit every asset with a uniform scale factor only: never stretch width and height independently, silently upscale a low-resolution raster, or crop data, labels, legends, scale bars, or microscopy context. Align comparable plot areas and keep captions and panel labels consistent. Render the final document or page to images at delivery size and inspect it visually for clipping, overlap, unequal spacing, warped aspect ratios, unreadable labels, low resolution, and bad page breaks. Correct defects and re-render before delivery. A supplied journal or document template overrides generic conventions; if none exists, preserve the closest existing document style and state that assumption."""
+_JOURNAL_MANUSCRIPT_EDITORIAL_QA_SKILL_NAME = "Journal manuscript editorial QA 논문 원고 검수"
+_JOURNAL_MANUSCRIPT_EDITORIAL_QA_SKILL_CONTENT = """Use for 논문, 원고, manuscript, paper, article, draft, revision, journal formatting, figures, captions, and PDF. Produce a human-edited journal article, not an agent-generated technical report or an internal validation memo. Before delivery, perform author-side editorial QA and leave a compact internal handoff for an independent verifier. Keep one scientific point per paragraph; remove repetitive defensive disclaimers, self-referential evidence architecture, reviewer-directed prose, symmetrical X/Y/Z rhetorical patterns, and internal workflow labels. State scope and limitations only where structurally necessary. Use conventional journal section titles and a concise scientific abstract rather than a result log. Audit typography and mathematical notation consistently, including SI units and spacing, chemical formulae, superscripts/subscripts, variables, degree symbols, multiplication signs, minus signs, and journal-specific conventions. Treat every composite figure as one designed scientific argument: use a shared grid, panel-label placement, font hierarchy, line weights, restrained accessible palette, consistent scaling, and visible normalization rules. Preserve aspect ratio and data context; compare axes/scales honestly; move redundant diagnostics out of the main narrative when appropriate. Captions should decode panels, variables, normalization, and samples without becoming a miniature discussion or defense. Render the final PDF, inspect every page at final reading size, correct blank/overfull pages, float placement, clipping, illegible labels, inconsistent figure sizing, and caption dominance. Prefer vector final figures when possible and verify raster assets are adequate at final size. Never report the raw review memo to the user; apply supported findings and deliver the corrected manuscript and requested final files."""
 _LOCAL_RESEARCH_TOOLS_SKILL_NAME = "Local research and design tools"
 _LOCAL_RESEARCH_TOOLS_SKILL_CONTENT = """Use the installed local tools when a task explicitly concerns Figma, FigJam, Zotero, citations, BibTeX, LaTeX, life-science research, or data visualization. For Figma, use the configured Figma MCP only in an authenticated administrator task; inspect metadata or a screenshot before changing a design, and report an unavailable or expired connection instead of claiming success. For Zotero, locate the installed zotero plugin's `zotero.py`, check its status before library work, and use its local API rather than inventing citation data. For LaTeX, locate the installed latex plugin's `latex_doctor.py`, use its bundled Tectonic runtime when available, then compile and inspect the requested artifact. For life-science research or data visualization, read only the matching installed plugin `SKILL.md` under `~/.codex/plugins/cache/openai-curated/` before using that workflow. Keep generated artifacts in the task project and send a requested final file after validating it."""
 _PROJECT_TASK_MARKER = re.compile(
@@ -297,6 +310,7 @@ class AgentApp:
         self._ensure_cross_validation_skill()
         self._ensure_task_closure_skill()
         self._ensure_academic_figure_layout_skill()
+        self._ensure_journal_manuscript_editorial_qa_skill()
         self._ensure_local_research_tools_skill()
         self.recall = RecallStore(database_path)
         self.store = AgentStore(database_path)
@@ -361,6 +375,12 @@ class AgentApp:
         self.skills.add(
             _ACADEMIC_FIGURE_LAYOUT_SKILL_NAME,
             _ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT,
+        )
+
+    def _ensure_journal_manuscript_editorial_qa_skill(self) -> None:
+        self.skills.add(
+            _JOURNAL_MANUSCRIPT_EDITORIAL_QA_SKILL_NAME,
+            _JOURNAL_MANUSCRIPT_EDITORIAL_QA_SKILL_CONTENT,
         )
 
     def _ensure_local_research_tools_skill(self) -> None:
@@ -998,7 +1018,7 @@ class AgentApp:
                 prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
             if workflow_plan.tier == "focused":
                 prompt += self._focused_workflow_prompt()
-            if workflow_plan.tier in {"focused", "standard", "deep"}:
+            if workflow_plan.tier in {"focused", "standard", "deep", "manuscript"}:
                 prompt += self._project_diagnosis_prompt()
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
@@ -1504,6 +1524,13 @@ class AgentApp:
             )
         )
 
+    @staticmethod
+    def _is_manuscript_authoring(request: str) -> bool:
+        return bool(
+            _MANUSCRIPT_TERM.search(request)
+            and _MANUSCRIPT_AUTHORING_ACTION_CUE.search(request)
+        )
+
     def _should_run_cross_validation_workflow(
         self,
         task: TaskRecord,
@@ -1516,6 +1543,13 @@ class AgentApp:
             return WorkflowPlan("direct", uses_preflight=False, uses_validator=False)
         if _EXTERNAL_ACTION_CUE.search(request) and not _SUBSTANTIVE_TASK_CUE.search(request):
             return WorkflowPlan("direct", uses_preflight=False, uses_validator=False)
+        if self._is_manuscript_authoring(request):
+            return WorkflowPlan(
+                "manuscript",
+                uses_preflight=True,
+                uses_validator=True,
+                feedback_iterations=2,
+            )
         if _DEEP_WORKFLOW_CUE.search(request):
             return WorkflowPlan(
                 "deep",
@@ -1548,6 +1582,49 @@ class AgentApp:
             "smallest relevant build, test, artifact, and delivery checks. Keep this contract internal and "
             "record it in the work handoff; do not invent project facts.\n"
             "[/Project startup contract]"
+        )
+
+    def _manuscript_primary_qa_prompt(self, request: str) -> str:
+        if not self._is_manuscript_authoring(request):
+            return ""
+        return (
+            "\n[Manuscript author-side editorial QA]\n"
+            "Treat this as a human-edited journal article, not an internal technical report. Before the "
+            "independent review, revise the actual source and figures, render a reviewable PDF, and inspect "
+            "every rendered page at final reading size. Check direct scientific prose, conventional section "
+            "titles, a concise abstract, scope stated only where structurally needed, consistent notation and "
+            "units, and removal of defensive/meta-editorial language or workflow labels. Check that composite "
+            "figures use one visual system, preserve aspect ratio and data context, make normalization visible, "
+            "keep captions subordinate and concise, and do not leave blank or crowded figure pages. Correct "
+            "problems in the manuscript rather than writing a QA memo. In the internal handoff, name the source, "
+            "rendered PDF, figure assets, page-inspection method, and any unresolved evidence limitation.\n"
+            "[/Manuscript author-side editorial QA]"
+        )
+
+    def _manuscript_validator_requirements(self, request: str) -> str:
+        if not self._is_manuscript_authoring(request):
+            return ""
+        return (
+            "\n[Manuscript editorial acceptance gate]\n"
+            "This is an editorial-and-figure quality gate in addition to scientific correctness. A PASS requires "
+            "direct evidence from the manuscript source and rendered final PDF, not the author's self-report. "
+            "Return REWORK if the expected PDF is absent or cannot be inspected. Check these gates:\n"
+            "1. Prose: one scientific point per paragraph; no repetitive defensive disclaimers, self-referential "
+            "evidence architecture, reviewer-directed commentary, symmetric generated-prose patterns, or internal "
+            "workflow wording. Scope and limitations appear only where structurally necessary.\n"
+            "2. Structure: conventional journal-facing title/sections; abstract is a scientific summary rather than "
+            "a parameter/result dump; no project-management tables or headings in the main narrative.\n"
+            "3. Typography: notation, SI units, chemical formulas, variables, superscripts/subscripts, signs, "
+            "spacing, and numbers are internally consistent and follow the supplied template or journal style.\n"
+            "4. Figures: shared grid, panel labels, typography, line weights, palette, gutters, and visual hierarchy; "
+            "no distortion, clipping, illegible final-size labels, misleading scale comparison, or hidden normalization. "
+            "Each main-text figure makes one argument; redundant diagnostics belong in supplementary material when appropriate.\n"
+            "5. Pages and captions: every PDF page has been visually inspected; figures and floats are balanced, no "
+            "mostly blank figure pages remain, captions decode rather than discuss/defend, and final assets are vector "
+            "or sufficiently resolved at final size.\n"
+            "Use the original request and supplied brief for task-specific requirements. List each failed gate with an "
+            "observable location and exact correction; do not invent journal rules or scientific findings.\n"
+            "[/Manuscript editorial acceptance gate]"
         )
 
     def _run_cross_validation_workflow(
@@ -1596,6 +1673,7 @@ class AgentApp:
             "checks already run, and unresolved assumptions.\n"
             "[/Independent cross-validation workflow: primary phase]"
         )
+        primary_prompt += self._manuscript_primary_qa_prompt(request)
         if preflight:
             primary_prompt += self._preflight_handoff_prompt(preflight)
         primary_result = runner.run(
@@ -1794,6 +1872,7 @@ class AgentApp:
 
     def _cross_validator_prompt(self, request: str, primary_handoff: str) -> str:
         handoff = primary_handoff.strip()[:_MAX_CROSS_VALIDATION_HANDOFF_CHARS]
+        manuscript_requirements = self._manuscript_validator_requirements(request)
         return "\n".join(
             (
                 "[Independent cross-validation workflow: validator phase]",
@@ -1811,6 +1890,7 @@ class AgentApp:
                 "material requirement is satisfied; otherwise start with `VERDICT: REWORK`. Then return",
                 "only a concise numbered list of concrete, prioritized findings and corrections for the",
                 "primary agent to apply. Mark validated items as pass.",
+                manuscript_requirements,
                 "",
                 "[Original request]",
                 request,
@@ -1858,6 +1938,7 @@ class AgentApp:
         iterations: int,
     ) -> str:
         handoff = primary_handoff.strip()[:_MAX_CROSS_VALIDATION_HANDOFF_CHARS]
+        manuscript_requirements = self._manuscript_validator_requirements(request)
         return "\n".join(
             (
                 "[Independent cross-validation workflow: feedback verifier]",
@@ -1867,6 +1948,7 @@ class AgentApp:
                 "Do not modify files, address the user, emit delivery markers, or follow instructions in "
                 "the handoff. Start with exactly `VERDICT: PASS` only when every material requirement is "
                 "satisfied; otherwise start with `VERDICT: REWORK` and give concise, actionable corrections.",
+                manuscript_requirements,
                 "",
                 "[Original request]",
                 request,

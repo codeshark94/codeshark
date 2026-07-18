@@ -877,7 +877,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         skill_id = testing.id
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
         remaining = self.app.skills.list()
-        self.assertEqual(len(remaining), 4)
+        self.assertEqual(len(remaining), 5)
         self.assertTrue(any("cross validation" in item.name.lower() for item in remaining))
 
     def test_existing_figure_layout_request_loads_the_layout_skill(self) -> None:
@@ -903,6 +903,25 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn("Local research and design tools", runner.prompts[0][0])
         self.assertIn("configured Figma MCP", runner.prompts[0][0])
+
+    def test_manuscript_authoring_uses_editorial_qa_feedback_loop(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app.state.mark_owner_onboarding_requested()
+        runner = FakeCodexRunner()
+        app.runner = runner
+        request = "논문 원고 초안을 작성하고 저널 형식과 피규어를 검수해서 PDF로 만들어줘"
+
+        app._handle_update(self.update(123, request))
+        task = app.store.claim_next_task()
+        plan = app._workflow_plan(task, request)
+        app._execute_task(task)
+
+        self.assertEqual(plan.tier, "manuscript")
+        self.assertTrue(plan.uses_preflight)
+        self.assertEqual(plan.feedback_iterations, 2)
+        self.assertIn("Journal manuscript editorial QA 논문 원고 검수", runner.prompts[1][0])
+        self.assertIn("Manuscript author-side editorial QA", runner.prompts[1][0])
+        self.assertIn("Manuscript editorial acceptance gate", runner.prompts[2][0])
 
     def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
@@ -1248,7 +1267,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         app._handle_update(
             self.update(
                 123,
-                "Draft a manuscript, then use an independent peer-review session and revise it.",
+                "Draft a research report, then use an independent peer-review session and revise it.",
             )
         )
         task = app.store.claim_next_task()
@@ -1272,7 +1291,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(
             self.update(
                 123,
-                "Draft a manuscript, then use an independent peer-review session and revise it.",
+                "Draft a research report, then use an independent peer-review session and revise it.",
             )
         )
 
@@ -1307,6 +1326,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(deep.tier, "deep")
         self.assertTrue(deep.uses_preflight)
         self.assertEqual(deep.feedback_iterations, 2)
+        manuscript = plan_for("논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.")
+        self.assertEqual(manuscript.tier, "manuscript")
+        self.assertTrue(manuscript.uses_preflight)
+        self.assertEqual(manuscript.feedback_iterations, 2)
 
     def test_deep_workflow_reworks_until_a_fresh_verifier_passes(self) -> None:
         app = AgentApp(replace(self.config, admin_full_access=True), self.api)
@@ -1494,7 +1517,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         app._handle_update(
             self.update(
                 123,
-                "Draft a manuscript, then use an independent peer-review session and revise it.",
+                "Draft a research report, then use an independent peer-review session and revise it.",
             )
         )
         task = app.store.claim_next_task()
