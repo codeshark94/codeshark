@@ -44,6 +44,8 @@ To receive a generated or existing result file, ask naturally (for example, `작
 
 For substantive code, analysis, research, document, report, or artifact work, Codeshark uses independent cross-validation by default: a primary phase in the current project session, a separate read-only validator session with no primary-session history, then a reconciliation phase back in the primary session. The validation memo is internal handoff material: the final response is the corrected result, not an un-applied review report. Simple factual questions and standalone external side-effect actions skip the extra pass. On installations that require approval for file changes, approve a writable task before its primary phase can make changes.
 
+For existing figures, charts, images, and multipanel academic layouts, Codeshark selects a visual-layout routine. It inventories source aspect ratios and crop constraints, uses a consistent grid and uniform scaling, renders the final page, and visually inspects it before delivery. It does not stretch images or silently crop scientific content to make a layout fit.
+
 ### Sessions and tasks
 
 | Command | Purpose |

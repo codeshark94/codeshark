@@ -179,6 +179,8 @@ _CROSS_VALIDATION_SKILL_NAME = "Independent cross validation 교차 검증"
 _CROSS_VALIDATION_SKILL_CONTENT = """Use the generic task router before work begins. Direct questions use one primary session; focused bounded work uses the primary session with relevant checks; substantive analysis, research, document, report, artifact, or explicit cross-validation work uses a fresh independent validator; complex multi-agent, production, security, migration, or high-assurance work also begins with a concise planning pass and uses a bounded correction-and-recheck loop. The primary agent owns the user response and receives internal findings as advisory evidence. Validators inspect, test, recalculate, or challenge work independently, return a clear PASS or REWORK verdict with concrete findings, and stay read-only. When a recheck reports REWORK, the primary corrects the result and sends it through the next fresh recheck. Deliver the corrected result rather than a validator memo. For manuscripts, include rendered-PDF, public terminology, evidence-to-claim alignment, figure, originality, and research-necessity checks. If independent validation does not complete, clearly distinguish completed work from remaining verification."""
 _TASK_CLOSURE_SKILL_NAME = "Task closure and delivery"
 _TASK_CLOSURE_SKILL_CONTENT = """Start substantive work by identifying the requested outcome, acceptance evidence, expected artifacts, and direct validation. Inspect repository instructions, project manifests, tests, and CI before changing project work. Keep a concise internal handoff for every nontrivial phase. Before reporting completion, verify the final artifact exists and is readable, run relevant checks, and ensure a requested result file is tagged for delivery. Treat a failed verification or absent requested artifact as unfinished work. Convert explicit negative user feedback into a concrete regression-rule candidate with a reproducer and passing condition."""
+_ACADEMIC_FIGURE_LAYOUT_SKILL_NAME = "Academic figure layout 학술 그림 배치"
+_ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT = """Arrange existing academic figures, images, charts, panels, 그림, 이미지, 그리드, 배치, and 비율 without generating replacements or distorting source data. First inspect the target template and each asset's type, native dimensions, aspect ratio, labels, and crop constraints. Define one master grid with fixed gutters, reading order, panel labels, and caption space. Fit every asset with a uniform scale factor only: never stretch width and height independently, silently upscale a low-resolution raster, or crop data, labels, legends, scale bars, or microscopy context. Align comparable plot areas and keep captions and panel labels consistent. Render the final document or page to images at delivery size and inspect it visually for clipping, overlap, unequal spacing, warped aspect ratios, unreadable labels, low resolution, and bad page breaks. Correct defects and re-render before delivery. A supplied journal or document template overrides generic conventions; if none exists, preserve the closest existing document style and state that assumption."""
 _PROJECT_TASK_MARKER = re.compile(
     r"\A\[\[CODESHARK_PROJECT:\s*(?P<project>[^\]\r\n]{1,80})\]\]\r?\n"
 )
@@ -292,6 +294,7 @@ class AgentApp:
         self.skills = SkillStore(runtime_dir / "skills")
         self._ensure_cross_validation_skill()
         self._ensure_task_closure_skill()
+        self._ensure_academic_figure_layout_skill()
         self.recall = RecallStore(database_path)
         self.store = AgentStore(database_path)
         self._quarantine_legacy_automatic_learning()
@@ -350,6 +353,12 @@ class AgentApp:
 
     def _ensure_task_closure_skill(self) -> None:
         self.skills.add(_TASK_CLOSURE_SKILL_NAME, _TASK_CLOSURE_SKILL_CONTENT)
+
+    def _ensure_academic_figure_layout_skill(self) -> None:
+        self.skills.add(
+            _ACADEMIC_FIGURE_LAYOUT_SKILL_NAME,
+            _ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT,
+        )
 
     def _roots_with_agent_repository(self, roots: tuple[Path, ...]) -> tuple[Path, ...]:
         result: list[Path] = []

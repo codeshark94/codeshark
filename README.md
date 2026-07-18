@@ -41,6 +41,7 @@ Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a 
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. Use `/file_delivery on` to attach new final files automatically for a chat. |
 | Corrective learning | Turn explicit `/bad` feedback into a visible regression-rule candidate with `/guardrails`. |
+| Academic figure layout | Arrange supplied figures on a consistent grid without distortion, then render and visually inspect the final placement before delivery. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
 | Isolated group analysis | Let directly addressed group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
 | Service-grade operation | Run the configured number of independent tasks concurrently, persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
