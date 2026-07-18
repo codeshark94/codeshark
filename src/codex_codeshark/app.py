@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import re
 import threading
 import time
@@ -68,6 +69,8 @@ Plain text: submit a task or steer active private work
 /approve ID, /reject ID: review risky work or pending learning proposals
 /skills, /forget_skill ID: manage learned skills
 /tasks: show recent persistent tasks
+/task ID: show this task's execution contract and delivery evidence
+/guardrails: show regression-rule candidates created from /bad feedback
 /deliveries, /retry_delivery ID: inspect or retry failed replies
 /send PATH: send one requested file from a configured project root
 /file_delivery on|off: automatically attach final files created for this chat
@@ -174,6 +177,8 @@ _MAX_CROSS_VALIDATION_HANDOFF_CHARS = 12_000
 _MAX_FRESH_VALIDATOR_SESSIONS = 3
 _CROSS_VALIDATION_SKILL_NAME = "Independent cross validation 교차 검증"
 _CROSS_VALIDATION_SKILL_CONTENT = """Use the generic task router before work begins. Direct questions use one primary session; focused bounded work uses the primary session with relevant checks; substantive analysis, research, document, report, artifact, or explicit cross-validation work uses a fresh independent validator; complex multi-agent, production, security, migration, or high-assurance work also begins with a concise planning pass and uses a bounded correction-and-recheck loop. The primary agent owns the user response and receives internal findings as advisory evidence. Validators inspect, test, recalculate, or challenge work independently, return a clear PASS or REWORK verdict with concrete findings, and stay read-only. When a recheck reports REWORK, the primary corrects the result and sends it through the next fresh recheck. Deliver the corrected result rather than a validator memo. For manuscripts, include rendered-PDF, public terminology, evidence-to-claim alignment, figure, originality, and research-necessity checks. If independent validation does not complete, clearly distinguish completed work from remaining verification."""
+_TASK_CLOSURE_SKILL_NAME = "Task closure and delivery"
+_TASK_CLOSURE_SKILL_CONTENT = """Start substantive work by identifying the requested outcome, acceptance evidence, expected artifacts, and direct validation. Inspect repository instructions, project manifests, tests, and CI before changing project work. Keep a concise internal handoff for every nontrivial phase. Before reporting completion, verify the final artifact exists and is readable, run relevant checks, and ensure a requested result file is tagged for delivery. Treat a failed verification or absent requested artifact as unfinished work. Convert explicit negative user feedback into a concrete regression-rule candidate with a reproducer and passing condition."""
 _PROJECT_TASK_MARKER = re.compile(
     r"\A\[\[CODESHARK_PROJECT:\s*(?P<project>[^\]\r\n]{1,80})\]\]\r?\n"
 )
@@ -286,6 +291,7 @@ class AgentApp:
         self.learning = LearningStore(database_path)
         self.skills = SkillStore(runtime_dir / "skills")
         self._ensure_cross_validation_skill()
+        self._ensure_task_closure_skill()
         self.recall = RecallStore(database_path)
         self.store = AgentStore(database_path)
         self._quarantine_legacy_automatic_learning()
@@ -341,6 +347,9 @@ class AgentApp:
 
     def _ensure_cross_validation_skill(self) -> None:
         self.skills.add(_CROSS_VALIDATION_SKILL_NAME, _CROSS_VALIDATION_SKILL_CONTENT)
+
+    def _ensure_task_closure_skill(self) -> None:
+        self.skills.add(_TASK_CLOSURE_SKILL_NAME, _TASK_CLOSURE_SKILL_CONTENT)
 
     def _roots_with_agent_repository(self, roots: tuple[Path, ...]) -> tuple[Path, ...]:
         result: list[Path] = []
@@ -522,6 +531,10 @@ class AgentApp:
             self._forget_skill(chat_id, argument)
         elif command == "/tasks":
             self._send_chunks(chat_id, self._tasks_text())
+        elif command == "/task":
+            self._send_chunks(chat_id, self._task_manifest_text(argument))
+        elif command == "/guardrails":
+            self._send_chunks(chat_id, self._guardrails_text())
         elif command == "/groups":
             self._send_chunks(chat_id, self._groups_text())
         elif command in {"/disable-group", "/disable_group"}:
@@ -954,10 +967,21 @@ class AgentApp:
                 project_name=project,
             )
             workflow_plan = self._workflow_plan(task, request)
+            self.store.upsert_task_manifest(
+                task.id,
+                project=project,
+                tier=workflow_plan.tier,
+                phase="routing",
+                acceptance=("user-facing result",)
+                + (("requested artifact",) if file_delivery_requested else ()),
+                delivery_state="required" if file_delivery_requested else "not-requested",
+            )
             if file_delivery_enabled and not workflow_plan.uses_validator:
                 prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
             if workflow_plan.tier == "focused":
                 prompt += self._focused_workflow_prompt()
+            if workflow_plan.tier in {"focused", "standard", "deep"}:
+                prompt += self._project_diagnosis_prompt()
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
         thread_id = (
@@ -967,6 +991,10 @@ class AgentApp:
         )
         delivery_started_at_ns = time.time_ns() if file_delivery_enabled else None
         if workflow_plan.uses_validator:
+            self.store.upsert_task_manifest(
+                task.id, project=project, tier=workflow_plan.tier, phase="primary",
+                acceptance=("user-facing result",), delivery_state="required" if file_delivery_requested else "not-requested",
+            )
             result = self._run_cross_validation_workflow(
                 runner,
                 subagent_runner,
@@ -981,6 +1009,11 @@ class AgentApp:
                 automatic_file_delivery=automatic_file_delivery,
             )
         else:
+            if not task.restricted:
+                self.store.upsert_task_manifest(
+                    task.id, project=project, tier=workflow_plan.tier, phase="primary",
+                    acceptance=("user-facing result",), delivery_state="required" if file_delivery_requested else "not-requested",
+                )
             result = runner.run(
                 prompt,
                 thread_id,
@@ -1026,6 +1059,24 @@ class AgentApp:
             elif unavailable_files:
                 delivery_notice = "A requested file was not delivered because it was missing, unsafe, unchanged, oversized, or outside configured project roots."
                 clean_message = (clean_message + "\n\n" if clean_message else "") + delivery_notice
+        acceptance_passed = successful and not (file_delivery_requested and not delivery_files)
+        if not task.restricted:
+            self.store.upsert_task_manifest(
+                task.id,
+                project=project,
+                tier=workflow_plan.tier,
+                phase="completed" if acceptance_passed else "needs-follow-up",
+                acceptance=("user-facing result",)
+                + (("requested artifact",) if file_delivery_requested else ()),
+                artifacts=tuple(str(path) for path in delivery_files),
+                checks=(
+                    "runner succeeded" if successful else "runner failed",
+                    "artifact delivered" if delivery_files else "no artifact delivery",
+                ),
+                delivery_state=(
+                    "delivered" if delivery_files else "missing" if file_delivery_requested else "not-requested"
+                ),
+            )
         if proposed and successful and task.source == "telegram":
             self._auto_apply_learning(
                 proposed,
@@ -1054,6 +1105,7 @@ class AgentApp:
             project=project,
             reply_to_message_id=task.reply_to_message_id,
             documents=delivery_files,
+            task_id=task.id,
         )
         if not task.restricted:
             with self._status_lock:
@@ -1203,6 +1255,7 @@ class AgentApp:
         project: str = DEFAULT_PROJECT,
         reply_to_message_id: int | None = None,
         documents: tuple[Path, ...] = (),
+        task_id: str | None = None,
     ) -> None:
         if persist_session and result.thread_id:
             self.state.record_session_turn(chat_id, result.thread_id, project)
@@ -1239,8 +1292,12 @@ class AgentApp:
                 chat_id,
                 document,
                 reply_to_message_id=reply_to_message_id,
+                task_id=task_id,
             ):
+                self._set_manifest_delivery(task_id, "failed", phase="needs-follow-up")
                 return
+        if documents:
+            self._set_manifest_delivery(task_id, "delivered")
         if result.message:
             self._send_chunks(chat_id, result.message, reply_to_message_id=reply_to_message_id)
         elif not documents:
@@ -1250,6 +1307,29 @@ class AgentApp:
                 reply_to_message_id=reply_to_message_id,
             )
 
+    def _set_manifest_delivery(
+        self,
+        task_id: str | None,
+        delivery_state: str,
+        *,
+        phase: str | None = None,
+    ) -> None:
+        if task_id is None:
+            return
+        manifest = self.store.get_task_manifest(task_id)
+        if manifest is None:
+            return
+        self.store.upsert_task_manifest(
+            task_id,
+            project=manifest.project,
+            tier=manifest.tier,
+            phase=phase or manifest.phase,
+            acceptance=manifest.acceptance,
+            artifacts=manifest.artifacts,
+            checks=manifest.checks,
+            delivery_state=delivery_state,
+        )
+
     def _enqueue_user_task(
         self,
         chat_id: int,
@@ -1257,6 +1337,8 @@ class AgentApp:
         *,
         reply_to_message_id: int | None = None,
     ) -> bool:
+        requires_approval = self._requires_admin_approval(prompt)
+        scoped_prompt = scope_task_prompt(self.state.active_project(chat_id), prompt)
         if self.store.pending_count() >= self.config.queue_size:
             self._send_message(
                 chat_id,
@@ -1264,10 +1346,14 @@ class AgentApp:
                 reply_to_message_id=reply_to_message_id,
             )
             return False
-        requires_approval = self._requires_admin_approval(prompt)
+        if not requires_approval and "[Attached workspace file:" in prompt:
+            workpack = self.store.append_to_recent_queued_task(chat_id, scoped_prompt)
+            if workpack is not None:
+                self._wake_worker.set()
+                return True
         task = self.store.enqueue_task(
             chat_id,
-            scope_task_prompt(self.state.active_project(chat_id), prompt),
+            scoped_prompt,
             source="telegram",
             ephemeral=False,
             requires_approval=requires_approval,
@@ -1433,6 +1519,17 @@ class AgentApp:
             "permissions, run the directly relevant checks, and return the final user-facing "
             "result. Do not create an unnecessary internal review chain.\n"
             "[/Task routing]"
+        )
+
+    @staticmethod
+    def _project_diagnosis_prompt() -> str:
+        return (
+            "\n\n[Project startup contract]\n"
+            "Before nontrivial project work, inspect the nearest AGENTS.md, README, project manifest, "
+            "test configuration, and CI definition that apply to the target. Use them to establish the "
+            "smallest relevant build, test, artifact, and delivery checks. Keep this contract internal and "
+            "record it in the work handoff; do not invent project facts.\n"
+            "[/Project startup contract]"
         )
 
     def _run_cross_validation_workflow(
@@ -2291,6 +2388,8 @@ class AgentApp:
                             skill_ids=completed.skill_ids,
                             rating=rating,
                         )
+                        if rating == "bad" and note:
+                            self.store.propose_guardrail(completed.id, note)
                         if note:
                             self._auto_apply_learning(
                                 ProposedLearning(
@@ -2504,6 +2603,33 @@ class AgentApp:
         )
         return "\n".join(lines)
 
+    def _task_manifest_text(self, task_id: str) -> str:
+        if not task_id:
+            return "Usage: /task TASK_ID"
+        manifest = self.store.get_task_manifest(task_id)
+        if manifest is None:
+            return "No execution contract was recorded for that task."
+        lines = [
+            f"Task {manifest.task_id} [{manifest.tier}/{manifest.phase}] project={manifest.project}",
+            "Acceptance: " + (", ".join(manifest.acceptance) or "none"),
+            "Checks: " + (", ".join(manifest.checks) or "pending"),
+            f"Delivery: {manifest.delivery_state}",
+        ]
+        if manifest.artifacts:
+            lines.append("Artifacts: " + ", ".join(manifest.artifacts))
+        return "\n".join(lines)
+
+    def _guardrails_text(self) -> str:
+        candidates = self.store.list_guardrails()
+        if not candidates:
+            return "No regression-rule candidates are pending."
+        lines = ["Regression-rule candidates from negative feedback:"]
+        lines.extend(
+            f"{item.id} [task={item.source_task_id}] {item.content}"
+            for item in candidates
+        )
+        return "\n".join(lines)
+
     def _groups_text(self) -> str:
         groups = self.store.list_groups()
         if not groups:
@@ -2612,7 +2738,15 @@ class AgentApp:
         document: Path,
         *,
         reply_to_message_id: int | None = None,
+        task_id: str | None = None,
     ) -> bool:
+        try:
+            with document.open("rb") as source:
+                digest = hashlib.file_digest(source, "sha256").hexdigest()
+            size_bytes = document.stat().st_size
+        except OSError:
+            digest = "unavailable"
+            size_bytes = 0
         try:
             self.api.send_document(
                 chat_id,
@@ -2621,6 +2755,15 @@ class AgentApp:
                 reply_to_message_id=reply_to_message_id,
             )
         except TelegramError as exc:
+            self.store.record_artifact_receipt(
+                task_id=task_id,
+                chat_id=chat_id,
+                path=str(document),
+                sha256=digest,
+                size_bytes=size_bytes,
+                status="failed",
+                error=str(exc),
+            )
             LOGGER.warning("Telegram document delivery failed for %s: %s", document.name, exc)
             self._send_message(
                 chat_id,
@@ -2628,5 +2771,13 @@ class AgentApp:
                 reply_to_message_id=reply_to_message_id,
             )
             return False
+        self.store.record_artifact_receipt(
+            task_id=task_id,
+            chat_id=chat_id,
+            path=str(document),
+            sha256=digest,
+            size_bytes=size_bytes,
+            status="sent",
+        )
         LOGGER.info("delivered Telegram document %s to chat_id=%s", document.name, chat_id)
         return True

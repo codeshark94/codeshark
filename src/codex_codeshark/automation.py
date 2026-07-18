@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import sqlite3
 import threading
 import time
@@ -65,6 +66,28 @@ class DeliveryRecord:
     last_error: str
     created_at: float
     updated_at: float
+
+
+@dataclass(frozen=True)
+class TaskManifest:
+    task_id: str
+    project: str
+    tier: str
+    phase: str
+    acceptance: tuple[str, ...]
+    artifacts: tuple[str, ...]
+    checks: tuple[str, ...]
+    delivery_state: str
+    updated_at: float
+
+
+@dataclass(frozen=True)
+class GuardrailCandidate:
+    id: str
+    source_task_id: str
+    content: str
+    status: str
+    created_at: float
 
 
 @dataclass(frozen=True)
@@ -308,6 +331,37 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS deliveries_status
                     ON deliveries(status, updated_at);
+                CREATE TABLE IF NOT EXISTS task_manifests (
+                    task_id TEXT PRIMARY KEY,
+                    project TEXT NOT NULL,
+                    tier TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    acceptance_json TEXT NOT NULL DEFAULT '[]',
+                    artifacts_json TEXT NOT NULL DEFAULT '[]',
+                    checks_json TEXT NOT NULL DEFAULT '[]',
+                    delivery_state TEXT NOT NULL DEFAULT 'not-requested',
+                    updated_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS artifact_receipts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT,
+                    chat_id INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS artifact_receipts_task
+                    ON artifact_receipts(task_id, created_at);
+                CREATE TABLE IF NOT EXISTS guardrail_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_task_id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS group_chats (
                     chat_id INTEGER PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -489,6 +543,116 @@ class AgentStore:
             self._prune_deliveries(connection)
             return cursor.rowcount == 1
 
+    @staticmethod
+    def _manifest(row: sqlite3.Row | None) -> TaskManifest | None:
+        if row is None:
+            return None
+        return TaskManifest(
+            task_id=row["task_id"],
+            project=row["project"],
+            tier=row["tier"],
+            phase=row["phase"],
+            acceptance=tuple(json.loads(row["acceptance_json"])),
+            artifacts=tuple(json.loads(row["artifacts_json"])),
+            checks=tuple(json.loads(row["checks_json"])),
+            delivery_state=row["delivery_state"],
+            updated_at=row["updated_at"],
+        )
+
+    def upsert_task_manifest(
+        self,
+        task_id: str,
+        *,
+        project: str,
+        tier: str,
+        phase: str,
+        acceptance: tuple[str, ...] = (),
+        artifacts: tuple[str, ...] = (),
+        checks: tuple[str, ...] = (),
+        delivery_state: str = "not-requested",
+    ) -> None:
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO task_manifests
+                    (task_id, project, tier, phase, acceptance_json, artifacts_json,
+                     checks_json, delivery_state, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    phase = excluded.phase,
+                    acceptance_json = excluded.acceptance_json,
+                    artifacts_json = excluded.artifacts_json,
+                    checks_json = excluded.checks_json,
+                    delivery_state = excluded.delivery_state,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    task_id,
+                    project,
+                    tier,
+                    phase,
+                    json.dumps(acceptance),
+                    json.dumps(artifacts),
+                    json.dumps(checks),
+                    delivery_state,
+                    now,
+                ),
+            )
+
+    def get_task_manifest(self, task_id: str) -> TaskManifest | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM task_manifests WHERE task_id = ?", (task_id,)
+            ).fetchone()
+        return self._manifest(row)
+
+    def record_artifact_receipt(
+        self,
+        *,
+        task_id: str | None,
+        chat_id: int,
+        path: str,
+        sha256: str,
+        size_bytes: int,
+        status: str,
+        error: str = "",
+    ) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO artifact_receipts
+                    (task_id, chat_id, path, sha256, size_bytes, status, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, chat_id, path, sha256, size_bytes, status, error[-500:], time.time()),
+            )
+
+    def propose_guardrail(self, source_task_id: str, content: str) -> GuardrailCandidate:
+        normalized = " ".join(content.split())[:1000]
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO guardrail_candidates (source_task_id, content, created_at) VALUES (?, ?, ?)",
+                (source_task_id, normalized, time.time()),
+            )
+            row = connection.execute(
+                "SELECT * FROM guardrail_candidates WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+        return GuardrailCandidate(
+            id=f"g{row['id']}", source_task_id=row["source_task_id"], content=row["content"],
+            status=row["status"], created_at=row["created_at"],
+        )
+
+    def list_guardrails(self, limit: int = 20) -> list[GuardrailCandidate]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM guardrail_candidates ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [
+            GuardrailCandidate(f"g{row['id']}", row["source_task_id"], row["content"], row["status"], row["created_at"])
+            for row in rows
+        ]
+
     def enqueue_task(
         self,
         chat_id: int,
@@ -528,6 +692,31 @@ class AgentStore:
                 ),
             )
         return self.get_task(task_id)
+
+    def append_to_recent_queued_task(
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        window_seconds: int = 12,
+    ) -> TaskRecord | None:
+        cutoff = time.time() - window_seconds
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM tasks
+                WHERE chat_id = ? AND source = 'telegram' AND status = 'queued'
+                  AND ephemeral = 0 AND created_at >= ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (chat_id, cutoff),
+            ).fetchone()
+            if row is None:
+                return None
+            combined = row["prompt"] + "\n\n[Additional user message]\n" + prompt
+            connection.execute("UPDATE tasks SET prompt = ? WHERE id = ?", (combined, row["id"]))
+            updated = connection.execute("SELECT * FROM tasks WHERE id = ?", (row["id"],)).fetchone()
+        return self._task(updated)
 
     def claim_next_task(self, *, now: float | None = None) -> TaskRecord | None:
         current = time.time() if now is None else now

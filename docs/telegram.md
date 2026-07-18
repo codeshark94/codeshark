@@ -52,6 +52,8 @@ For substantive code, analysis, research, document, report, or artifact work, Co
 | Photo or document | Store the attachment privately and queue its caption as the task. |
 | `/status` | Show active work, queue depth, session capacity, model, and stored item counts. |
 | `/tasks` | List recent persistent task records. |
+| `/task ID` | Show the task's routing tier, phase, acceptance checks, artifacts, and delivery state. |
+| `/guardrails` | Show regression-rule candidates created from explicit negative feedback. |
 | `/cancel` | Cancel the active process or the oldest queued task. |
 | `/file_delivery on\|off` | Automatically attach final files newly produced for this chat, or turn that behavior off. |
 | `/project [NAME]` | Show or switch the active project. Projects start empty and default to `General`. |

@@ -877,8 +877,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         skill_id = testing.id
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
         remaining = self.app.skills.list()
-        self.assertEqual(len(remaining), 1)
-        self.assertIn("cross validation", remaining[0].name.lower())
+        self.assertEqual(len(remaining), 2)
+        self.assertTrue(any("cross validation" in item.name.lower() for item in remaining))
 
     def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
