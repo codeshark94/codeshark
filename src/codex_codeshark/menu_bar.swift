@@ -24,7 +24,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         if let button = statusItem.button,
            let image = NSImage(contentsOfFile: iconPath) {
             image.isTemplate = true
-            image.size = NSSize(width: 20, height: 20)
+            image.size = NSSize(width: 22, height: 17.7)
             button.image = image
             button.toolTip = "Codeshark: starting"
         }
