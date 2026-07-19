@@ -87,6 +87,7 @@ Interactive work continues a persisted Codex thread within the active project. U
 ### Requirements
 
 - macOS
+- Xcode Command Line Tools (`xcode-select --install`)
 - Python 3.11 or newer
 - [Codex desktop](https://openai.com/codex/) with Codex CLI 0.138.0 or newer
 - An active Codex login
@@ -100,7 +101,7 @@ Run this one command in Terminal:
 curl -fsSL https://raw.githubusercontent.com/codeshark94/codeshark/main/scripts/install.sh | sh
 ```
 
-It installs or fast-forwards Codeshark in `~/.codeshark`, then runs guided setup, the live diagnostic, and the background service. The only interactive steps are intentionally private: enter the BotFather token at a hidden prompt and send the displayed `/pair` command from your Telegram account. The token is stored only in macOS Keychain.
+It installs or fast-forwards Codeshark in `~/.codeshark`, then runs guided setup, the live diagnostic, and the background service. It also launches a native macOS menu-bar companion with a monochrome Codeshark mascot icon; its menu shows whether the agent is ready or working and opens the local workspace or logs. The only interactive steps are intentionally private: enter the BotFather token at a hidden prompt and send the displayed `/pair` command from your Telegram account. The token is stored only in macOS Keychain.
 
 To use another installation directory, set `CODESHARK_INSTALL_DIR` before running the command. If an existing checkout has local edits, the installer stops rather than overwriting them.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import hashlib
 import re
@@ -42,6 +43,7 @@ from .memory import (
 from .personal_sync import PersonalDataSync, PersonalSyncError
 from .projects import DEFAULT_PROJECT, GLOBAL_SCOPE, normalize_project_name
 from .recall import RecallStore
+from .secure_io import atomic_write_text
 from .state import StateStore
 from .telegram_api import TelegramAPI, TelegramError
 from .vault import ASSET_KINDS, VaultStore
@@ -367,6 +369,7 @@ class AgentApp:
         self._wake_worker = threading.Event()
         self._bot_username: str | None = None
         self._bot_user_id: int | None = None
+        self._write_menu_status(0)
 
     def _workspace_system_dir(self) -> Path:
         return self.config.workdir / ".codeshark"
@@ -376,6 +379,23 @@ class AgentApp:
 
     def _deliverables_dir(self) -> Path:
         return self._workspace_system_dir() / "deliverables"
+
+    def _write_menu_status(self, active_task_count: int) -> None:
+        """Publish only non-sensitive activity for the local menu bar companion."""
+        try:
+            atomic_write_text(
+                self.config.state_path.parent / "menu-status.json",
+                json.dumps(
+                    {
+                        "active_task_count": active_task_count,
+                        "state": "working" if active_task_count else "idle",
+                        "updated_at": int(time.time()),
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+        except Exception:
+            LOGGER.warning("could not update the menu bar status", exc_info=True)
 
     def _ensure_cross_validation_skill(self) -> None:
         self.skills.add(_CROSS_VALIDATION_SKILL_NAME, _CROSS_VALIDATION_SKILL_CONTENT)
@@ -915,6 +935,8 @@ class AgentApp:
                 continue
             with self._status_lock:
                 self._active_tasks[task.id] = ActiveTask(task, runner)
+                active_task_count = len(self._active_tasks)
+            self._write_menu_status(active_task_count)
             try:
                 result = self._execute_task(
                     task,
@@ -953,6 +975,8 @@ class AgentApp:
                 with self._status_lock:
                     self._active_tasks.pop(task.id, None)
                     self._artifact_revision_task_ids.discard(task.id)
+                    active_task_count = len(self._active_tasks)
+                self._write_menu_status(active_task_count)
 
     def _execute_task(
         self,

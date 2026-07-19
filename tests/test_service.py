@@ -35,6 +35,9 @@ class ServiceTests(unittest.TestCase):
             )
             with plist_path.open("rb") as stream:
                 payload = plistlib.load(stream)
+            menu_plist_path = plist_path.with_name("com.codeshark.status.plist")
+            with menu_plist_path.open("rb") as stream:
+                menu_payload = plistlib.load(stream)
             self.assertEqual(plist_path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
             self.assertEqual(old_log.stat().st_mode & 0o777, 0o600)
@@ -54,6 +57,8 @@ class ServiceTests(unittest.TestCase):
             self.assertTrue(installed_config.is_file())
             self.assertTrue(installed_config.is_relative_to(install_root))
             self.assertEqual(payload["Umask"], 0o077)
+            self.assertEqual(menu_payload["Label"], "com.codeshark.status")
+            self.assertEqual(menu_payload["ProgramArguments"][1], str(root))
             commands = [call.args[0] for call in run_mock.call_args_list]
             self.assertTrue(any("bootstrap" in command for command in commands))
             self.assertTrue(any("kickstart" in command for command in commands))

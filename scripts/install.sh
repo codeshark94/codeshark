@@ -17,6 +17,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 command -v git >/dev/null 2>&1 || fail "install Xcode Command Line Tools, then rerun"
+command -v swiftc >/dev/null 2>&1 || fail "install Xcode Command Line Tools for the Codeshark menu bar icon, then rerun"
 command -v python3 >/dev/null 2>&1 || fail "install Python 3.11 or newer, then rerun"
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' \
     || fail "Python 3.11 or newer is required"

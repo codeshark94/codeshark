@@ -21,7 +21,9 @@ from .secure_io import (
 )
 
 LABEL = "com.codeshark.agent"
+MENU_LABEL = "com.codeshark.status"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+MENU_PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{MENU_LABEL}.plist"
 INSTALL_ROOT = Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "app"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _TOKEN_PATTERN = re.compile(r"\b[0-9]{6,}:[A-Za-z0-9_-]+\b")
@@ -45,6 +47,16 @@ def _domain() -> str:
 
 def _service_target() -> str:
     return f"{_domain()}/{LABEL}"
+
+
+def _menu_service_target() -> str:
+    return f"{_domain()}/{MENU_LABEL}"
+
+
+def _menu_plist_path(agent_plist_path: Path) -> Path:
+    if agent_plist_path == PLIST_PATH:
+        return MENU_PLIST_PATH
+    return agent_plist_path.with_name(f"{MENU_LABEL}.plist")
 
 
 def _wait_for_status(*, running: bool, timeout: float = 5.0) -> ServiceStatus:
@@ -164,6 +176,40 @@ def _payload(
     }
 
 
+def _build_menu_bar_agent(installed_source: Path) -> Path:
+    source = installed_source / "codex_codeshark" / "menu_bar.swift"
+    if not source.is_file():
+        raise ServiceError("Codeshark menu bar source is missing from the service package")
+    executable = installed_source.parent / "CodesharkMenu"
+    result = subprocess.run(
+        ["/usr/bin/swiftc", str(source), "-o", str(executable)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "swiftc failed"
+        raise ServiceError(f"could not build the Codeshark menu bar icon: {detail}")
+    if executable.is_file():
+        executable.chmod(0o700)
+    return executable
+
+
+def _menu_payload(project_root: Path, executable: Path) -> dict:
+    runtime = project_root / "runtime"
+    return {
+        "Label": MENU_LABEL,
+        "ProgramArguments": [str(executable), str(project_root)],
+        "WorkingDirectory": str(executable.parent),
+        "Umask": 0o077,
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 10,
+        "StandardOutPath": str(runtime / "menu.out.log"),
+        "StandardErrorPath": str(runtime / "menu.err.log"),
+    }
+
+
 def install_service(
     *,
     project_root: Path = PROJECT_ROOT,
@@ -183,6 +229,8 @@ def install_service(
         config_path=config_path,
         install_root=install_root,
     )
+    menu_executable = _build_menu_bar_agent(installed_source)
+    menu_plist_path = _menu_plist_path(plist_path)
     atomic_write_bytes(
         plist_path,
         plistlib.dumps(
@@ -190,9 +238,18 @@ def install_service(
             sort_keys=False,
         ),
     )
+    atomic_write_bytes(
+        menu_plist_path,
+        plistlib.dumps(_menu_payload(project_root, menu_executable), sort_keys=False),
+    )
 
     subprocess.run(
         ["/bin/launchctl", "bootout", _domain(), str(plist_path)],
+        capture_output=True,
+        check=False,
+    )
+    subprocess.run(
+        ["/bin/launchctl", "bootout", _domain(), str(menu_plist_path)],
         capture_output=True,
         check=False,
     )
@@ -209,17 +266,40 @@ def install_service(
         capture_output=True,
         check=False,
     )
+    result = subprocess.run(
+        ["/bin/launchctl", "bootstrap", _domain(), str(menu_plist_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ServiceError(
+            result.stderr.strip() or result.stdout.strip() or "launchctl menu bootstrap failed"
+        )
+    subprocess.run(
+        ["/bin/launchctl", "kickstart", "-k", _menu_service_target()],
+        capture_output=True,
+        check=False,
+    )
     return plist_path
 
 
 def uninstall_service(*, plist_path: Path = PLIST_PATH) -> None:
+    menu_plist_path = _menu_plist_path(plist_path)
     subprocess.run(
         ["/bin/launchctl", "bootout", _domain(), str(plist_path)],
         capture_output=True,
         check=False,
     )
+    subprocess.run(
+        ["/bin/launchctl", "bootout", _domain(), str(menu_plist_path)],
+        capture_output=True,
+        check=False,
+    )
     if plist_path.exists():
         plist_path.unlink()
+    if menu_plist_path.exists():
+        menu_plist_path.unlink()
 
 
 def start_service(
@@ -239,8 +319,14 @@ def start_service(
 
 
 def stop_service(*, plist_path: Path = PLIST_PATH) -> ServiceStatus:
+    menu_plist_path = _menu_plist_path(plist_path)
     subprocess.run(
         ["/bin/launchctl", "bootout", _domain(), str(plist_path)],
+        capture_output=True,
+        check=False,
+    )
+    subprocess.run(
+        ["/bin/launchctl", "bootout", _domain(), str(menu_plist_path)],
         capture_output=True,
         check=False,
     )
@@ -287,7 +373,7 @@ def read_logs(
 ) -> str:
     limit = max(1, min(lines, 1000))
     sections: list[str] = []
-    for name in ("agent.out.log", "agent.err.log"):
+    for name in ("agent.out.log", "agent.err.log", "menu.out.log", "menu.err.log"):
         path = project_root / "runtime" / name
         if not path.is_file():
             continue
