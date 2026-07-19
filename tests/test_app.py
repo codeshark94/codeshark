@@ -646,6 +646,27 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.store.pending_count(), 1)
         self.assertEqual(self.api.messages, [])
 
+    def test_figure_revision_follow_up_keeps_steering_and_requires_an_artifact(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        runner = FakeCodexRunner()
+        task = app.store.enqueue_task(
+            123,
+            "inspect the project",
+            source="telegram",
+            ephemeral=False,
+        )
+        with app._status_lock:
+            app._active_tasks[task.id] = ActiveTask(task, runner)
+
+        app._handle_update(
+            self.update(123, "Fig8 마커를 SEM 사진과 같은 색으로 구분하고 범례에 넣어")
+        )
+
+        self.assertEqual(len(runner.steers), 1)
+        self.assertIn("Concrete figure revision", runner.steers[0])
+        self.assertIn("CODESHARK_SEND_FILE", runner.steers[0])
+        self.assertIn(task.id, app._artifact_revision_task_ids)
+
     def test_risky_private_follow_up_is_queued_for_its_own_approval(self) -> None:
         runner = FakeCodexRunner()
         task = self.app.store.enqueue_task(
@@ -892,6 +913,59 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn("Academic figure layout 학술 그림 배치", runner.prompts[0][0])
         self.assertIn("never stretch width and height independently", runner.prompts[0][0])
+
+    def test_figure_revision_routes_to_rendered_artifact_delivery(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        deliverables = app.config.workdir / ".codeshark" / "deliverables"
+        deliverables.mkdir(parents=True)
+        figure = deliverables / "fig8-revised.pdf"
+
+        class FigureRevisionRunner(FakeCodexRunner):
+            def run(self, *args, **kwargs) -> RunResult:
+                figure.write_bytes(b"%PDF-1.4")
+                return super().run(*args, **kwargs)
+
+        app.runner = FigureRevisionRunner(
+            RunResult(0, "Figure 8 updated.", "thread-new", "")
+        )
+        request = "Fig8 마커를 SEM 사진과 같은 색으로 구분하고 범례 차트에 넣어"
+        app._handle_update(self.update(123, request))
+        task = app.store.claim_next_task()
+        plan = app._workflow_plan(task, request)
+        app._execute_task(task)
+
+        manifest = app.store.get_task_manifest(task.id)
+        self.assertEqual(plan.tier, "figure-revision")
+        self.assertIn("Academic figure layout 학술 그림 배치", app.runner.prompts[0][0])
+        self.assertIn("Concrete figure revision", app.runner.prompts[0][0])
+        self.assertIn("CODESHARK_SEND_FILE", app.runner.prompts[0][0])
+        self.assertEqual(self.api.documents[0][1], figure.resolve())
+        self.assertEqual(self.api.messages, [(123, "Figure 8 updated.")])
+        self.assertEqual((manifest.phase, manifest.delivery_state), ("completed", "delivered"))
+
+    def test_figure_revision_without_a_new_artifact_is_not_accepted(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app.runner = FakeCodexRunner(
+            RunResult(0, "No concrete issues to fix.", "thread-new", "")
+        )
+        request = "Fig8 마커를 SEM 사진과 같은 색으로 구분하고 범례 차트에 넣어"
+        app._handle_update(self.update(123, request))
+        task = app.store.claim_next_task()
+        app._execute_task(task)
+
+        manifest = app.store.get_task_manifest(task.id)
+        self.assertEqual(self.api.documents, [])
+        self.assertIn("revision is unfinished", self.api.messages[-1][1])
+        self.assertEqual((manifest.phase, manifest.delivery_state), ("needs-follow-up", "missing"))
+        self.assertIsNone(app._last_completed_task)
+
+    def test_figure_revision_requires_approval_without_full_access(self) -> None:
+        self.app._handle_update(
+            self.update(123, "Fig8 마커를 SEM 사진과 같은 색으로 구분하고 범례에 넣어")
+        )
+
+        task = self.app.store.list_tasks()[0]
+        self.assertEqual(task.status, "awaiting_approval")
 
     def test_local_research_tools_skill_loads_for_figma_task(self) -> None:
         runner = FakeCodexRunner()

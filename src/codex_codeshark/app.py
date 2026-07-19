@@ -158,6 +158,17 @@ _MANUSCRIPT_AUTHORING_ACTION_CUE = re.compile(
     r"(?:써|쓰|만들|다듬|고쳐|완성).{0,40}(?:논문|원고)",
     flags=re.IGNORECASE,
 )
+_FIGURE_REFERENCE_CUE = re.compile(
+    r"\b(?:fig(?:ure)?\.?\s*\d+|panel|legend|marker|chart|plot|graph|sem)\b|"
+    r"그림|피규어|패널|범례|마커|차트|그래프|도표|SEM\s*사진|현미경",
+    flags=re.IGNORECASE,
+)
+_FIGURE_EDIT_ACTION_CUE = re.compile(
+    r"\b(?:add|change|update|revise|edit|redesign|replace|recolor|colour|color|"
+    r"label|annotate|move|resize|align|place|overlay)\b|"
+    r"수정|고쳐|바꿔|변경|추가|넣어|박아|표시|구분|색|라벨|범례|마커|일치|정렬|배치|교체|재구성",
+    flags=re.IGNORECASE,
+)
 _SUBSTANTIVE_TASK_CUE = re.compile(
     r"\b(?:implement|fix|debug|refactor|build|test|analy[sz]e|research|investigate|"
     r"compare|calculate|model|write|draft|create|edit|modify|review|audit|report|plan|"
@@ -351,6 +362,7 @@ class AgentApp:
         self.runner = self._worker_runners[0]
         self._status_lock = threading.Lock()
         self._active_tasks: dict[str, ActiveTask] = {}
+        self._artifact_revision_task_ids: set[str] = set()
         self._last_completed_task: CompletedTask | None = None
         self._wake_worker = threading.Event()
         self._bot_username: str | None = None
@@ -940,6 +952,7 @@ class AgentApp:
             finally:
                 with self._status_lock:
                     self._active_tasks.pop(task.id, None)
+                    self._artifact_revision_task_ids.discard(task.id)
 
     def _execute_task(
         self,
@@ -958,10 +971,12 @@ class AgentApp:
         full_access = self.config.admin_full_access and not task.restricted
         effective_approval = task.approved or full_access
         file_delivery_requested = not task.restricted and self._file_delivery_requested(request)
+        figure_revision = not task.restricted and self._is_figure_revision(request)
         automatic_file_delivery = (
             not task.restricted and self.state.automatic_file_delivery_enabled(task.chat_id)
         )
-        file_delivery_enabled = file_delivery_requested or automatic_file_delivery
+        file_delivery_required = file_delivery_requested or figure_revision
+        file_delivery_enabled = file_delivery_required or automatic_file_delivery
         workflow_plan = WorkflowPlan("direct", uses_preflight=False, uses_validator=False)
         if not task.ephemeral and not task.restricted:
             self._rotate_session_if_needed(task.chat_id, project, runner)
@@ -982,7 +997,7 @@ class AgentApp:
             skill_ids: tuple[str, ...] = ()
         else:
             selected_skills = self.skills.select(
-                request,
+                request + " academic figure layout" if figure_revision else request,
                 quality_scores=self.recall.quality_scores("skill"),
             )
             prompt, memory_ids, skill_ids = compose_prompt(
@@ -1011,14 +1026,27 @@ class AgentApp:
                 tier=workflow_plan.tier,
                 phase="routing",
                 acceptance=("user-facing result",)
-                + (("requested artifact",) if file_delivery_requested else ()),
-                delivery_state="required" if file_delivery_requested else "not-requested",
+                + (("requested artifact",) if file_delivery_required else ()),
+                delivery_state="required" if file_delivery_required else "not-requested",
             )
             if file_delivery_enabled and not workflow_plan.uses_validator:
-                prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
+                prompt += self._file_delivery_prompt(
+                    automatic=automatic_file_delivery,
+                    artifact_revision=figure_revision,
+                )
             if workflow_plan.tier == "focused":
                 prompt += self._focused_workflow_prompt()
-            if workflow_plan.tier in {"focused", "standard", "deep", "manuscript"}:
+            if workflow_plan.tier == "figure-revision":
+                prompt += self._figure_revision_prompt()
+            if figure_revision and workflow_plan.tier != "figure-revision":
+                prompt += self._figure_revision_prompt()
+            if workflow_plan.tier in {
+                "focused",
+                "standard",
+                "deep",
+                "manuscript",
+                "figure-revision",
+            }:
                 prompt += self._project_diagnosis_prompt()
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
@@ -1027,11 +1055,14 @@ class AgentApp:
             if task.ephemeral
             else self.state.session_snapshot(task.chat_id, project).codex_thread_id
         )
-        delivery_started_at_ns = time.time_ns() if file_delivery_enabled else None
+        task_started_at_ns = time.time_ns()
+        delivery_started_at_ns = task_started_at_ns if file_delivery_enabled else None
         if workflow_plan.uses_validator:
             self.store.upsert_task_manifest(
                 task.id, project=project, tier=workflow_plan.tier, phase="primary",
-                acceptance=("user-facing result",), delivery_state="required" if file_delivery_requested else "not-requested",
+                acceptance=("user-facing result",)
+                + (("requested artifact",) if file_delivery_required else ()),
+                delivery_state="required" if file_delivery_required else "not-requested",
             )
             result = self._run_cross_validation_workflow(
                 runner,
@@ -1050,7 +1081,9 @@ class AgentApp:
             if not task.restricted:
                 self.store.upsert_task_manifest(
                     task.id, project=project, tier=workflow_plan.tier, phase="primary",
-                    acceptance=("user-facing result",), delivery_state="required" if file_delivery_requested else "not-requested",
+                    acceptance=("user-facing result",)
+                    + (("requested artifact",) if file_delivery_required else ()),
+                    delivery_state="required" if file_delivery_required else "not-requested",
                 )
             result = runner.run(
                 prompt,
@@ -1060,6 +1093,12 @@ class AgentApp:
                 approved=effective_approval,
                 full_access=full_access,
             )
+        with self._status_lock:
+            figure_revision = figure_revision or task.id in self._artifact_revision_task_ids
+        file_delivery_required = file_delivery_requested or figure_revision
+        file_delivery_enabled = file_delivery_required or automatic_file_delivery
+        if figure_revision and delivery_started_at_ns is None:
+            delivery_started_at_ns = task_started_at_ns
         successful = result.exit_code == 0 and not result.cancelled and not result.timed_out
         if task.restricted:
             clean_message, _ignored_proposal = extract_learning_candidate(result.message)
@@ -1077,10 +1116,14 @@ class AgentApp:
         unavailable_files = 0
         if successful and file_delivery_enabled:
             delivery_files, unavailable_files = self._resolve_delivery_files(
-                marked_paths, min_modified_at_ns=None
+                marked_paths,
+                min_modified_at_ns=delivery_started_at_ns if figure_revision else None,
             )
-            if file_delivery_requested and not delivery_files and not marked_paths:
-                fallback = self._latest_deliverable_file(delivery_started_at_ns)
+            if file_delivery_required and not delivery_files and not marked_paths:
+                fallback = self._latest_deliverable_file(
+                    delivery_started_at_ns,
+                    require_fresh=figure_revision,
+                )
                 if fallback is not None:
                     delivery_files = (fallback,)
             elif automatic_file_delivery and not delivery_files:
@@ -1089,15 +1132,18 @@ class AgentApp:
                 )
                 if fallback is not None:
                     delivery_files = (fallback,)
-            if file_delivery_requested and not delivery_files:
+            if file_delivery_required and not delivery_files:
                 clean_message = (
-                    "The task completed, but no requested file was attached. "
+                    "The requested figure revision is unfinished: no safe, newly updated result file "
+                    "was produced or attached. Codeshark did not treat the previous artifact as a pass."
+                    if figure_revision
+                    else "The task completed, but no requested file was attached. "
                     "Codeshark found no safe, readable output file to send."
                 )
             elif unavailable_files:
                 delivery_notice = "A requested file was not delivered because it was missing, unsafe, unchanged, oversized, or outside configured project roots."
                 clean_message = (clean_message + "\n\n" if clean_message else "") + delivery_notice
-        acceptance_passed = successful and not (file_delivery_requested and not delivery_files)
+        acceptance_passed = successful and not (file_delivery_required and not delivery_files)
         if not task.restricted:
             self.store.upsert_task_manifest(
                 task.id,
@@ -1105,17 +1151,21 @@ class AgentApp:
                 tier=workflow_plan.tier,
                 phase="completed" if acceptance_passed else "needs-follow-up",
                 acceptance=("user-facing result",)
-                + (("requested artifact",) if file_delivery_requested else ()),
+                + (("requested artifact",) if file_delivery_required else ()),
                 artifacts=tuple(str(path) for path in delivery_files),
                 checks=(
                     "runner succeeded" if successful else "runner failed",
                     "artifact delivered" if delivery_files else "no artifact delivery",
                 ),
                 delivery_state=(
-                    "delivered" if delivery_files else "missing" if file_delivery_requested else "not-requested"
+                    "delivered"
+                    if delivery_files
+                    else "missing"
+                    if file_delivery_required
+                    else "not-requested"
                 ),
             )
-        if proposed and successful and task.source == "telegram":
+        if proposed and acceptance_passed and task.source == "telegram":
             self._auto_apply_learning(
                 proposed,
                 source_task_id=task.id,
@@ -1157,10 +1207,10 @@ class AgentApp:
                         response=clean_message,
                         project=project,
                     )
-                    if successful
+                    if acceptance_passed
                     else None
                 )
-            if successful:
+            if acceptance_passed:
                 self._backup_personal_data()
         return result
 
@@ -1430,7 +1480,19 @@ class AgentApp:
                 ),
                 None,
             )
-        return active is not None and active.runner.steer(prompt)
+        if active is None:
+            return False
+        figure_revision = self._is_figure_revision(prompt)
+        if figure_revision:
+            prompt += self._figure_revision_prompt()
+            prompt += self._file_delivery_prompt(artifact_revision=True)
+        if not active.runner.steer(prompt):
+            return False
+        if figure_revision:
+            with self._status_lock:
+                if active.task.id in self._active_tasks:
+                    self._artifact_revision_task_ids.add(active.task.id)
+        return True
 
     def _agent_name(self) -> str:
         item = self.memory.find_by_title(AGENT_NAME_TITLE, scope=GLOBAL_SCOPE)
@@ -1515,12 +1577,15 @@ class AgentApp:
         return bool(_SUBSTANTIVE_TASK_CUE.search(prompt))
 
     def _requires_writable_cross_validation(self, prompt: str) -> bool:
-        return self._cross_validation_requested(prompt) and bool(
-            re.search(
-                r"\b(?:implement|fix|debug|refactor|build|write|draft|create|edit|modify|"
-                r"code)\b|구현|수정|고쳐|디버그|리팩터|빌드|작성|초안|만들|코드",
-                prompt,
-                flags=re.IGNORECASE,
+        return self._is_figure_revision(prompt) or (
+            self._cross_validation_requested(prompt)
+            and bool(
+                re.search(
+                    r"\b(?:implement|fix|debug|refactor|build|write|draft|create|edit|modify|"
+                    r"code)\b|구현|수정|고쳐|디버그|리팩터|빌드|작성|초안|만들|코드",
+                    prompt,
+                    flags=re.IGNORECASE,
+                )
             )
         )
 
@@ -1529,6 +1594,13 @@ class AgentApp:
         return bool(
             _MANUSCRIPT_TERM.search(request)
             and _MANUSCRIPT_AUTHORING_ACTION_CUE.search(request)
+        )
+
+    @staticmethod
+    def _is_figure_revision(request: str) -> bool:
+        return bool(
+            _FIGURE_REFERENCE_CUE.search(request)
+            and _FIGURE_EDIT_ACTION_CUE.search(request)
         )
 
     def _should_run_cross_validation_workflow(
@@ -1550,6 +1622,8 @@ class AgentApp:
                 uses_validator=True,
                 feedback_iterations=2,
             )
+        if self._is_figure_revision(request):
+            return WorkflowPlan("figure-revision", uses_preflight=False, uses_validator=False)
         if _DEEP_WORKFLOW_CUE.search(request):
             return WorkflowPlan(
                 "deep",
@@ -1571,6 +1645,22 @@ class AgentApp:
             "permissions, run the directly relevant checks, and return the final user-facing "
             "result. Do not create an unnecessary internal review chain.\n"
             "[/Task routing]"
+        )
+
+    @staticmethod
+    def _figure_revision_prompt() -> str:
+        return (
+            "\n\n[Concrete figure revision]\n"
+            "This is an implementation request, not a request to inspect or approve the current figure. "
+            "Locate the exact requested figure/panel and its editable source before changing anything; do not "
+            "silently substitute a differently numbered figure. Apply the requested visual/data-label change to "
+            "the source, regenerate the affected figure or manuscript, and visually inspect the rendered output "
+            "at delivery size. For SEM/image-to-chart marker mappings, use the same explicit color and label in "
+            "both locations; for a proxy or equation request, put the requested definition in the source rather "
+            "than merely describing it in chat. Return the changed source and a newly rendered relevant artifact. "
+            "Do not answer with a review verdict, `no issues`, or an unchanged-PDF inspection. If the target source, "
+            "data mapping, or required asset is genuinely unavailable, identify that exact blocker instead.\n"
+            "[/Concrete figure revision]"
         )
 
     @staticmethod
@@ -2020,10 +2110,18 @@ class AgentApp:
                 roots.append(resolved)
         return tuple(roots)
 
-    def _file_delivery_prompt(self, *, automatic: bool = False) -> str:
+    def _file_delivery_prompt(
+        self,
+        *,
+        automatic: bool = False,
+        artifact_revision: bool = False,
+    ) -> str:
         roots = "\n".join(f"- {root}" for root in self._delivery_roots())
         mode = (
-            "Automatic final-file delivery is enabled for this chat. When this task creates or "
+            "This task is a concrete artifact revision. Tag the newly changed and rendered result file; "
+            "an unchanged pre-existing file is not a completion."
+            if artifact_revision
+            else "Automatic final-file delivery is enabled for this chat. When this task creates or "
             "completes a user-facing result file, tag every final file. Do not tag a file when "
             "this task does not produce a result file."
             if automatic

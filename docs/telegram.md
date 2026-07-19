@@ -48,6 +48,8 @@ Manuscript authoring and revision receive a stricter bounded loop: a low-cost pl
 
 For existing figures, charts, images, and multipanel academic layouts, Codeshark selects a visual-layout routine. It inventories source aspect ratios and crop constraints, uses a consistent grid and uniform scaling, renders the final page, and visually inspects it before delivery. It does not stretch images or silently crop scientific content to make a layout fit.
 
+A concrete figure-edit instruction (for example, a Fig./panel/SEM/marker/legend/caption change) is treated as a revision, not a request to approve the current output. Codeshark must locate the exact source, regenerate and inspect a new relevant artifact, and attach it. Without a newly changed safe artifact, the task remains unfinished rather than returning a “no issues” verdict.
+
 ### Sessions and tasks
 
 | Command | Purpose |
