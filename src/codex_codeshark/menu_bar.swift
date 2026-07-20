@@ -781,7 +781,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             action: nil,
             keyEquivalent: ""
         )
-        status.isEnabled = false
         let statusText = NSMutableAttributedString(
             string: "●",
             attributes: [
