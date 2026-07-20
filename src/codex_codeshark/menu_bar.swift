@@ -109,6 +109,34 @@ struct DashboardModelAssignment: Decodable, Identifiable {
     }
 }
 
+struct DashboardSecurityGroup: Decodable, Identifiable {
+    let chatID: Int
+    let title: String
+    let enabledAt: Int
+
+    var id: String { String(chatID) }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case chatID = "chat_id"
+        case enabledAt = "enabled_at"
+    }
+}
+
+struct DashboardSecurity: Decodable {
+    let sandbox: String
+    let networkAccess: Bool
+    let adminFullAccess: Bool
+    let telegram: String
+    let groups: [DashboardSecurityGroup]
+
+    enum CodingKeys: String, CodingKey {
+        case sandbox, telegram, groups
+        case networkAccess = "network_access"
+        case adminFullAccess = "admin_full_access"
+    }
+}
+
 struct DashboardOrchestrationTier: Decodable {
     let usesPreflight: Bool
     let usesResearch: Bool
@@ -408,6 +436,7 @@ struct DashboardSnapshot: Decodable {
     let projectUsage7d: [DashboardProjectUsage]
     let accountUsage: DashboardAccountUsage?
     let orchestration: DashboardOrchestration?
+    let security: DashboardSecurity?
 
     static let empty = DashboardSnapshot(
         state: "starting",
@@ -428,7 +457,8 @@ struct DashboardSnapshot: Decodable {
         projectUsage5h: [],
         projectUsage7d: [],
         accountUsage: nil,
-        orchestration: nil
+        orchestration: nil,
+        security: nil
     )
 
     enum CodingKeys: String, CodingKey {
@@ -451,6 +481,7 @@ struct DashboardSnapshot: Decodable {
         case projectUsage7d = "project_usage_7d"
         case accountUsage = "account_usage"
         case orchestration
+        case security
     }
 
     init(
@@ -472,7 +503,8 @@ struct DashboardSnapshot: Decodable {
         projectUsage5h: [DashboardProjectUsage],
         projectUsage7d: [DashboardProjectUsage],
         accountUsage: DashboardAccountUsage?,
-        orchestration: DashboardOrchestration?
+        orchestration: DashboardOrchestration?,
+        security: DashboardSecurity?
     ) {
         self.state = state
         self.activeTaskCount = activeTaskCount
@@ -493,6 +525,7 @@ struct DashboardSnapshot: Decodable {
         self.projectUsage7d = projectUsage7d
         self.accountUsage = accountUsage
         self.orchestration = orchestration
+        self.security = security
     }
 
     init(from decoder: Decoder) throws {
@@ -516,6 +549,7 @@ struct DashboardSnapshot: Decodable {
         projectUsage7d = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage7d) ?? []
         accountUsage = try container.decodeIfPresent(DashboardAccountUsage.self, forKey: .accountUsage)
         orchestration = try container.decodeIfPresent(DashboardOrchestration.self, forKey: .orchestration)
+        security = try container.decodeIfPresent(DashboardSecurity.self, forKey: .security)
     }
 }
 
@@ -536,6 +570,231 @@ final class DashboardModel: ObservableObject {
             return
         }
         self.snapshot = snapshot
+    }
+}
+
+private struct LocalConsoleMessage: Decodable, Identifiable {
+    let id: Int
+    let taskID: String?
+    let role: String
+    let text: String
+    let attachments: [String]
+    let createdAt: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, text, attachments
+        case taskID = "task_id"
+        case createdAt = "created_at"
+    }
+}
+
+private struct LocalConsoleHistory: Decodable {
+    let messages: [LocalConsoleMessage]
+}
+
+private struct LocalConsoleSubmission: Decodable {
+    let taskID: String
+
+    enum CodingKeys: String, CodingKey {
+        case taskID = "task_id"
+    }
+}
+
+private final class LocalConsoleModel: ObservableObject {
+    typealias Command = ([String]) -> (status: Int32, output: String)
+
+    @Published private(set) var messages: [LocalConsoleMessage] = []
+    @Published var draft = ""
+    @Published var attachments: [String] = []
+    @Published private(set) var status = ""
+    @Published private(set) var sending = false
+
+    private let command: Command
+    private var refreshTimer: Timer?
+
+    init(command: @escaping Command) {
+        self.command = command
+        refresh()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
+    }
+
+    deinit {
+        refreshTimer?.invalidate()
+    }
+
+    func refresh() {
+        let command = command
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = command(["local-history", "--limit", "120"])
+            guard result.status == 0,
+                  let payload = result.output.data(using: .utf8),
+                  let history = try? JSONDecoder().decode(LocalConsoleHistory.self, from: payload)
+            else {
+                return
+            }
+            DispatchQueue.main.async {
+                self?.messages = history.messages
+            }
+        }
+    }
+
+    func addAttachments(_ urls: [URL]) {
+        for url in urls where !attachments.contains(url.path) {
+            attachments.append(url.path)
+        }
+    }
+
+    func removeAttachment(_ path: String) {
+        attachments.removeAll { $0 == path }
+    }
+
+    func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let files = attachments
+        guard !sending, !text.isEmpty || !files.isEmpty else { return }
+        sending = true
+        status = "Sending…"
+        draft = ""
+        attachments = []
+        let command = command
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var arguments = ["local-send", "--text", text]
+            for file in files {
+                arguments += ["--file", file]
+            }
+            let result = command(arguments)
+            let taskID = result.output.data(using: .utf8)
+                .flatMap { try? JSONDecoder().decode(LocalConsoleSubmission.self, from: $0) }
+                .map(\.taskID)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.sending = false
+                self.status = result.status == 0
+                    ? "Queued\(taskID.map { " · \($0)" } ?? "")"
+                    : (result.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "Could not queue the task."
+                        : result.output.trimmingCharacters(in: .whitespacesAndNewlines))
+                self.refresh()
+            }
+        }
+    }
+}
+
+private struct LocalConsoleView: View {
+    @ObservedObject var model: LocalConsoleModel
+    let chooseFiles: () -> Void
+    let revealArtifacts: ([String]) -> Void
+    let close: () -> Void
+
+    private func bubbleColor(_ role: String) -> Color {
+        switch role {
+        case "user": return .blue.opacity(0.24)
+        case "system": return .secondary.opacity(0.12)
+        default: return .secondary.opacity(0.18)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Codeshark")
+                        .font(.title3.weight(.semibold))
+                    Text("Direct local session · separate from Telegram")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Close", action: close)
+                    .buttonStyle(.bordered)
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if model.messages.isEmpty {
+                        ContentUnavailableView(
+                            "Start a local task",
+                            systemImage: "bubble.left.and.bubble.right",
+                            description: Text("This uses the same Codeshark workspace and delivery flow without Telegram."))
+                            .frame(maxWidth: .infinity, minHeight: 250)
+                    } else {
+                        ForEach(model.messages) { message in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(message.role == "user" ? "You" : message.role == "system" ? "Codeshark" : "Codeshark")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                if !message.text.isEmpty {
+                                    Text(message.text)
+                                        .font(.body)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                ForEach(message.attachments, id: \.self) { path in
+                                    Button(URL(fileURLWithPath: path).lastPathComponent) {
+                                        revealArtifacts([path])
+                                    }
+                                    .buttonStyle(.link)
+                                    .font(.caption)
+                                }
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(bubbleColor(message.role), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(minHeight: 300)
+
+            if !model.attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(model.attachments, id: \.self) { path in
+                            HStack(spacing: 4) {
+                                Text(URL(fileURLWithPath: path).lastPathComponent)
+                                    .lineLimit(1)
+                                Button {
+                                    model.removeAttachment(path)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.quaternary, in: Capsule())
+                        }
+                    }
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                Button(action: chooseFiles) {
+                    Image(systemName: "paperclip")
+                }
+                .buttonStyle(.bordered)
+                TextEditor(text: $model.draft)
+                    .font(.body)
+                    .frame(minHeight: 42, maxHeight: 78)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                Button(model.sending ? "Sending…" : "Send") {
+                    model.send()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.sending || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
+            }
+            if !model.status.isEmpty {
+                Text(model.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 600, minHeight: 560, alignment: .topLeading)
     }
 }
 
@@ -1488,6 +1747,11 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var attentionPanel: NSPanel?
     private var modelRoutingPanel: NSPanel?
     private var orchestrationPanel: NSPanel?
+    private var securityPanel: NSPanel?
+    private var localConsolePanel: NSPanel?
+    private var localConsoleModel: LocalConsoleModel?
+    private var securityNetworkAccess: NSButton?
+    private var securityAdminFullAccess: NSButton?
     private var modelPickers: [String: NSPopUpButton] = [:]
     private var reasoningPickers: [String: NSPopUpButton] = [:]
     private var orchestrationPreflight: [String: NSButton] = [:]
@@ -1560,6 +1824,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         menu.addItem(.separator())
+        menu.addItem(actionItem("Open Codeshark", action: #selector(openLocalConsole(_:))))
+        menu.addItem(.separator())
         let taskTitle = snapshot.queueCount > 0 || snapshot.activeTaskCount > 0
             ? "Tasks · \(snapshot.activeTaskCount) active · \(snapshot.queueCount) queued"
             : "Tasks"
@@ -1572,6 +1838,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         menu.addItem(.separator())
         menu.addItem(actionItem("Model Routing", action: #selector(openModelRouting(_:))))
         menu.addItem(actionItem("Orchestration", action: #selector(openOrchestration(_:))))
+        menu.addItem(actionItem("Security Settings", action: #selector(openSecurity(_:))))
         menu.addItem(usageMenuItem(snapshot: snapshot))
         menu.addItem(actionItem("Workspace", action: #selector(openWorkspace(_:))))
         menu.addItem(actionItem("Logs", action: #selector(openLogs(_:))))
@@ -1646,6 +1913,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         configureModels()
     }
 
+    @objc private func openLocalConsole(_ sender: Any?) {
+        showLocalConsole()
+    }
+
+    @objc private func openSecurity(_ sender: Any?) {
+        configureSecurity()
+    }
+
     @objc private func openTasks(_ sender: Any?) {
         showTasks()
     }
@@ -1676,6 +1951,180 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     @objc private func openLogs(_ sender: Any?) {
         showLogs()
+    }
+
+    private func configureSecurity() {
+        dashboard.refresh()
+        if let panel = securityPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let security = dashboard.snapshot.security ?? DashboardSecurity(
+            sandbox: "workspace-write",
+            networkAccess: false,
+            adminFullAccess: false,
+            telegram: "Keychain credential · one paired administrator",
+            groups: []
+        )
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 480),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Security Settings"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+
+        let content = NSView(frame: panel.contentView?.bounds ?? .zero)
+        let title = NSTextField(labelWithString: "Security Settings")
+        title.font = .systemFont(ofSize: 16, weight: .semibold)
+        title.frame = NSRect(x: 16, y: 444, width: 588, height: 21)
+        content.addSubview(title)
+        let detail = NSTextField(wrappingLabelWithString: "Changes save now and the service restarts after active work finishes. The menu bar stays available.")
+        detail.font = .systemFont(ofSize: 11)
+        detail.textColor = .secondaryLabelColor
+        detail.frame = NSRect(x: 16, y: 410, width: 588, height: 28)
+        content.addSubview(detail)
+
+        let execution = NSTextField(labelWithString: "EXECUTION")
+        execution.font = .systemFont(ofSize: 10, weight: .semibold)
+        execution.textColor = .secondaryLabelColor
+        execution.frame = NSRect(x: 16, y: 383, width: 180, height: 14)
+        content.addSubview(execution)
+        let sandbox = NSTextField(labelWithString: "Sandbox · \(security.sandbox) (fixed)")
+        sandbox.font = .systemFont(ofSize: 12)
+        sandbox.frame = NSRect(x: 16, y: 358, width: 280, height: 18)
+        content.addSubview(sandbox)
+        let network = NSButton(checkboxWithTitle: "Allow network access", target: nil, action: nil)
+        network.state = security.networkAccess ? .on : .off
+        network.font = .systemFont(ofSize: 12)
+        network.frame = NSRect(x: 16, y: 329, width: 250, height: 20)
+        content.addSubview(network)
+        let fullAccess = NSButton(checkboxWithTitle: "Allow administrator full filesystem access", target: nil, action: nil)
+        fullAccess.state = security.adminFullAccess ? .on : .off
+        fullAccess.font = .systemFont(ofSize: 12)
+        fullAccess.frame = NSRect(x: 16, y: 302, width: 330, height: 20)
+        content.addSubview(fullAccess)
+        securityNetworkAccess = network
+        securityAdminFullAccess = fullAccess
+
+        let telegram = NSTextField(labelWithString: "TELEGRAM")
+        telegram.font = .systemFont(ofSize: 10, weight: .semibold)
+        telegram.textColor = .secondaryLabelColor
+        telegram.frame = NSRect(x: 16, y: 267, width: 180, height: 14)
+        content.addSubview(telegram)
+        let telegramPolicy = NSTextField(wrappingLabelWithString: "\(security.telegram). Private and group conversations have separate persistent sessions.")
+        telegramPolicy.font = .systemFont(ofSize: 12)
+        telegramPolicy.textColor = .labelColor
+        telegramPolicy.frame = NSRect(x: 16, y: 232, width: 588, height: 30)
+        content.addSubview(telegramPolicy)
+
+        let groups = NSTextField(labelWithString: "GROUP CHAT")
+        groups.font = .systemFont(ofSize: 10, weight: .semibold)
+        groups.textColor = .secondaryLabelColor
+        groups.frame = NSRect(x: 16, y: 199, width: 180, height: 14)
+        content.addSubview(groups)
+        let enabledGroups = security.groups.isEmpty
+            ? "No enabled groups."
+            : security.groups.prefix(3).map { "\($0.title) (\($0.chatID))" }.joined(separator: " · ")
+        let groupSummary = NSTextField(wrappingLabelWithString: "Enabled: \(enabledGroups)")
+        groupSummary.font = .systemFont(ofSize: 12)
+        groupSummary.frame = NSRect(x: 16, y: 165, width: 588, height: 28)
+        content.addSubview(groupSummary)
+        let groupPolicy = NSTextField(wrappingLabelWithString: "Requests must mention or reply to Codeshark. Non-admin members stay isolated: group sandbox only, no administrator memory, credentials, project roots, or MCP.")
+        groupPolicy.font = .systemFont(ofSize: 11)
+        groupPolicy.textColor = .secondaryLabelColor
+        groupPolicy.frame = NSRect(x: 16, y: 112, width: 588, height: 44)
+        content.addSubview(groupPolicy)
+
+        let local = NSTextField(wrappingLabelWithString: "Local console: actions sent through Open Codeshark are direct owner requests on this Mac, with a separate session and the same configured sandbox.")
+        local.font = .systemFont(ofSize: 11)
+        local.textColor = .secondaryLabelColor
+        local.frame = NSRect(x: 16, y: 69, width: 588, height: 32)
+        content.addSubview(local)
+
+        let separator = NSBox(frame: NSRect(x: 16, y: 43, width: 588, height: 1))
+        separator.boxType = .separator
+        content.addSubview(separator)
+        let close = NSButton(title: "Close", target: self, action: #selector(closeSecurity))
+        close.bezelStyle = .rounded
+        close.frame = NSRect(x: 16, y: 9, width: 84, height: 26)
+        content.addSubview(close)
+        let apply = NSButton(title: "Apply", target: self, action: #selector(applySecurity))
+        apply.bezelStyle = .rounded
+        apply.keyEquivalent = "\r"
+        apply.frame = NSRect(x: 520, y: 9, width: 84, height: 26)
+        content.addSubview(apply)
+        panel.contentView = content
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        securityPanel = panel
+    }
+
+    @objc private func closeSecurity() {
+        securityPanel?.close()
+    }
+
+    @objc private func applySecurity() {
+        guard let network = securityNetworkAccess, let fullAccess = securityAdminFullAccess else {
+            showError("Could not read the security settings.")
+            return
+        }
+        securityPanel?.close()
+        runServiceCommand([
+            "set-security",
+            "--network", network.state == .on ? "true" : "false",
+            "--admin-full-access", fullAccess.state == .on ? "true" : "false",
+        ])
+    }
+
+    private func showLocalConsole() {
+        if let panel = localConsolePanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let model = LocalConsoleModel { [weak self] arguments in
+            self?.executeServiceCommand(arguments) ?? (status: 1, output: "Codeshark is unavailable.")
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 650),
+            styleMask: [.titled, .closable, .utilityWindow, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark"
+        panel.minSize = NSSize(width: 600, height: 560)
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        panel.contentViewController = NSHostingController(
+            rootView: LocalConsoleView(
+                model: model,
+                chooseFiles: { [weak self] in self?.chooseLocalFiles() },
+                revealArtifacts: { [weak self] paths in self?.revealArtifacts(paths) },
+                close: { [weak self] in self?.localConsolePanel?.close() }
+            )
+        )
+        localConsoleModel = model
+        localConsolePanel = panel
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func chooseLocalFiles() {
+        let chooser = NSOpenPanel()
+        chooser.canChooseFiles = true
+        chooser.canChooseDirectories = false
+        chooser.allowsMultipleSelection = true
+        chooser.message = "Attach files to the local Codeshark task"
+        guard chooser.runModal() == .OK else { return }
+        localConsoleModel?.addAttachments(chooser.urls)
     }
 
     private func chooseWorkspace() {
@@ -2295,6 +2744,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             orchestrationValidation = [:]
             orchestrationFeedback = [:]
             orchestrationFinalization = [:]
+        } else if window == securityPanel {
+            securityPanel = nil
+            securityNetworkAccess = nil
+            securityAdminFullAccess = nil
+        } else if window == localConsolePanel {
+            localConsolePanel = nil
+            localConsoleModel = nil
         } else if window == usagePanel {
             usagePanel = nil
         } else if window == taskPanel {
@@ -2336,10 +2792,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         NSWorkspace.shared.activateFileViewerSelecting(files)
     }
 
-    private func runServiceCommand(_ arguments: [String]) {
+    private func executeServiceCommand(_ arguments: [String]) -> (status: Int32, output: String) {
         guard let python = servicePython() else {
-            showError("Could not find the Codeshark service Python runtime.")
-            return
+            return (status: 1, output: "Could not find the Codeshark service Python runtime.")
         }
         let command = Process()
         let output = Pipe()
@@ -2360,15 +2815,19 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             try command.run()
             command.waitUntilExit()
         } catch {
-            showError("Could not apply the setting: \(error.localizedDescription)")
-            return
+            return (status: 1, output: "Could not run Codeshark: \(error.localizedDescription)")
         }
-        if command.terminationStatus != 0 {
-            let detail = String(
-                data: output.fileHandleForReading.readDataToEndOfFile(),
-                encoding: .utf8
-            ) ?? ""
-            showError(detail.isEmpty ? "Could not apply the setting." : detail)
+        let detail = String(
+            data: output.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+        return (status: command.terminationStatus, output: detail)
+    }
+
+    private func runServiceCommand(_ arguments: [String]) {
+        let result = executeServiceCommand(arguments)
+        if result.status != 0 {
+            showError(result.output.isEmpty ? "Could not apply the setting." : result.output)
         }
     }
 

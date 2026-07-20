@@ -956,6 +956,38 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(runner.deleted_sessions, [])
 
+    def test_local_result_is_recorded_without_telegram_delivery(self) -> None:
+        artifact = self.config.workdir / "local-result.md"
+        artifact.write_text("result", encoding="utf-8")
+        result = RunResult(
+            exit_code=0,
+            message="Completed locally.",
+            thread_id="local-thread",
+            stderr="",
+        )
+
+        self.app._deliver_result(
+            0,
+            result,
+            persist_session=True,
+            restricted=False,
+            project="General",
+            documents=(artifact,),
+            task_id="local-task",
+            local=True,
+        )
+
+        self.assertEqual(self.api.messages, [])
+        self.assertEqual(self.api.documents, [])
+        self.assertEqual(
+            self.app.store.list_local_messages()[-1].attachments,
+            (str(artifact),),
+        )
+        self.assertEqual(
+            self.app.state.session_snapshot(0, "General").codex_thread_id,
+            "local-thread",
+        )
+
     def test_feedback_requires_a_successful_completed_task(self) -> None:
         self.app._handle_update(self.update(123, "/good"))
         self.assertIn("no completed task", self.api.messages[-1][1].lower())

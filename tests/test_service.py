@@ -140,6 +140,26 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(result.running)
         self.assertEqual(result.pid, 456)
 
+    @patch("codex_codeshark.service.time.sleep")
+    @patch("codex_codeshark.service.install_service")
+    @patch("codex_codeshark.service.service_status")
+    def test_standard_restart_keeps_an_existing_menu_agent(
+        self,
+        status_mock: Mock,
+        install_mock: Mock,
+        _sleep_mock: Mock,
+    ) -> None:
+        status_mock.return_value = ServiceStatus(True, "running", 456)
+        with tempfile.TemporaryDirectory() as directory:
+            plist = Path(directory) / "agent.plist"
+            plist.write_text("placeholder", encoding="utf-8")
+            plist.with_name("com.codeshark.status.plist").write_text(
+                "menu", encoding="utf-8"
+            )
+            restart_service(plist_path=plist)
+
+        self.assertFalse(install_mock.call_args.kwargs["install_menu"])
+
     def test_deferred_restart_waits_for_the_active_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

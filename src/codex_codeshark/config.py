@@ -604,6 +604,44 @@ def set_model_assignments(
         raise
 
 
+def set_security_settings(
+    *,
+    network_access: bool,
+    admin_full_access: bool,
+    config_path: Path | None = None,
+) -> Config:
+    """Persist the two administrator-controlled execution permissions."""
+    if not isinstance(network_access, bool) or not isinstance(admin_full_access, bool):
+        raise ConfigError("security settings must be true or false")
+    path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
+    try:
+        original = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"cannot read config: {exc}") from exc
+    updated = original
+    assignments = {
+        "codex_network_access": network_access,
+        "admin_full_access": admin_full_access,
+    }
+    for setting, value in assignments.items():
+        rendered = str(value).lower()
+        updated, replacements = re.subn(
+            rf"(?m)^{setting}\s*=\s*(?:true|false)\s*$",
+            f"{setting} = {rendered}",
+            updated,
+        )
+        if replacements != 1:
+            raise ConfigError(f"config must contain exactly one {setting} setting")
+    if updated == original:
+        return load_config(path)
+    atomic_write_text(path, updated)
+    try:
+        return load_config(path)
+    except ConfigError:
+        atomic_write_text(path, original)
+        raise
+
+
 def set_orchestration(
     *,
     profiles: dict[str, OrchestrationProfile],

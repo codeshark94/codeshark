@@ -35,6 +35,7 @@ from .learning import (
     can_auto_approve_learning,
     extract_learning_candidate,
 )
+from .local_console import LOCAL_CONSOLE_SOURCE
 from .memory import (
     FeedbackStore,
     MemoryStore,
@@ -531,6 +532,7 @@ class AgentApp:
             ]
             recent_manifests = self.store.recent_task_manifests(limit=8)
             failed_deliveries = self.store.list_failed_deliveries(limit=8)
+            enabled_groups = self.store.list_groups()
             projects: dict[str, dict[str, object]] = {}
 
             def project_summary(project: str) -> dict[str, object]:
@@ -617,6 +619,20 @@ class AgentApp:
                         "state": "working" if active_tasks else "idle",
                         "queue_count": self.store.pending_count(),
                         "workspace_path": str(self.config.workdir),
+                        "security": {
+                            "sandbox": "workspace-write",
+                            "network_access": self.config.codex_network_access,
+                            "admin_full_access": self.config.admin_full_access,
+                            "telegram": "Keychain credential · one paired administrator",
+                            "groups": [
+                                {
+                                    "chat_id": group.chat_id,
+                                    "title": group.title,
+                                    "enabled_at": int(group.enabled_at),
+                                }
+                                for group in enabled_groups
+                            ],
+                        },
                         "model_assignments": [
                             assignment(
                                 "Routine",
@@ -1435,6 +1451,8 @@ class AgentApp:
                 self._active_tasks[task.id] = ActiveTask(task, runner)
                 active_task_count = len(self._active_tasks)
             self._write_menu_status(active_task_count)
+            if task.source == LOCAL_CONSOLE_SOURCE:
+                self.store.append_local_message("system", "Working…", task_id=task.id)
             try:
                 result = self._execute_task(
                     task,
@@ -1519,10 +1537,12 @@ class AgentApp:
                 self._set_active_task_project(task)
         full_access = self.config.admin_full_access and not task.restricted
         effective_approval = task.approved or full_access
+        local_console = task.source == LOCAL_CONSOLE_SOURCE
         file_delivery_requested = not task.restricted and self._file_delivery_requested(request)
         figure_revision = not task.restricted and self._is_figure_revision(request)
         automatic_file_delivery = (
-            not task.restricted and self.state.automatic_file_delivery_enabled(task.chat_id)
+            not task.restricted
+            and (local_console or self.state.automatic_file_delivery_enabled(task.chat_id))
         )
         file_delivery_required = file_delivery_requested or figure_revision
         file_delivery_enabled = file_delivery_required or automatic_file_delivery
@@ -1722,7 +1742,7 @@ class AgentApp:
                     else "not-requested"
                 ),
             )
-        if proposed and acceptance_passed and task.source == "telegram":
+        if proposed and acceptance_passed and task.source in {"telegram", LOCAL_CONSOLE_SOURCE}:
             self._auto_apply_learning(
                 proposed,
                 source_task_id=task.id,
@@ -1751,6 +1771,7 @@ class AgentApp:
             reply_to_message_id=task.reply_to_message_id,
             documents=delivery_files,
             task_id=task.id,
+            local=local_console,
         )
         if not task.restricted:
             with self._status_lock:
@@ -1915,6 +1936,7 @@ class AgentApp:
         reply_to_message_id: int | None = None,
         documents: tuple[Path, ...] = (),
         task_id: str | None = None,
+        local: bool = False,
     ) -> None:
         if persist_session and result.thread_id:
             if result.timed_out:
@@ -1922,6 +1944,9 @@ class AgentApp:
                 self.state.mark_session_interrupted(chat_id, project)
             else:
                 self.state.record_session_turn(chat_id, result.thread_id, project)
+        if local:
+            self._deliver_local_result(result, documents=documents, task_id=task_id)
+            return
         if result.cancelled:
             self._send_message(
                 chat_id,
@@ -1969,6 +1994,28 @@ class AgentApp:
                 "Codex completed the task without a text response.",
                 reply_to_message_id=reply_to_message_id,
             )
+
+    def _deliver_local_result(
+        self,
+        result: RunResult,
+        *,
+        documents: tuple[Path, ...],
+        task_id: str | None,
+    ) -> None:
+        if result.cancelled:
+            text = "The task was cancelled."
+        elif result.timed_out:
+            text = "The task exceeded its time limit and was stopped."
+        elif result.exit_code != 0:
+            text = "Codeshark could not complete this task. Check the local logs and retry."
+        else:
+            text = result.message or "Codex completed the task without a text response."
+        self.store.append_local_message(
+            "assistant",
+            text,
+            task_id=task_id,
+            attachments=tuple(str(path) for path in documents),
+        )
 
     def _set_manifest_delivery(
         self,

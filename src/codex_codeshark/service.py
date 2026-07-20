@@ -314,6 +314,7 @@ def install_service(
     python: str = sys.executable,
     install_root: Path = INSTALL_ROOT,
     source_root: Path = SOURCE_ROOT,
+    install_menu: bool = True,
 ) -> Path:
     config_path = project_root / "config.local.toml"
     if config_path.is_symlink() or not config_path.is_file():
@@ -326,7 +327,6 @@ def install_service(
         config_path=config_path,
         install_root=install_root,
     )
-    menu_executable, menu_icon = _build_menu_bar_agent(installed_source)
     menu_plist_path = _menu_plist_path(plist_path)
     atomic_write_bytes(
         plist_path,
@@ -335,21 +335,24 @@ def install_service(
             sort_keys=False,
         ),
     )
-    atomic_write_bytes(
-        menu_plist_path,
-        plistlib.dumps(_menu_payload(project_root, menu_executable, menu_icon), sort_keys=False),
-    )
+    if install_menu:
+        menu_executable, menu_icon = _build_menu_bar_agent(installed_source)
+        atomic_write_bytes(
+            menu_plist_path,
+            plistlib.dumps(_menu_payload(project_root, menu_executable, menu_icon), sort_keys=False),
+        )
 
     subprocess.run(
         ["/bin/launchctl", "bootout", _domain(), str(plist_path)],
         capture_output=True,
         check=False,
     )
-    subprocess.run(
-        ["/bin/launchctl", "bootout", _domain(), str(menu_plist_path)],
-        capture_output=True,
-        check=False,
-    )
+    if install_menu:
+        subprocess.run(
+            ["/bin/launchctl", "bootout", _domain(), str(menu_plist_path)],
+            capture_output=True,
+            check=False,
+        )
     result = subprocess.run(
         ["/bin/launchctl", "bootstrap", _domain(), str(plist_path)],
         capture_output=True,
@@ -363,21 +366,22 @@ def install_service(
         capture_output=True,
         check=False,
     )
-    result = subprocess.run(
-        ["/bin/launchctl", "bootstrap", _domain(), str(menu_plist_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise ServiceError(
-            result.stderr.strip() or result.stdout.strip() or "launchctl menu bootstrap failed"
+    if install_menu:
+        result = subprocess.run(
+            ["/bin/launchctl", "bootstrap", _domain(), str(menu_plist_path)],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-    subprocess.run(
-        ["/bin/launchctl", "kickstart", "-k", _menu_service_target()],
-        capture_output=True,
-        check=False,
-    )
+        if result.returncode != 0:
+            raise ServiceError(
+                result.stderr.strip() or result.stdout.strip() or "launchctl menu bootstrap failed"
+            )
+        subprocess.run(
+            ["/bin/launchctl", "kickstart", "-k", _menu_service_target()],
+            capture_output=True,
+            check=False,
+        )
     return plist_path
 
 
@@ -483,12 +487,14 @@ def restart_service(
     plist_path: Path = PLIST_PATH,
     python: str = sys.executable,
     install_root: Path = INSTALL_ROOT,
+    refresh_menu: bool = False,
 ) -> ServiceStatus:
     install_service(
         project_root=project_root,
         plist_path=plist_path,
         python=python,
         install_root=install_root,
+        install_menu=refresh_menu or not _menu_plist_path(plist_path).is_file(),
     )
     return _wait_for_status(running=True)
 

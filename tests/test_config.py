@@ -17,6 +17,7 @@ from codex_codeshark.config import (
     prepare_group_runtime,
     set_model_assignments,
     set_orchestration,
+    set_security_settings,
     set_workspace_directory,
     validate_mcp_policy,
     write_codex_profile,
@@ -100,6 +101,42 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.workdir, new_workspace.resolve())
             text = config_path.read_text(encoding="utf-8")
             self.assertIn(f'workdir = "{new_workspace.resolve()}"', text)
+            self.assertIn('primary_model = "gpt-5.6-sol"', text)
+
+    def test_sets_security_permissions_without_rewriting_other_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        "codex_network_access = false",
+                        "admin_full_access = false",
+                        'primary_model = "gpt-5.6-sol"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            updated = set_security_settings(
+                network_access=True,
+                admin_full_access=True,
+                config_path=config_path,
+            )
+
+            self.assertTrue(updated.codex_network_access)
+            self.assertTrue(updated.admin_full_access)
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn("codex_network_access = true", text)
+            self.assertIn("admin_full_access = true", text)
             self.assertIn('primary_model = "gpt-5.6-sol"', text)
 
     def test_sets_model_assignments_without_rewriting_other_settings(self) -> None:

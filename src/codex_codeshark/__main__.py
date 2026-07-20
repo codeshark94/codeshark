@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from pathlib import Path
 
 from .app import AgentApp
+from .automation import AgentStore
 from .config import (
     ConfigError,
     ORCHESTRATION_TIERS,
@@ -14,12 +16,14 @@ from .config import (
     load_config,
     set_model_assignments,
     set_orchestration,
+    set_security_settings,
     set_workspace_directory,
     validate_codex_profile,
     validate_codex_version,
     validate_mcp_policy,
 )
 from .doctor import run_doctor
+from .local_console import local_history, local_security_summary, submit_local_request
 from .migration import MigrationError, export_personal_data, import_personal_data
 from .personal_sync import PersonalDataSync, PersonalSyncError
 from .service import (
@@ -49,6 +53,17 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("refresh-menu", help="rebuild and restart only the menu bar")
     commands.add_parser("apply-pending-restart", help=argparse.SUPPRESS)
     commands.add_parser("service-status", help="show the background service status")
+    commands.add_parser("security-status", help=argparse.SUPPRESS)
+    security = commands.add_parser("set-security", help="set Codeshark execution security settings")
+    security.add_argument("--network", required=True, choices=("true", "false"))
+    security.add_argument("--admin-full-access", required=True, choices=("true", "false"))
+    disable_group = commands.add_parser("disable-group", help=argparse.SUPPRESS)
+    disable_group.add_argument("chat_id", type=int)
+    local_history_parser = commands.add_parser("local-history", help=argparse.SUPPRESS)
+    local_history_parser.add_argument("--limit", type=int, default=100)
+    local_send = commands.add_parser("local-send", help=argparse.SUPPRESS)
+    local_send.add_argument("--text", default="")
+    local_send.add_argument("--file", action="append", type=Path, default=[])
     workspace = commands.add_parser("set-workspace", help="set the Codeshark workspace directory")
     workspace.add_argument("directory", type=Path)
     models = commands.add_parser("set-models", help="set the role-specific Codeshark models")
@@ -126,6 +141,68 @@ def main() -> int:
                 print(f"Service: {status.state}")
                 if status.pid is not None:
                     print(f"PID: {status.pid}")
+            return 0
+        if args.command == "security-status":
+            print(json.dumps(local_security_summary(load_config()), ensure_ascii=False))
+            return 0
+        if args.command == "set-security":
+            config = set_security_settings(
+                network_access=args.network == "true",
+                admin_full_access=args.admin_full_access == "true",
+            )
+            status = restart_when_idle()
+            print(
+                "Security: "
+                f"network={'enabled' if config.codex_network_access else 'disabled'}, "
+                f"administrator={'full' if config.admin_full_access else 'approval-gated'}"
+            )
+            if status is None:
+                print("Restart: scheduled after active work finishes")
+            return 0
+        if args.command == "disable-group":
+            config = load_config()
+            disabled = AgentStore(config.state_path.parent / "agent.db").disable_group(args.chat_id)
+            if not disabled:
+                raise ConfigError("group is not enabled")
+            print(f"Group disabled: {args.chat_id}")
+            return 0
+        if args.command == "local-history":
+            messages = local_history(load_config(), limit=args.limit)
+            print(
+                json.dumps(
+                    {
+                        "messages": [
+                            {
+                                "id": item.id,
+                                "task_id": item.task_id,
+                                "role": item.role,
+                                "text": item.text,
+                                "attachments": list(item.attachments),
+                                "created_at": int(item.created_at),
+                            }
+                            for item in messages
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return 0
+        if args.command == "local-send":
+            submission = submit_local_request(
+                load_config(),
+                args.text,
+                attachments=tuple(args.file),
+            )
+            print(
+                json.dumps(
+                    {
+                        "task_id": submission.task_id,
+                        "project": submission.project,
+                        "attachments": [str(path) for path in submission.attachments],
+                    },
+                    ensure_ascii=False,
+                )
+            )
             return 0
         if args.command in {"start", "stop", "restart", "service-status"}:
             if args.command == "start":

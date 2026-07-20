@@ -69,6 +69,16 @@ class DeliveryRecord:
 
 
 @dataclass(frozen=True)
+class LocalConversationMessage:
+    id: int
+    task_id: str | None
+    role: str
+    text: str
+    attachments: tuple[str, ...]
+    created_at: float
+
+
+@dataclass(frozen=True)
 class TaskManifest:
     task_id: str
     project: str
@@ -393,6 +403,16 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS deliveries_status
                     ON deliveries(status, updated_at);
+                CREATE TABLE IF NOT EXISTS local_conversation (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT,
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    attachments_json TEXT NOT NULL DEFAULT '[]',
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS local_conversation_recent
+                    ON local_conversation(id DESC);
                 CREATE TABLE IF NOT EXISTS task_manifests (
                     task_id TEXT PRIMARY KEY,
                     project TEXT NOT NULL,
@@ -585,6 +605,75 @@ class AgentStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    @staticmethod
+    def _local_message(row: sqlite3.Row | None) -> LocalConversationMessage | None:
+        if row is None:
+            return None
+        try:
+            raw_attachments = json.loads(row["attachments_json"])
+            attachments = (
+                tuple(item for item in raw_attachments if isinstance(item, str))
+                if isinstance(raw_attachments, list)
+                else ()
+            )
+        except (TypeError, ValueError):
+            attachments = ()
+        return LocalConversationMessage(
+            id=int(row["id"]),
+            task_id=row["task_id"],
+            role=row["role"],
+            text=row["text"],
+            attachments=attachments,
+            created_at=float(row["created_at"]),
+        )
+
+    def append_local_message(
+        self,
+        role: str,
+        text: str,
+        *,
+        task_id: str | None = None,
+        attachments: tuple[str, ...] = (),
+    ) -> LocalConversationMessage:
+        if role not in {"user", "assistant", "system"}:
+            raise ValueError("local message role is invalid")
+        normalized_text = text.strip()[:12000]
+        normalized_attachments = tuple(
+            item.strip() for item in attachments if isinstance(item, str) and item.strip()
+        )[:20]
+        if not normalized_text and not normalized_attachments:
+            raise ValueError("local message must include text or an attachment")
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO local_conversation (task_id, role, text, attachments_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    role,
+                    normalized_text,
+                    json.dumps(normalized_attachments),
+                    time.time(),
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM local_conversation WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+        message = self._local_message(row)
+        if message is None:
+            raise RuntimeError("could not save local conversation message")
+        return message
+
+    def list_local_messages(self, limit: int = 100) -> list[LocalConversationMessage]:
+        safe_limit = max(1, min(limit, 500))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM local_conversation ORDER BY id DESC LIMIT ?", (safe_limit,)
+            ).fetchall()
+        messages = [self._local_message(row) for row in reversed(rows)]
+        return [message for message in messages if message is not None]
 
     def record_delivery_failure(
         self,
@@ -1019,6 +1108,7 @@ class AgentStore:
         source: str,
         ephemeral: bool,
         requires_approval: bool = False,
+        approved: bool = False,
         restricted: bool = False,
         requester_id: int | None = None,
         reply_to_message_id: int | None = None,
@@ -1032,8 +1122,8 @@ class AgentStore:
                 """
                 INSERT INTO tasks
                     (id, chat_id, prompt, source, ephemeral, status, created_at, due_at,
-                     restricted, requester_id, reply_to_message_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     approved, restricted, requester_id, reply_to_message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -1044,6 +1134,7 @@ class AgentStore:
                     status,
                     now,
                     due_at or now,
+                    int(approved),
                     int(restricted),
                     requester_id,
                     reply_to_message_id,
