@@ -100,6 +100,43 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(role_usage[0].total_tokens, 160)
             self.assertEqual(role_usage[1].role, "Validation")
 
+    def test_summarizes_model_usage_by_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.upsert_task_manifest(
+                "task-1",
+                project="Research",
+                tier="deep",
+                phase="completed",
+            )
+            store.record_model_run(
+                task_id="task-1",
+                phase="primary",
+                role="Primary",
+                model="gpt-5.6-luna",
+                reasoning_effort="medium",
+                started_at=100.0,
+                finished_at=160.0,
+                exit_code=0,
+                cancelled=False,
+                timed_out=False,
+                input_tokens=120,
+                cached_input_tokens=30,
+                output_tokens=40,
+                reasoning_output_tokens=15,
+                total_tokens=160,
+                token_usage_recorded=True,
+            )
+
+            usage = store.project_model_usage(since=150.0)
+
+            self.assertEqual(len(usage), 1)
+            self.assertEqual(usage[0].project, "Research")
+            self.assertEqual(usage[0].model, "gpt-5.6-luna")
+            self.assertEqual(usage[0].measured_runs, 1)
+            self.assertEqual(usage[0].cached_input_tokens, 30)
+            self.assertEqual(usage[0].reasoning_output_tokens, 15)
+
     def test_persists_and_recovers_running_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "agent.db"

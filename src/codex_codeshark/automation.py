@@ -99,6 +99,21 @@ class ModelRunSummary:
 
 
 @dataclass(frozen=True)
+class ProjectModelUsage:
+    project: str
+    model: str
+    reasoning_effort: str
+    runs: int
+    measured_runs: int
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_input_tokens: int
+    output_tokens: int
+    reasoning_output_tokens: int
+    total_tokens: int
+
+
+@dataclass(frozen=True)
 class ModelRoleUsage:
     role: str
     model: str
@@ -814,6 +829,44 @@ class AgentStore:
                 runs=row["runs"],
                 completed=row["completed"],
                 elapsed_seconds=row["elapsed_seconds"],
+                measured_runs=row["measured_runs"],
+                input_tokens=row["input_tokens"],
+                cached_input_tokens=row["cached_input_tokens"],
+                cache_write_input_tokens=row["cache_write_input_tokens"],
+                output_tokens=row["output_tokens"],
+                reasoning_output_tokens=row["reasoning_output_tokens"],
+                total_tokens=row["total_tokens"],
+            )
+            for row in rows
+        ]
+
+    def project_model_usage(self, *, since: float) -> list[ProjectModelUsage]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT COALESCE(manifests.project, 'General') AS project,
+                       runs.model, runs.reasoning_effort, COUNT(*) AS runs,
+                       SUM(runs.token_usage_recorded) AS measured_runs,
+                       SUM(runs.input_tokens) AS input_tokens,
+                       SUM(runs.cached_input_tokens) AS cached_input_tokens,
+                       SUM(runs.cache_write_input_tokens) AS cache_write_input_tokens,
+                       SUM(runs.output_tokens) AS output_tokens,
+                       SUM(runs.reasoning_output_tokens) AS reasoning_output_tokens,
+                       SUM(runs.total_tokens) AS total_tokens
+                FROM model_runs AS runs
+                LEFT JOIN task_manifests AS manifests ON manifests.task_id = runs.task_id
+                WHERE runs.finished_at >= ?
+                GROUP BY project, runs.model, runs.reasoning_effort
+                ORDER BY total_tokens DESC, project, runs.model, runs.reasoning_effort
+                """,
+                (since,),
+            ).fetchall()
+        return [
+            ProjectModelUsage(
+                project=row["project"],
+                model=row["model"],
+                reasoning_effort=row["reasoning_effort"],
+                runs=row["runs"],
                 measured_runs=row["measured_runs"],
                 input_tokens=row["input_tokens"],
                 cached_input_tokens=row["cached_input_tokens"],

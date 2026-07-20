@@ -176,6 +176,11 @@ struct DashboardModelUsage: Decodable, Identifiable {
     let completed: Int
     let elapsedSeconds: Double
     let measuredRuns: Int?
+    let inputTokens: Int?
+    let cachedInputTokens: Int?
+    let cacheWriteInputTokens: Int?
+    let outputTokens: Int?
+    let reasoningOutputTokens: Int?
     let totalTokens: Int?
 
     var id: String { "\(model)-\(reasoningEffort)-\(phase)" }
@@ -185,6 +190,39 @@ struct DashboardModelUsage: Decodable, Identifiable {
         case reasoningEffort = "reasoning_effort"
         case elapsedSeconds = "elapsed_seconds"
         case measuredRuns = "measured_runs"
+        case inputTokens = "input_tokens"
+        case cachedInputTokens = "cached_input_tokens"
+        case cacheWriteInputTokens = "cache_write_input_tokens"
+        case outputTokens = "output_tokens"
+        case reasoningOutputTokens = "reasoning_output_tokens"
+        case totalTokens = "total_tokens"
+    }
+}
+
+struct DashboardProjectUsage: Decodable, Identifiable {
+    let project: String
+    let model: String
+    let reasoningEffort: String
+    let runs: Int
+    let measuredRuns: Int?
+    let inputTokens: Int?
+    let cachedInputTokens: Int?
+    let cacheWriteInputTokens: Int?
+    let outputTokens: Int?
+    let reasoningOutputTokens: Int?
+    let totalTokens: Int?
+
+    var id: String { "\(project)-\(model)-\(reasoningEffort)" }
+
+    enum CodingKeys: String, CodingKey {
+        case project, model, runs
+        case reasoningEffort = "reasoning_effort"
+        case measuredRuns = "measured_runs"
+        case inputTokens = "input_tokens"
+        case cachedInputTokens = "cached_input_tokens"
+        case cacheWriteInputTokens = "cache_write_input_tokens"
+        case outputTokens = "output_tokens"
+        case reasoningOutputTokens = "reasoning_output_tokens"
         case totalTokens = "total_tokens"
     }
 }
@@ -298,6 +336,8 @@ struct DashboardSnapshot: Decodable {
     let activityLog: [DashboardActivityLog]
     let modelUsage5h: [DashboardModelUsage]
     let modelUsage7d: [DashboardModelUsage]
+    let projectUsage5h: [DashboardProjectUsage]
+    let projectUsage7d: [DashboardProjectUsage]
     let accountUsage: DashboardAccountUsage?
     let orchestration: DashboardOrchestration?
 
@@ -313,6 +353,8 @@ struct DashboardSnapshot: Decodable {
         activityLog: [],
         modelUsage5h: [],
         modelUsage7d: [],
+        projectUsage5h: [],
+        projectUsage7d: [],
         accountUsage: nil,
         orchestration: nil
     )
@@ -329,6 +371,8 @@ struct DashboardSnapshot: Decodable {
         case activityLog = "activity_log"
         case modelUsage5h = "model_usage_5h"
         case modelUsage7d = "model_usage_7d"
+        case projectUsage5h = "project_usage_5h"
+        case projectUsage7d = "project_usage_7d"
         case accountUsage = "account_usage"
         case orchestration
     }
@@ -345,6 +389,8 @@ struct DashboardSnapshot: Decodable {
         activityLog: [DashboardActivityLog],
         modelUsage5h: [DashboardModelUsage],
         modelUsage7d: [DashboardModelUsage],
+        projectUsage5h: [DashboardProjectUsage],
+        projectUsage7d: [DashboardProjectUsage],
         accountUsage: DashboardAccountUsage?,
         orchestration: DashboardOrchestration?
     ) {
@@ -359,6 +405,8 @@ struct DashboardSnapshot: Decodable {
         self.activityLog = activityLog
         self.modelUsage5h = modelUsage5h
         self.modelUsage7d = modelUsage7d
+        self.projectUsage5h = projectUsage5h
+        self.projectUsage7d = projectUsage7d
         self.accountUsage = accountUsage
         self.orchestration = orchestration
     }
@@ -376,6 +424,8 @@ struct DashboardSnapshot: Decodable {
         activityLog = try container.decodeIfPresent([DashboardActivityLog].self, forKey: .activityLog) ?? []
         modelUsage5h = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage5h) ?? []
         modelUsage7d = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage7d) ?? []
+        projectUsage5h = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage5h) ?? []
+        projectUsage7d = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage7d) ?? []
         accountUsage = try container.decodeIfPresent(DashboardAccountUsage.self, forKey: .accountUsage)
         orchestration = try container.decodeIfPresent(DashboardOrchestration.self, forKey: .orchestration)
     }
@@ -590,18 +640,106 @@ private struct ModelUsageGroup: Identifiable {
     let runs: Int
     let completed: Int
     let measuredRuns: Int
+    let inputTokens: Int
+    let cachedInputTokens: Int
+    let cacheWriteInputTokens: Int
+    let outputTokens: Int
+    let reasoningOutputTokens: Int
     let totalTokens: Int
 
     var id: String { "\(model)-\(reasoningEffort)" }
+}
+
+private struct APIModelPrice {
+    let input: Double
+    let cachedInput: Double
+    let cacheWriteInput: Double?
+    let output: Double
+}
+
+private func apiModelPrice(for model: String) -> APIModelPrice? {
+    // Official OpenAI standard API list prices per 1M tokens. GPT-5.6 cache writes cost 1.25× input.
+    switch model {
+    case "gpt-5.6-sol":
+        return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: 6.25, output: 30.00)
+    case "gpt-5.6-terra":
+        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: 3.125, output: 15.00)
+    case "gpt-5.6-luna":
+        return APIModelPrice(input: 1.00, cachedInput: 0.10, cacheWriteInput: 1.25, output: 6.00)
+    case "gpt-5.5":
+        return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: nil, output: 30.00)
+    case "gpt-5.4":
+        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: nil, output: 15.00)
+    case "gpt-5.4-mini":
+        return APIModelPrice(input: 0.75, cachedInput: 0.075, cacheWriteInput: nil, output: 4.50)
+    case "gpt-5.4-nano":
+        return APIModelPrice(input: 0.20, cachedInput: 0.02, cacheWriteInput: nil, output: 1.25)
+    case "gpt-5.3-codex", "gpt-5.2":
+        return APIModelPrice(input: 1.75, cachedInput: 0.175, cacheWriteInput: nil, output: 14.00)
+    default:
+        return nil
+    }
+}
+
+private func apiEquivalentCost(
+    model: String,
+    inputTokens: Int,
+    cachedInputTokens: Int,
+    cacheWriteInputTokens: Int,
+    outputTokens: Int,
+    reasoningOutputTokens: Int
+) -> Double? {
+    guard let price = apiModelPrice(for: model) else { return nil }
+    let cached = min(inputTokens, cachedInputTokens)
+    let cacheWrites = min(max(0, inputTokens - cached), cacheWriteInputTokens)
+    guard cacheWrites == 0 || price.cacheWriteInput != nil else { return nil }
+    let uncached = max(0, inputTokens - cached - cacheWrites)
+    let output = outputTokens + reasoningOutputTokens
+    return Double(uncached) * price.input / 1_000_000
+        + Double(cached) * price.cachedInput / 1_000_000
+        + Double(cacheWrites) * (price.cacheWriteInput ?? 0) / 1_000_000
+        + Double(output) * price.output / 1_000_000
+}
+
+private func apiCostText(_ amount: Double) -> String {
+    amount >= 1 ? String(format: "$%.2f", amount) : String(format: "$%.4f", amount)
+}
+
+private struct ProjectUsageGroup: Identifiable {
+    let project: String
+    let entries: [DashboardProjectUsage]
+
+    var id: String { project }
+    var totalTokens: Int { entries.reduce(0) { $0 + ($1.totalTokens ?? 0) } }
+    var measuredRuns: Int { entries.reduce(0) { $0 + ($1.measuredRuns ?? 0) } }
+    var runs: Int { entries.reduce(0) { $0 + $1.runs } }
+    var estimatedAPICost: Double? {
+        let costs = entries.compactMap {
+            apiEquivalentCost(
+                model: $0.model,
+                inputTokens: $0.inputTokens ?? 0,
+                cachedInputTokens: $0.cachedInputTokens ?? 0,
+                cacheWriteInputTokens: $0.cacheWriteInputTokens ?? 0,
+                outputTokens: $0.outputTokens ?? 0,
+                reasoningOutputTokens: $0.reasoningOutputTokens ?? 0
+            )
+        }
+        return costs.isEmpty ? nil : costs.reduce(0, +)
+    }
 }
 
 struct ModelUsageView: View {
     @ObservedObject var model: DashboardModel
     let close: () -> Void
     @State private var period = 0
+    @State private var breakdown = 0
 
     private var entries: [DashboardModelUsage] {
         period == 0 ? model.snapshot.modelUsage5h : model.snapshot.modelUsage7d
+    }
+
+    private var projectEntries: [DashboardProjectUsage] {
+        period == 0 ? model.snapshot.projectUsage5h : model.snapshot.projectUsage7d
     }
 
     private var groups: [ModelUsageGroup] {
@@ -622,6 +760,11 @@ struct ModelUsageView: View {
                 runs: entries.reduce(0) { $0 + $1.runs },
                 completed: entries.reduce(0) { $0 + $1.completed },
                 measuredRuns: entries.reduce(0) { $0 + ($1.measuredRuns ?? 0) },
+                inputTokens: entries.reduce(0) { $0 + ($1.inputTokens ?? 0) },
+                cachedInputTokens: entries.reduce(0) { $0 + ($1.cachedInputTokens ?? 0) },
+                cacheWriteInputTokens: entries.reduce(0) { $0 + ($1.cacheWriteInputTokens ?? 0) },
+                outputTokens: entries.reduce(0) { $0 + ($1.outputTokens ?? 0) },
+                reasoningOutputTokens: entries.reduce(0) { $0 + ($1.reasoningOutputTokens ?? 0) },
                 totalTokens: entries.reduce(0) { $0 + ($1.totalTokens ?? 0) }
             )
         }
@@ -634,6 +777,43 @@ struct ModelUsageView: View {
 
     private var totalTokens: Int {
         groups.reduce(0) { $0 + $1.totalTokens }
+    }
+
+    private var estimatedAPICost: Double {
+        groups.reduce(0) { total, group in
+            total + (apiEquivalentCost(
+                model: group.model,
+                inputTokens: group.inputTokens,
+                cachedInputTokens: group.cachedInputTokens,
+                cacheWriteInputTokens: group.cacheWriteInputTokens,
+                outputTokens: group.outputTokens,
+                reasoningOutputTokens: group.reasoningOutputTokens
+            ) ?? 0)
+        }
+    }
+
+    private var pricedGroupCount: Int {
+        groups.filter {
+            apiEquivalentCost(
+                model: $0.model,
+                inputTokens: $0.inputTokens,
+                cachedInputTokens: $0.cachedInputTokens,
+                cacheWriteInputTokens: $0.cacheWriteInputTokens,
+                outputTokens: $0.outputTokens,
+                reasoningOutputTokens: $0.reasoningOutputTokens
+            ) != nil
+        }.count
+    }
+
+    private var projectGroups: [ProjectUsageGroup] {
+        Dictionary(grouping: projectEntries, by: \.project)
+            .map { ProjectUsageGroup(project: $0.key, entries: $0.value) }
+            .sorted { $0.totalTokens == $1.totalTokens ? $0.project < $1.project : $0.totalTokens > $1.totalTokens }
+    }
+
+    private var unpricedModels: [String] {
+        let source = breakdown == 0 ? entries.map(\.model) : projectEntries.map(\.model)
+        return Array(Set(source.filter { apiModelPrice(for: $0) == nil })).sorted()
     }
 
     var body: some View {
@@ -680,54 +860,120 @@ struct ModelUsageView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Picker("Period", selection: $period) {
-                Text("Last 5 hours").tag(0)
-                Text("Last 7 days").tag(1)
+            HStack(spacing: 8) {
+                Picker("Period", selection: $period) {
+                    Text("5 hours").tag(0)
+                    Text("7 days").tag(1)
+                }
+                Picker("Breakdown", selection: $breakdown) {
+                    Text("Models").tag(0)
+                    Text("Projects").tag(1)
+                }
             }
+            .labelsHidden()
             .pickerStyle(.segmented)
 
-            Text("Codeshark-only model telemetry")
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TOTAL TOKENS")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("\(tokenText(totalTokens)) tokens")
+                        .font(.subheadline.weight(.semibold))
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("API-EQUIVALENT")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(apiCostText(estimatedAPICost))
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+
+            Text("Official API rates · \(pricedGroupCount)/\(groups.count) model groups priced · includes cache reads, writes, and reasoning output.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if !unpricedModels.isEmpty {
+                Text("No public standard API rate: \(unpricedModels.joined(separator: ", ")).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(breakdown == 0 ? "Codeshark-only model telemetry" : "Project estimate")
                 .font(.subheadline.weight(.semibold))
 
             ScrollView {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(minimum: 0), spacing: 8),
-                        GridItem(.flexible(minimum: 0), spacing: 8),
-                    ],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    if groups.isEmpty {
-                        Label("No recorded model phases", systemImage: "chart.bar")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(groups) { group in
-                            let share = totalTokens > 0
-                                ? Int((Double(group.totalTokens) / Double(totalTokens) * 100).rounded())
-                                : 0
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(compactModelName(group.model))
-                                        .font(.subheadline.weight(.semibold))
-                                    Text(group.reasoningEffort)
-                                        .font(.caption.monospaced())
+                if breakdown == 0 {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(minimum: 0), spacing: 8),
+                            GridItem(.flexible(minimum: 0), spacing: 8),
+                        ],
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        if groups.isEmpty {
+                            Label("No recorded model phases", systemImage: "chart.bar")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(groups) { group in
+                                let share = totalTokens > 0
+                                    ? Int((Double(group.totalTokens) / Double(totalTokens) * 100).rounded())
+                                    : 0
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(compactModelName(group.model))
+                                            .font(.subheadline.weight(.semibold))
+                                        Text(group.reasoningEffort)
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text("\(share)%")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("\(tokenText(group.totalTokens)) · exact data \(group.measuredRuns)/\(group.runs) turns · \(group.completed) completed")
+                                        .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text("\(share)%")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
+                                    ProgressView(value: totalTokens > 0 ? Double(group.totalTokens) / Double(totalTokens) : 0)
                                 }
-                                Text("\(tokenText(group.totalTokens)) · exact data \(group.measuredRuns)/\(group.runs) turns · \(group.completed) completed")
+                                .padding(9)
+                                .frame(maxWidth: .infinity, minHeight: 86, maxHeight: 86, alignment: .topLeading)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                } else if projectGroups.isEmpty {
+                    Label("No project telemetry yet", systemImage: "folder")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(projectGroups) { group in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(group.project)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(group.estimatedAPICost.map(apiCostText) ?? "No public rate")
+                                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(group.estimatedAPICost == nil ? .secondary : .primary)
+                                }
+                                Text("\(tokenText(group.totalTokens)) · exact data \(group.measuredRuns)/\(group.runs) turns · \(group.entries.count) model configurations")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
                                 ProgressView(value: totalTokens > 0 ? Double(group.totalTokens) / Double(totalTokens) : 0)
                             }
-                            .padding(9)
-                            .frame(maxWidth: .infinity, minHeight: 86, maxHeight: 86, alignment: .topLeading)
+                            .padding(10)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
@@ -736,10 +982,11 @@ struct ModelUsageView: View {
 
             Divider()
 
+            Text("Standard API list-price equivalent; excludes tool, long-context, priority, and regional adjustments. ChatGPT/Codex plan quota is separate.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
             HStack {
-                Text("Account quota is shared; Codex does not expose per-model quota debits.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
                 Spacer()
                 Button("Close", action: close)
                     .buttonStyle(.bordered)
@@ -747,7 +994,7 @@ struct ModelUsageView: View {
         }
         .padding(16)
         .frame(minWidth: 560, idealWidth: 580, maxWidth: .infinity,
-               minHeight: 640, idealHeight: 680, maxHeight: .infinity)
+               minHeight: 730, idealHeight: 760, maxHeight: .infinity)
     }
 }
 
@@ -1369,13 +1616,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 760),
             styleMask: [.titled, .closable, .utilityWindow, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Codeshark Model Usage"
-        panel.minSize = NSSize(width: 560, height: 640)
+        panel.minSize = NSSize(width: 560, height: 730)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.delegate = self

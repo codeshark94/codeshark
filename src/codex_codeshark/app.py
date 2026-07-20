@@ -518,6 +518,10 @@ class AgentApp:
             latest_failure = self.store.latest_failure()
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
             weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
+            project_usage = self.store.project_model_usage(since=now - 5 * 60 * 60)
+            weekly_project_usage = self.store.project_model_usage(
+                since=now - 7 * 24 * 60 * 60
+            )
             weekly_role_usage = {
                 item.role: item
                 for item in self.store.model_role_usage(since=now - 7 * 24 * 60 * 60)
@@ -648,6 +652,38 @@ class AgentApp:
                                 "total_tokens": summary.total_tokens,
                             }
                             for summary in weekly_model_usage
+                        ],
+                        "project_usage_5h": [
+                            {
+                                "project": summary.project,
+                                "model": summary.model,
+                                "reasoning_effort": summary.reasoning_effort,
+                                "runs": summary.runs,
+                                "measured_runs": summary.measured_runs,
+                                "input_tokens": summary.input_tokens,
+                                "cached_input_tokens": summary.cached_input_tokens,
+                                "cache_write_input_tokens": summary.cache_write_input_tokens,
+                                "output_tokens": summary.output_tokens,
+                                "reasoning_output_tokens": summary.reasoning_output_tokens,
+                                "total_tokens": summary.total_tokens,
+                            }
+                            for summary in project_usage
+                        ],
+                        "project_usage_7d": [
+                            {
+                                "project": summary.project,
+                                "model": summary.model,
+                                "reasoning_effort": summary.reasoning_effort,
+                                "runs": summary.runs,
+                                "measured_runs": summary.measured_runs,
+                                "input_tokens": summary.input_tokens,
+                                "cached_input_tokens": summary.cached_input_tokens,
+                                "cache_write_input_tokens": summary.cache_write_input_tokens,
+                                "output_tokens": summary.output_tokens,
+                                "reasoning_output_tokens": summary.reasoning_output_tokens,
+                                "total_tokens": summary.total_tokens,
+                            }
+                            for summary in weekly_project_usage
                         ],
                         "account_usage": self._account_usage_payload(),
                         "activity_log": [
