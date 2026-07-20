@@ -22,6 +22,7 @@ from .personal_sync import PersonalDataSync, PersonalSyncError
 from .service import (
     ServiceError,
     read_logs,
+    refresh_menu_bar,
     restart_service,
     service_status,
     start_service,
@@ -40,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("start", help="start or install the background service")
     commands.add_parser("stop", help="stop the background service")
     commands.add_parser("restart", help="restart the background service")
+    commands.add_parser("refresh-menu", help="rebuild and restart only the menu bar")
     commands.add_parser("service-status", help="show the background service status")
     workspace = commands.add_parser("set-workspace", help="set the Codeshark workspace directory")
     workspace.add_argument("directory", type=Path)
@@ -92,6 +94,10 @@ def main() -> int:
             return interactive_setup()
         if args.command == "doctor":
             return run_doctor()
+        if args.command == "refresh-menu":
+            refresh_menu_bar()
+            print("Menu bar: refreshed")
+            return 0
         if args.command in {"start", "stop", "restart", "service-status"}:
             if args.command == "start":
                 status = start_service()

@@ -8,6 +8,7 @@ from codex_codeshark.service import (
     ServiceStatus,
     install_service,
     read_logs,
+    refresh_menu_bar,
     restart_service,
     service_status,
 )
@@ -63,6 +64,30 @@ class ServiceTests(unittest.TestCase):
             commands = [call.args[0] for call in run_mock.call_args_list]
             self.assertTrue(any("bootstrap" in command for command in commands))
             self.assertTrue(any("kickstart" in command for command in commands))
+
+    @patch("codex_codeshark.service.subprocess.run")
+    def test_refresh_menu_restarts_only_the_menu_launch_agent(self, run_mock: Mock) -> None:
+        run_mock.return_value = Mock(returncode=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.local.toml").write_text("configured = true\n", encoding="utf-8")
+            (root / "runtime").mkdir()
+            plist_path = root / "LaunchAgents" / "agent.plist"
+            install_root = root / "Application Support" / "app"
+            result = refresh_menu_bar(
+                project_root=root,
+                plist_path=plist_path,
+                install_root=install_root,
+            )
+            self.assertEqual(result, plist_path.with_name("com.codeshark.status.plist"))
+            commands = [call.args[0] for call in run_mock.call_args_list]
+            self.assertTrue(all(str(plist_path) not in command for command in commands))
+            self.assertTrue(
+                any(
+                    any("com.codeshark.status.plist" in str(argument) for argument in command)
+                    for command in commands
+                )
+            )
 
     @patch("codex_codeshark.service.subprocess.run")
     def test_status_parses_running_pid(self, run_mock: Mock) -> None:

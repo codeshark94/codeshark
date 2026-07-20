@@ -285,6 +285,53 @@ def install_service(
     return plist_path
 
 
+def refresh_menu_bar(
+    *,
+    project_root: Path = PROJECT_ROOT,
+    plist_path: Path = PLIST_PATH,
+    install_root: Path = INSTALL_ROOT,
+    source_root: Path = SOURCE_ROOT,
+) -> Path:
+    config_path = project_root / "config.local.toml"
+    if config_path.is_symlink() or not config_path.is_file():
+        raise ServiceError("config.local.toml is missing; run setup first")
+    runtime = project_root / "runtime"
+    _harden_runtime(runtime)
+    ensure_private_directory(plist_path.parent)
+    installed_source, _ = _deploy_source(
+        source_root=source_root,
+        config_path=config_path,
+        install_root=install_root,
+    )
+    menu_executable, menu_icon = _build_menu_bar_agent(installed_source)
+    menu_plist_path = _menu_plist_path(plist_path)
+    atomic_write_bytes(
+        menu_plist_path,
+        plistlib.dumps(_menu_payload(project_root, menu_executable, menu_icon), sort_keys=False),
+    )
+    subprocess.run(
+        ["/bin/launchctl", "bootout", _domain(), str(menu_plist_path)],
+        capture_output=True,
+        check=False,
+    )
+    result = subprocess.run(
+        ["/bin/launchctl", "bootstrap", _domain(), str(menu_plist_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ServiceError(
+            result.stderr.strip() or result.stdout.strip() or "launchctl menu bootstrap failed"
+        )
+    subprocess.run(
+        ["/bin/launchctl", "kickstart", "-k", _menu_service_target()],
+        capture_output=True,
+        check=False,
+    )
+    return menu_plist_path
+
+
 def uninstall_service(*, plist_path: Path = PLIST_PATH) -> None:
     menu_plist_path = _menu_plist_path(plist_path)
     subprocess.run(
