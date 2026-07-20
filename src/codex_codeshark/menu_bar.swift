@@ -433,6 +433,30 @@ private func tokenText(_ tokens: Int) -> String {
     return "\(tokens) tokens"
 }
 
+private final class StatusMenuRow: NSView {
+    init(title: String, color: NSColor) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
+
+        let dot = NSTextField(labelWithString: "●")
+        dot.font = .systemFont(ofSize: 14)
+        dot.textColor = color
+        dot.frame = NSRect(x: 14, y: 5, width: 12, height: 18)
+        addSubview(dot)
+
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .secondaryLabelColor
+        label.frame = NSRect(x: 32, y: 5, width: 274, height: 18)
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+}
+
 private func quotaWindowText(_ window: DashboardQuotaWindow) -> String {
     let duration: String
     if let minutes = window.windowDurationMins {
@@ -781,23 +805,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             action: nil,
             keyEquivalent: ""
         )
-        let statusText = NSMutableAttributedString(
-            string: "●",
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 14),
-                .foregroundColor: statusMenuColor(for: snapshot),
-            ]
+        status.view = StatusMenuRow(
+            title: "Codeshark is \(statusTitle(for: snapshot).lowercased())",
+            color: statusMenuColor(for: snapshot)
         )
-        statusText.append(
-            NSAttributedString(
-                string: "  Codeshark is \(statusTitle(for: snapshot).lowercased())",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 14),
-                    .foregroundColor: NSColor.secondaryLabelColor,
-                ]
-            )
-        )
-        status.attributedTitle = statusText
         menu.addItem(status)
         menu.addItem(.separator())
 
