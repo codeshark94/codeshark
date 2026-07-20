@@ -805,12 +805,17 @@ struct ModelUsageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Model Usage")
-                    .font(.headline)
-                Text("Shared account quota + Codeshark-only turn telemetry.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Model Usage")
+                        .font(.headline)
+                    Text("Shared account quota + Codeshark-only turn telemetry.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Button("Close", action: close)
+                    .buttonStyle(.bordered)
             }
 
             if let accountUsage = model.snapshot.accountUsage {
@@ -969,15 +974,10 @@ struct ModelUsageView: View {
 
             Divider()
 
-            HStack(alignment: .center, spacing: 16) {
-                Text("Standard API list-price equivalent; excludes tool, long-context, priority, and regional adjustments. ChatGPT/Codex plan quota is separate.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-                Spacer(minLength: 12)
-                Button("Close", action: close)
-                    .buttonStyle(.bordered)
-            }
+            Text("Standard API list-price equivalent; excludes tool, long-context, priority, and regional adjustments. ChatGPT/Codex plan quota is separate.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
         }
         .padding(16)
         .frame(minWidth: 560, idealWidth: 580, maxWidth: .infinity,
