@@ -722,10 +722,12 @@ struct ModelUsageView: View {
                                 Text("\(tokenText(group.totalTokens)) · exact data \(group.measuredRuns)/\(group.runs) turns · \(group.completed) completed")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
                                 ProgressView(value: totalTokens > 0 ? Double(group.totalTokens) / Double(totalTokens) : 0)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(9)
+                            .frame(maxWidth: .infinity, minHeight: 86, maxHeight: 86, alignment: .topLeading)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
