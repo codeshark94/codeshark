@@ -622,7 +622,7 @@ struct ModelUsageView: View {
 final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private let projectRoot: String
     private let iconPath: String
-    private let statusItem = NSStatusBar.system.statusItem(withLength: 29)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: 26)
     private let menu = NSMenu()
     private let dashboard: DashboardModel
     private var logPanel: NSPanel?
@@ -651,7 +651,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             button.toolTip = "Codeshark: starting"
             if let image = NSImage(contentsOfFile: iconPath) {
                 image.isTemplate = false
-                image.size = NSSize(width: 24, height: 16)
+                image.size = NSSize(width: 21, height: 16)
                 button.image = image
             }
         }
