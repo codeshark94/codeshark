@@ -82,6 +82,16 @@ class TaskManifest:
 
 
 @dataclass(frozen=True)
+class ModelRunSummary:
+    model: str
+    reasoning_effort: str
+    phase: str
+    runs: int
+    completed: int
+    elapsed_seconds: float
+
+
+@dataclass(frozen=True)
 class GuardrailCandidate:
     id: str
     source_task_id: str
@@ -355,6 +365,21 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS artifact_receipts_task
                     ON artifact_receipts(task_id, created_at);
+                CREATE TABLE IF NOT EXISTS model_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT,
+                    phase TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    reasoning_effort TEXT NOT NULL,
+                    started_at REAL NOT NULL,
+                    finished_at REAL NOT NULL,
+                    elapsed_seconds REAL NOT NULL,
+                    exit_code INTEGER NOT NULL,
+                    cancelled INTEGER NOT NULL DEFAULT 0,
+                    timed_out INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS model_runs_recent
+                    ON model_runs(finished_at DESC);
                 CREATE TABLE IF NOT EXISTS guardrail_candidates (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_task_id TEXT NOT NULL,
@@ -606,6 +631,73 @@ class AgentStore:
                 "SELECT * FROM task_manifests WHERE task_id = ?", (task_id,)
             ).fetchone()
         return self._manifest(row)
+
+    def record_model_run(
+        self,
+        *,
+        task_id: str | None,
+        phase: str,
+        model: str,
+        reasoning_effort: str,
+        started_at: float,
+        finished_at: float,
+        exit_code: int,
+        cancelled: bool,
+        timed_out: bool,
+    ) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO model_runs
+                    (task_id, phase, model, reasoning_effort, started_at, finished_at,
+                     elapsed_seconds, exit_code, cancelled, timed_out)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    phase,
+                    model,
+                    reasoning_effort,
+                    started_at,
+                    finished_at,
+                    max(0.0, finished_at - started_at),
+                    exit_code,
+                    int(cancelled),
+                    int(timed_out),
+                ),
+            )
+
+    def model_run_summaries(self, *, since: float | None = None) -> list[ModelRunSummary]:
+        filters = ""
+        parameters: tuple[float, ...] = ()
+        if since is not None:
+            filters = "WHERE finished_at >= ?"
+            parameters = (since,)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT model, reasoning_effort, phase, COUNT(*) AS runs,
+                       SUM(CASE WHEN exit_code = 0 AND cancelled = 0 AND timed_out = 0
+                                THEN 1 ELSE 0 END) AS completed,
+                       SUM(elapsed_seconds) AS elapsed_seconds
+                FROM model_runs
+                {filters}
+                GROUP BY model, reasoning_effort, phase
+                ORDER BY elapsed_seconds DESC, model, phase
+                """,
+                parameters,
+            ).fetchall()
+        return [
+            ModelRunSummary(
+                model=row["model"],
+                reasoning_effort=row["reasoning_effort"],
+                phase=row["phase"],
+                runs=row["runs"],
+                completed=row["completed"],
+                elapsed_seconds=row["elapsed_seconds"],
+            )
+            for row in rows
+        ]
 
     def record_artifact_receipt(
         self,

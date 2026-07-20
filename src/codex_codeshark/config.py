@@ -35,6 +35,8 @@ DEFAULT_CODEX_PROFILE = "codex-codeshark"
 KEYCHAIN_SERVICE = "codex-codeshark.bot-token"
 _BOT_TOKEN_PATTERN = re.compile(r"[0-9]+:[A-Za-z0-9_-]+")
 _MIN_PERMISSION_PROFILE_VERSION = (0, 138, 0)
+_MODEL_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
+_MAX_REASONING_EFFORTS = frozenset({"low", "medium", "high"})
 
 
 class ConfigError(RuntimeError):
@@ -47,8 +49,13 @@ class Config:
     workdir: Path
     codex_binary: Path
     codex_profile: str = DEFAULT_CODEX_PROFILE
-    codex_model: str = "gpt-5.5"
-    subagent_reasoning_effort: str = "medium"
+    routine_model: str = "gpt-5.6-luna"
+    routine_reasoning_effort: str = "medium"
+    primary_model: str = "gpt-5.6-sol"
+    primary_reasoning_effort: str = "high"
+    validator_model: str = "gpt-5.6-terra"
+    validator_reasoning_effort: str = "high"
+    preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
     poll_timeout_seconds: int = 30
     task_timeout_seconds: int = 1800
@@ -84,6 +91,21 @@ def _require_bool(data: dict[str, Any], key: str, default: bool) -> bool:
     return value
 
 
+def _require_model_setting(data: dict[str, Any], key: str, default: str) -> str:
+    value = data.get(key, default)
+    if not isinstance(value, str) or not _MODEL_ID_PATTERN.fullmatch(value):
+        raise ConfigError(f"{key} must be a valid model identifier")
+    return value
+
+
+def _require_reasoning_effort(data: dict[str, Any], key: str, default: str) -> str:
+    value = data.get(key, default)
+    if value not in _MAX_REASONING_EFFORTS:
+        allowed = ", ".join(sorted(_MAX_REASONING_EFFORTS))
+        raise ConfigError(f"{key} must be one of: {allowed}")
+    return value
+
+
 def load_config(path: Path | None = None) -> Config:
     config_path = path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
     if not config_path.is_file():
@@ -103,27 +125,32 @@ def load_config(path: Path | None = None) -> Config:
     workdir = Path(str(data.get("workdir", ""))).expanduser()
     codex_binary = Path(str(data.get("codex_binary", ""))).expanduser()
     codex_profile = data.get("codex_profile", DEFAULT_CODEX_PROFILE)
-    codex_model = data.get("codex_model", "gpt-5.5")
-    subagent_reasoning_effort = data.get("subagent_reasoning_effort", "medium")
-    preflight_reasoning_effort = data.get("preflight_reasoning_effort", "low")
+    routine_model = _require_model_setting(
+        data, "routine_model", data.get("codex_model", "gpt-5.6-luna")
+    )
+    routine_reasoning_effort = _require_reasoning_effort(
+        data, "routine_reasoning_effort", "medium"
+    )
+    primary_model = _require_model_setting(data, "primary_model", "gpt-5.6-sol")
+    primary_reasoning_effort = _require_reasoning_effort(
+        data, "primary_reasoning_effort", "high"
+    )
+    validator_model = _require_model_setting(data, "validator_model", "gpt-5.6-terra")
+    validator_reasoning_effort = _require_reasoning_effort(
+        data,
+        "validator_reasoning_effort",
+        data.get("subagent_reasoning_effort", "high"),
+    )
+    preflight_model = _require_model_setting(data, "preflight_model", "gpt-5.6-luna")
+    preflight_reasoning_effort = _require_reasoning_effort(
+        data, "preflight_reasoning_effort", "low"
+    )
     if not workdir.is_absolute() or not workdir.is_dir():
         raise ConfigError(f"workdir must be an existing absolute directory: {workdir}")
     if not codex_binary.is_absolute() or not codex_binary.is_file():
         raise ConfigError(f"codex_binary must be an existing absolute file: {codex_binary}")
     if not isinstance(codex_profile, str) or not codex_profile.strip():
         raise ConfigError("codex_profile must be a non-empty string")
-    if not isinstance(codex_model, str) or not re.fullmatch(
-        r"[A-Za-z0-9._-]{1,100}", codex_model
-    ):
-        raise ConfigError("codex_model must be a valid model identifier")
-    if not isinstance(subagent_reasoning_effort, str) or not re.fullmatch(
-        r"[A-Za-z0-9_-]{1,32}", subagent_reasoning_effort
-    ):
-        raise ConfigError("subagent_reasoning_effort must be a valid reasoning effort")
-    if not isinstance(preflight_reasoning_effort, str) or not re.fullmatch(
-        r"[A-Za-z0-9_-]{1,32}", preflight_reasoning_effort
-    ):
-        raise ConfigError("preflight_reasoning_effort must be a valid reasoning effort")
     agent_repository_root = PROJECT_ROOT.resolve()
     if not agent_repository_root.is_dir():
         raise ConfigError(
@@ -233,8 +260,13 @@ def load_config(path: Path | None = None) -> Config:
         workdir=workdir.resolve(),
         codex_binary=codex_binary.resolve(),
         codex_profile=codex_profile.strip(),
-        codex_model=codex_model,
-        subagent_reasoning_effort=subagent_reasoning_effort,
+        routine_model=routine_model,
+        routine_reasoning_effort=routine_reasoning_effort,
+        primary_model=primary_model,
+        primary_reasoning_effort=primary_reasoning_effort,
+        validator_model=validator_model,
+        validator_reasoning_effort=validator_reasoning_effort,
+        preflight_model=preflight_model,
         preflight_reasoning_effort=preflight_reasoning_effort,
         poll_timeout_seconds=poll_timeout,
         task_timeout_seconds=task_timeout,
@@ -372,15 +404,44 @@ def codex_profile_path(profile: str, *, codex_home: Path | None = None) -> Path:
 
 def write_codex_profile(profile: str, *, codex_home: Path | None = None) -> Path:
     path = codex_profile_path(profile, codex_home=codex_home)
-    if path.exists():
-        return path
     ensure_private_directory(path.parent)
+    if path.exists():
+        original = path.read_text(encoding="utf-8")
+        updated = _standardize_codex_profile(original)
+        if updated != original:
+            atomic_write_text(path, updated)
+        return path
     atomic_write_text(
         path,
-        'sandbox_mode = "workspace-write"\napproval_policy = "never"\n\n'
+        'sandbox_mode = "workspace-write"\napproval_policy = "never"\n'
+        'service_tier = "standard"\n\n'
+        '[features]\nfast_mode = false\n\n'
         '[sandbox_workspace_write]\nnetwork_access = false\n',
     )
     return path
+
+
+def _standardize_codex_profile(content: str) -> str:
+    """Apply Codeshark's managed execution-tier settings without dropping profile extras."""
+    content = re.sub(r"(?m)^service_tier\s*=.*(?:\n|$)", "", content)
+    first_table = re.search(r"(?m)^\[", content)
+    insertion = first_table.start() if first_table else len(content)
+    content = (
+        content[:insertion]
+        + 'service_tier = "standard"\n'
+        + content[insertion:]
+    )
+    features = re.search(r"(?m)^\[features\]\s*$", content)
+    if features is None:
+        return content.rstrip() + "\n\n[features]\nfast_mode = false\n"
+    section_end = re.search(r"(?m)^\[(?!features\])", content[features.end() :])
+    end = features.end() + section_end.start() if section_end else len(content)
+    section = content[features.end() : end]
+    if re.search(r"(?m)^fast_mode\s*=.*$", section):
+        section = re.sub(r"(?m)^fast_mode\s*=.*$", "fast_mode = false", section)
+    else:
+        section = "\nfast_mode = false" + section
+    return content[: features.end()] + section + content[end:]
 
 
 def validate_codex_profile(config: Config, *, codex_home: Path | None = None) -> str:
@@ -395,6 +456,11 @@ def validate_codex_profile(config: Config, *, codex_home: Path | None = None) ->
         raise ConfigError("Codex profile sandbox_mode must be workspace-write")
     if data.get("approval_policy") != "never":
         raise ConfigError("Codex profile approval_policy must be never")
+    if data.get("service_tier") != "standard":
+        raise ConfigError("Codex profile service_tier must be standard")
+    features = data.get("features")
+    if not isinstance(features, dict) or features.get("fast_mode") is not False:
+        raise ConfigError("Codex profile must disable Fast mode")
     return config.codex_profile
 
 
@@ -505,8 +571,13 @@ def write_local_config(
             f"workdir = {json.dumps(str(workdir), ensure_ascii=False)}",
             f"codex_binary = {json.dumps(str(codex_binary), ensure_ascii=False)}",
             f'codex_profile = "{DEFAULT_CODEX_PROFILE}"',
-            'codex_model = "gpt-5.5"',
-            'subagent_reasoning_effort = "medium"',
+            'routine_model = "gpt-5.6-luna"',
+            'routine_reasoning_effort = "medium"',
+            'primary_model = "gpt-5.6-sol"',
+            'primary_reasoning_effort = "high"',
+            'validator_model = "gpt-5.6-terra"',
+            'validator_reasoning_effort = "high"',
+            'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
             "poll_timeout_seconds = 30",
             "task_timeout_seconds = 1800",

@@ -337,6 +337,7 @@ class TelegramAPI:
         private_commands = [
             {"command": "help", "description": "Show command help"},
             {"command": "status", "description": "Show task and session status"},
+            {"command": "model_usage", "description": "Show model activity telemetry"},
             {"command": "new", "description": "Delete the current session"},
             {"command": "name", "description": "Set the agent name"},
             {"command": "owner_public", "description": "Set public owner information"},

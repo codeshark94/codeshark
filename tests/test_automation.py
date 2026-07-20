@@ -33,6 +33,42 @@ class RiskPolicyTests(unittest.TestCase):
 
 
 class AgentStoreTests(unittest.TestCase):
+    def test_summarizes_model_runs_in_a_requested_time_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.record_model_run(
+                task_id="task-1",
+                phase="primary",
+                model="gpt-5.6-sol",
+                reasoning_effort="high",
+                started_at=100.0,
+                finished_at=160.0,
+                exit_code=0,
+                cancelled=False,
+                timed_out=False,
+            )
+            store.record_model_run(
+                task_id="task-2",
+                phase="validator",
+                model="gpt-5.6-terra",
+                reasoning_effort="high",
+                started_at=200.0,
+                finished_at=230.0,
+                exit_code=1,
+                cancelled=False,
+                timed_out=False,
+            )
+
+            summaries = store.model_run_summaries(since=150.0)
+
+            self.assertEqual(len(summaries), 2)
+            self.assertEqual(summaries[0].model, "gpt-5.6-sol")
+            self.assertEqual(summaries[0].runs, 1)
+            self.assertEqual(summaries[0].completed, 1)
+            self.assertEqual(summaries[0].elapsed_seconds, 60.0)
+            self.assertEqual(summaries[1].model, "gpt-5.6-terra")
+            self.assertEqual(summaries[1].completed, 0)
+
     def test_persists_and_recovers_running_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "agent.db"

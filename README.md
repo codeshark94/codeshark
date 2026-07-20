@@ -193,11 +193,16 @@ worker_count = 8
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
-Keep every stage on the same base model and reduce cost by lowering internal reasoning effort. The primary keeps its Codex-profile effort; only the internal stages selected by the request router use these settings:
+Codeshark uses Luna for routine requests and task preflight, Terra for focused work and independent validation, and Sol only for the primary/reconciliation path of cross-validated work. All stages are capped at `high`; the dedicated profile disables Fast mode.
 
 ```toml
-codex_model = "gpt-5.5"
-subagent_reasoning_effort = "medium"
+routine_model = "gpt-5.6-luna"
+routine_reasoning_effort = "medium"
+primary_model = "gpt-5.6-sol"
+primary_reasoning_effort = "high"
+validator_model = "gpt-5.6-terra"
+validator_reasoning_effort = "high"
+preflight_model = "gpt-5.6-luna"
 preflight_reasoning_effort = "low"
 ```
 

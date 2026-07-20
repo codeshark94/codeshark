@@ -89,8 +89,13 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.workdir, workspace.resolve())
             self.assertEqual(loaded.max_session_turns, 25)
             self.assertEqual(loaded.worker_count, 8)
-            self.assertEqual(loaded.codex_model, "gpt-5.5")
-            self.assertEqual(loaded.subagent_reasoning_effort, "medium")
+            self.assertEqual(loaded.routine_model, "gpt-5.6-luna")
+            self.assertEqual(loaded.routine_reasoning_effort, "medium")
+            self.assertEqual(loaded.primary_model, "gpt-5.6-sol")
+            self.assertEqual(loaded.primary_reasoning_effort, "high")
+            self.assertEqual(loaded.validator_model, "gpt-5.6-terra")
+            self.assertEqual(loaded.validator_reasoning_effort, "high")
+            self.assertEqual(loaded.preflight_model, "gpt-5.6-luna")
             self.assertEqual(loaded.preflight_reasoning_effort, "low")
             self.assertFalse(loaded.codex_network_access)
             self.assertTrue(loaded.admin_full_access)
@@ -123,6 +128,28 @@ class ConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ConfigError, "worker_count"):
+                load_config(config)
+
+    def test_rejects_reasoning_effort_above_high(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config = root / "config.toml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        'primary_reasoning_effort = "xhigh"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "primary_reasoning_effort"):
                 load_config(config)
 
     def test_rejects_empty_allowlist(self) -> None:
@@ -328,6 +355,9 @@ class ConfigTests(unittest.TestCase):
                 codex_binary=Path(__file__),
             )
             self.assertEqual(validate_codex_profile(config, codex_home=root), "codex-codeshark")
+            profile_text = path.read_text(encoding="utf-8")
+            self.assertIn('service_tier = "standard"', profile_text)
+            self.assertIn("fast_mode = false", profile_text)
 
             path.write_text(
                 'sandbox_mode = "danger-full-access"\napproval_policy = "never"\n',
@@ -335,6 +365,25 @@ class ConfigTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ConfigError, "workspace-write"):
                 validate_codex_profile(config, codex_home=root)
+
+    def test_existing_codex_profile_is_migrated_to_standard_without_losing_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "codex-codeshark.config.toml"
+            path.write_text(
+                'model = "gpt-5.6-sol"\nservice_tier = "priority"\n\n'
+                "[features]\nfast_mode = true\n\n[sandbox_workspace_write]\n"
+                "network_access = false\n",
+                encoding="utf-8",
+            )
+
+            write_codex_profile("codex-codeshark", codex_home=root)
+
+            profile_text = path.read_text(encoding="utf-8")
+            self.assertIn('model = "gpt-5.6-sol"', profile_text)
+            self.assertIn('service_tier = "standard"', profile_text)
+            self.assertIn("[features]\nfast_mode = false", profile_text)
+            self.assertIn("[sandbox_workspace_write]", profile_text)
 
     def test_generated_config_registers_existing_mcp_servers_as_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -356,10 +405,9 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual((root / "workspace").stat().st_mode & 0o777, 0o700)
             self.assertIn("read_only_roots = []", path.read_text(encoding="utf-8"))
             self.assertIn("delegated_roots = []", path.read_text(encoding="utf-8"))
-            self.assertIn(
-                'subagent_reasoning_effort = "medium"',
-                path.read_text(encoding="utf-8"),
-            )
+            self.assertIn('routine_model = "gpt-5.6-luna"', path.read_text(encoding="utf-8"))
+            self.assertIn('primary_model = "gpt-5.6-sol"', path.read_text(encoding="utf-8"))
+            self.assertIn('validator_model = "gpt-5.6-terra"', path.read_text(encoding="utf-8"))
             self.assertIn(
                 'preflight_reasoning_effort = "low"',
                 path.read_text(encoding="utf-8"),

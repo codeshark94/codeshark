@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -933,6 +934,26 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(remaining), 5)
         self.assertTrue(any("cross validation" in item.name.lower() for item in remaining))
 
+    def test_model_usage_command_reports_execution_proxy_not_quota(self) -> None:
+        self.app.store.record_model_run(
+            task_id="task-1",
+            phase="routine",
+            model="gpt-5.6-luna",
+            reasoning_effort="medium",
+            started_at=0.0,
+            finished_at=time.time(),
+            exit_code=0,
+            cancelled=False,
+            timed_out=False,
+        )
+
+        self.app._handle_update(self.update(123, "/model_usage"))
+
+        text = self.api.messages[-1][1]
+        self.assertIn("execution proxy", text)
+        self.assertIn("gpt-5.6-luna (medium), routine", text)
+        self.assertIn("Codex /usage", text)
+
     def test_existing_figure_layout_request_loads_the_layout_skill(self) -> None:
         runner = FakeCodexRunner()
         self.app.runner = runner
@@ -1063,6 +1084,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_creates_configured_isolated_group_worker_runners(self) -> None:
         self.assertEqual(len(self.app._worker_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._primary_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         workdirs = {runner.restricted_workdir for runner in self.app._worker_runners}
@@ -1071,15 +1093,29 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(homes), self.config.worker_count)
         self.assertTrue(
             all(
-                runner.model == self.config.codex_model
-                and runner.model_reasoning_effort == "medium"
+                runner.model == self.config.routine_model
+                and runner.model_reasoning_effort == self.config.routine_reasoning_effort
+                for runner in self.app._worker_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.primary_model
+                and runner.model_reasoning_effort == self.config.primary_reasoning_effort
+                for runner in self.app._primary_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.validator_model
+                and runner.model_reasoning_effort == self.config.validator_reasoning_effort
                 for runner in self.app._subagent_runners
             )
         )
         self.assertTrue(
             all(
-                runner.model == self.config.codex_model
-                and runner.model_reasoning_effort == "low"
+                runner.model == self.config.preflight_model
+                and runner.model_reasoning_effort == self.config.preflight_reasoning_effort
                 for runner in self.app._preflight_runners
             )
         )

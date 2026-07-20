@@ -74,6 +74,8 @@ class CodexRunnerTests(unittest.TestCase):
 
         command = runner.build_app_server_command(approved=False, full_access=False)
 
+        self.assertEqual(command[:2], ["/tmp/codex", "--profile"])
+        self.assertIn("codex-codeshark", command)
         self.assertIn('model="gpt-5.5"', command)
         self.assertIn('model_reasoning_effort="high"', command)
 

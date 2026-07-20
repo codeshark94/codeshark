@@ -4,7 +4,6 @@ import subprocess
 
 from .config import (
     ConfigError,
-    configured_codex_runtime,
     load_bot_token,
     load_config,
     prepare_group_runtime,
@@ -78,18 +77,11 @@ def run_doctor() -> int:
 
     def model_check() -> str:
         config = config_holder.get("value") or load_config()
-        model, effort = configured_codex_runtime(
-            config.codex_profile,
-            codex_home=config.codex_home,
-        )
-        effective_model = config.codex_model or model
-        if effective_model is None:
-            return "Codex default"
-        primary = effective_model + (f" ({effort})" if effort else "")
         return (
-            f"primary {primary}; validators {effective_model} "
-            f"({config.subagent_reasoning_effort}); preflight {effective_model} "
-            f"({config.preflight_reasoning_effort})"
+            f"routine {config.routine_model} ({config.routine_reasoning_effort}); "
+            f"primary {config.primary_model} ({config.primary_reasoning_effort}); "
+            f"validators {config.validator_model} ({config.validator_reasoning_effort}); "
+            f"preflight {config.preflight_model} ({config.preflight_reasoning_effort}); Fast off"
         )
 
     check("Codex model", model_check)

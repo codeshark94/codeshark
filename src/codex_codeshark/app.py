@@ -15,7 +15,6 @@ from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
 from .codex_runner import CodexRunner, RunResult
 from .config import (
     Config,
-    configured_codex_runtime,
     group_worker_runtime,
     prepare_group_runtime,
 )
@@ -63,6 +62,7 @@ HELP_TEXT = """Codex-codeshark
 
 Plain text: submit a task or steer active private work
 /status: show the active task, queue, and session
+/model_usage: show recorded model activity for the last 5 hours and 7 days
 /project [NAME]: show or switch the active project (default: General)
 /new, /clear_temp: delete this project's temporary session and start fresh
 /name NAME: set Codeshark's self-introduction name
@@ -338,33 +338,37 @@ class AgentApp:
         self._quarantine_legacy_automatic_learning()
         self.risk_policy = RiskPolicy()
         prepare_group_runtime(config)
-        _configured_model, reasoning_effort = configured_codex_runtime(
-            config.codex_profile,
-            codex_home=config.codex_home,
-        )
         self._administrator_write_roots = self._roots_with_agent_repository(
             config.delegated_roots
         )
         self._worker_runners = tuple(
             self._build_runner(
                 worker_index,
-                model=self.config.codex_model,
-                reasoning_effort=reasoning_effort,
+                model=self.config.routine_model,
+                reasoning_effort=self.config.routine_reasoning_effort,
+            )
+            for worker_index in range(config.worker_count)
+        )
+        self._primary_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.primary_model,
+                reasoning_effort=self.config.primary_reasoning_effort,
             )
             for worker_index in range(config.worker_count)
         )
         self._subagent_runners = tuple(
             self._build_runner(
                 worker_index,
-                model=self.config.codex_model,
-                reasoning_effort=self.config.subagent_reasoning_effort,
+                model=self.config.validator_model,
+                reasoning_effort=self.config.validator_reasoning_effort,
             )
             for worker_index in range(config.worker_count)
         )
         self._preflight_runners = tuple(
             self._build_runner(
                 worker_index,
-                model=self.config.codex_model,
+                model=self.config.preflight_model,
                 reasoning_effort=self.config.preflight_reasoning_effort,
             )
             for worker_index in range(config.worker_count)
@@ -489,9 +493,10 @@ class AgentApp:
         self.api.set_commands()
         self.store.recover_interrupted_tasks()
         LOGGER.info("starting @%s", identity.get("username", "unknown"))
-        for worker_index, (runner, subagent_runner, preflight_runner) in enumerate(
+        for worker_index, (runner, primary_runner, subagent_runner, preflight_runner) in enumerate(
             zip(
                 self._worker_runners,
+                self._primary_runners,
                 self._subagent_runners,
                 self._preflight_runners,
                 strict=True,
@@ -500,7 +505,7 @@ class AgentApp:
         ):
             threading.Thread(
                 target=self._worker,
-                args=(runner, subagent_runner, preflight_runner),
+                args=(runner, primary_runner, subagent_runner, preflight_runner),
                 name=f"codex-worker-{worker_index}",
                 daemon=True,
             ).start()
@@ -577,6 +582,8 @@ class AgentApp:
             self._send_message(chat_id, HELP_TEXT)
         elif command == "/status":
             self._send_message(chat_id, self._status_text(chat_id))
+        elif command == "/model_usage":
+            self._send_chunks(chat_id, self._model_usage_text())
         elif command == "/project":
             self._set_project(chat_id, argument)
         elif command in {"/new", "/clear_temp"}:
@@ -931,6 +938,7 @@ class AgentApp:
     def _worker(
         self,
         runner: CodexRunner,
+        primary_runner: CodexRunner,
         subagent_runner: CodexRunner,
         preflight_runner: CodexRunner,
     ) -> None:
@@ -957,6 +965,7 @@ class AgentApp:
                     runner,
                     subagent_runner,
                     preflight_runner,
+                    primary_runner=primary_runner,
                 )
                 if result.cancelled:
                     status = "cancelled"
@@ -998,10 +1007,13 @@ class AgentApp:
         runner: CodexRunner | None = None,
         subagent_runner: CodexRunner | None = None,
         preflight_runner: CodexRunner | None = None,
+        *,
+        primary_runner: CodexRunner | None = None,
     ) -> RunResult:
         runner = runner or self.runner
         subagent_runner = subagent_runner or runner
         preflight_runner = preflight_runner or subagent_runner
+        primary_runner = primary_runner or runner
         project, request = unpack_project_task(task.prompt) if not task.restricted else (
             DEFAULT_PROJECT,
             task.prompt,
@@ -1015,9 +1027,20 @@ class AgentApp:
         )
         file_delivery_required = file_delivery_requested or figure_revision
         file_delivery_enabled = file_delivery_required or automatic_file_delivery
-        workflow_plan = WorkflowPlan("direct", uses_preflight=False, uses_validator=False)
+        workflow_plan = (
+            WorkflowPlan("direct", uses_preflight=False, uses_validator=False)
+            if task.restricted
+            else self._workflow_plan(task, request)
+        )
+        execution_runner = (
+            primary_runner
+            if workflow_plan.uses_validator
+            else subagent_runner
+            if workflow_plan.tier in {"focused", "figure-revision"}
+            else runner
+        )
         if not task.ephemeral and not task.restricted:
-            self._rotate_session_if_needed(task.chat_id, project, runner)
+            self._rotate_session_if_needed(task.chat_id, project, execution_runner, task.id)
         if task.restricted:
             context = (
                 self.store.group_context(task.chat_id, task.requester_id)
@@ -1057,7 +1080,6 @@ class AgentApp:
                 owner_onboarding_requested=self.state.owner_onboarding_requested(),
                 project_name=project,
             )
-            workflow_plan = self._workflow_plan(task, request)
             self.store.upsert_task_manifest(
                 task.id,
                 project=project,
@@ -1103,7 +1125,7 @@ class AgentApp:
                 delivery_state="required" if file_delivery_required else "not-requested",
             )
             result = self._run_cross_validation_workflow(
-                runner,
+                primary_runner,
                 subagent_runner,
                 preflight_runner,
                 prompt,
@@ -1114,6 +1136,7 @@ class AgentApp:
                 full_access=full_access,
                 file_delivery_enabled=file_delivery_enabled,
                 automatic_file_delivery=automatic_file_delivery,
+                task_id=task.id,
             )
         else:
             if not task.restricted:
@@ -1123,9 +1146,12 @@ class AgentApp:
                     + (("requested artifact",) if file_delivery_required else ()),
                     delivery_state="required" if file_delivery_required else "not-requested",
                 )
-            result = runner.run(
-                prompt,
-                thread_id,
+            result = self._run_model_phase(
+                task_id=task.id,
+                phase=workflow_plan.tier,
+                runner=execution_runner,
+                prompt=prompt,
+                thread_id=thread_id,
                 ephemeral=task.ephemeral,
                 restricted=task.restricted,
                 approved=effective_approval,
@@ -1257,6 +1283,7 @@ class AgentApp:
         chat_id: int,
         project: str,
         runner: CodexRunner,
+        task_id: str,
     ) -> None:
         snapshot = self.state.session_snapshot(chat_id, project)
         if not snapshot.codex_thread_id or snapshot.session_turn_count < self.config.max_session_turns:
@@ -1266,7 +1293,13 @@ class AgentApp:
             "or reusable procedures needed in future sessions as one learning proposal. "
             "Respond only with the learning_candidate protocol and omit one-off details."
         )
-        result = runner.run(summary_prompt, snapshot.codex_thread_id)
+        result = self._run_model_phase(
+            task_id=task_id,
+            phase="session-summary",
+            runner=runner,
+            prompt=summary_prompt,
+            thread_id=snapshot.codex_thread_id,
+        )
         if result.exit_code != 0 or result.cancelled or result.timed_out:
             LOGGER.warning("session rotation summary failed; keeping current session")
             return None
@@ -1833,12 +1866,16 @@ class AgentApp:
         full_access: bool,
         file_delivery_enabled: bool,
         automatic_file_delivery: bool,
+        task_id: str,
     ) -> RunResult:
         preflight = ""
         if plan.uses_preflight:
-            preflight_result = preflight_runner.run(
-                self._workflow_preflight_prompt(request),
-                None,
+            preflight_result = self._run_model_phase(
+                task_id=task_id,
+                phase="preflight",
+                runner=preflight_runner,
+                prompt=self._workflow_preflight_prompt(request),
+                thread_id=None,
                 ephemeral=True,
                 restricted=False,
                 approved=False,
@@ -1868,9 +1905,12 @@ class AgentApp:
         primary_prompt += self._manuscript_primary_qa_prompt(request)
         if preflight:
             primary_prompt += self._preflight_handoff_prompt(preflight)
-        primary_result = runner.run(
-            primary_prompt,
-            thread_id,
+        primary_result = self._run_model_phase(
+            task_id=task_id,
+            phase="primary",
+            runner=runner,
+            prompt=primary_prompt,
+            thread_id=thread_id,
             ephemeral=False,
             restricted=False,
             approved=approved,
@@ -1890,14 +1930,19 @@ class AgentApp:
         validator_result, failed_validator_sessions, cancelled = self._run_fresh_validator(
             subagent_runner,
             validator_prompt,
+            task_id=task_id,
+            phase="validator",
         )
         if cancelled is not None:
             return replace(cancelled, thread_id=primary_result.thread_id)
 
         if validator_result is None:
-            return runner.run(
-                self._cross_validation_recovery_prompt(failed_validator_sessions),
-                primary_result.thread_id,
+            return self._run_model_phase(
+                task_id=task_id,
+                phase="validation-recovery",
+                runner=runner,
+                prompt=self._cross_validation_recovery_prompt(failed_validator_sessions),
+                thread_id=primary_result.thread_id,
                 ephemeral=False,
                 restricted=False,
                 approved=approved,
@@ -1916,14 +1961,18 @@ class AgentApp:
                 full_access=full_access,
                 file_delivery_enabled=file_delivery_enabled,
                 automatic_file_delivery=automatic_file_delivery,
+                task_id=task_id,
             )
 
         reconciliation_prompt = self._cross_reconciliation_prompt(validator_result.message)
         if file_delivery_enabled:
             reconciliation_prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
-        return runner.run(
-            reconciliation_prompt,
-            primary_result.thread_id,
+        return self._run_model_phase(
+            task_id=task_id,
+            phase="reconciliation",
+            runner=runner,
+            prompt=reconciliation_prompt,
+            thread_id=primary_result.thread_id,
             ephemeral=False,
             restricted=False,
             approved=approved,
@@ -1962,12 +2011,18 @@ class AgentApp:
         self,
         runner: CodexRunner,
         prompt: str,
+        *,
+        task_id: str,
+        phase: str,
     ) -> tuple[RunResult | None, int, RunResult | None]:
         failed_sessions = 0
         for _attempt in range(_MAX_FRESH_VALIDATOR_SESSIONS):
-            candidate = runner.run(
-                prompt,
-                None,
+            candidate = self._run_model_phase(
+                task_id=task_id,
+                phase=phase,
+                runner=runner,
+                prompt=prompt,
+                thread_id=None,
                 ephemeral=True,
                 restricted=False,
                 approved=False,
@@ -1993,12 +2048,16 @@ class AgentApp:
         full_access: bool,
         file_delivery_enabled: bool,
         automatic_file_delivery: bool,
+        task_id: str,
     ) -> RunResult:
         findings = initial_findings
         for attempt in range(1, iterations + 1):
-            rework_result = runner.run(
-                self._cross_reconciliation_prompt(findings, final=False),
-                primary_thread_id,
+            rework_result = self._run_model_phase(
+                task_id=task_id,
+                phase="rework",
+                runner=runner,
+                prompt=self._cross_reconciliation_prompt(findings, final=False),
+                thread_id=primary_thread_id,
                 ephemeral=False,
                 restricted=False,
                 approved=approved,
@@ -2015,13 +2074,18 @@ class AgentApp:
             verification, failed_sessions, cancelled = self._run_fresh_validator(
                 subagent_runner,
                 verification_prompt,
+                task_id=task_id,
+                phase="feedback-verifier",
             )
             if cancelled is not None:
                 return replace(cancelled, thread_id=primary_thread_id)
             if verification is None:
-                return runner.run(
-                    self._cross_validation_recovery_prompt(failed_sessions),
-                    primary_thread_id,
+                return self._run_model_phase(
+                    task_id=task_id,
+                    phase="feedback-recovery",
+                    runner=runner,
+                    prompt=self._cross_validation_recovery_prompt(failed_sessions),
+                    thread_id=primary_thread_id,
                     ephemeral=False,
                     restricted=False,
                     approved=approved,
@@ -2033,9 +2097,12 @@ class AgentApp:
                     final_prompt += self._file_delivery_prompt(
                         automatic=automatic_file_delivery
                     )
-                return runner.run(
-                    final_prompt,
-                    primary_thread_id,
+                return self._run_model_phase(
+                    task_id=task_id,
+                    phase="finalization",
+                    runner=runner,
+                    prompt=final_prompt,
+                    thread_id=primary_thread_id,
                     ephemeral=False,
                     restricted=False,
                     approved=approved,
@@ -2045,9 +2112,12 @@ class AgentApp:
         recovery_prompt = self._feedback_loop_recovery_prompt(iterations)
         if file_delivery_enabled:
             recovery_prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
-        return runner.run(
-            recovery_prompt,
-            primary_thread_id,
+        return self._run_model_phase(
+            task_id=task_id,
+            phase="feedback-exhausted",
+            runner=runner,
+            prompt=recovery_prompt,
+            thread_id=primary_thread_id,
             ephemeral=False,
             restricted=False,
             approved=approved,
@@ -2061,6 +2131,42 @@ class AgentApp:
     @staticmethod
     def _run_succeeded(result: RunResult) -> bool:
         return result.exit_code == 0 and not result.cancelled and not result.timed_out
+
+    def _run_model_phase(
+        self,
+        *,
+        task_id: str | None,
+        phase: str,
+        runner: CodexRunner,
+        prompt: str,
+        thread_id: str | None,
+        ephemeral: bool = False,
+        restricted: bool = False,
+        approved: bool = False,
+        full_access: bool = False,
+    ) -> RunResult:
+        started_at = time.time()
+        result = runner.run(
+            prompt,
+            thread_id,
+            ephemeral=ephemeral,
+            restricted=restricted,
+            approved=approved,
+            full_access=full_access,
+        )
+        self.store.record_model_run(
+            task_id=task_id,
+            phase=phase,
+            model=getattr(runner, "model", None) or "default",
+            reasoning_effort=getattr(runner, "model_reasoning_effort", None)
+            or "default",
+            started_at=started_at,
+            finished_at=time.time(),
+            exit_code=result.exit_code,
+            cancelled=result.cancelled,
+            timed_out=result.timed_out,
+        )
+        return result
 
     def _cross_validator_prompt(self, request: str, primary_handoff: str) -> str:
         handoff = primary_handoff.strip()[:_MAX_CROSS_VALIDATION_HANDOFF_CHARS]
@@ -2745,6 +2851,32 @@ class AgentApp:
                 f"Workspace: {self.config.workdir}",
             ]
         )
+
+    def _model_usage_text(self) -> str:
+        now = time.time()
+        windows = (
+            ("Last 5 hours", now - 5 * 60 * 60),
+            ("Last 7 days", now - 7 * 24 * 60 * 60),
+        )
+        lines = [
+            "Model activity telemetry (execution proxy)",
+            "This records run count, outcomes, and wall time—not exact ChatGPT quota consumption.",
+            "For the account's remaining quota/reset time, use Codex /usage and compare snapshots.",
+        ]
+        for title, since in windows:
+            summaries = self.store.model_run_summaries(since=since)
+            lines.append("")
+            lines.append(f"{title}:")
+            if not summaries:
+                lines.append("- no recorded model runs yet")
+                continue
+            for summary in summaries:
+                elapsed_minutes = summary.elapsed_seconds / 60
+                lines.append(
+                    f"- {summary.model} ({summary.reasoning_effort}), {summary.phase}: "
+                    f"{summary.completed}/{summary.runs} completed, {elapsed_minutes:.1f} min"
+                )
+        return "\n".join(lines)
 
     def _memories_text(self, chat_id: int) -> str:
         project = self.state.active_project(chat_id)

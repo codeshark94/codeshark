@@ -3,10 +3,13 @@ allowed_user_ids = [123456789]
 workdir = "/Users/yourname/workspace/Codex-codeshark/workspace"
 codex_binary = "/Applications/Codex.app/Contents/Resources/codex"
 codex_profile = "codex-codeshark"
-codex_model = "gpt-5.5"
-# Keep every stage on the same base model, but lower the effort for internal work.
-# The primary user-facing task keeps the profile's reasoning effort.
-subagent_reasoning_effort = "medium"
+routine_model = "gpt-5.6-luna"
+routine_reasoning_effort = "medium"
+primary_model = "gpt-5.6-sol"
+primary_reasoning_effort = "high"
+validator_model = "gpt-5.6-terra"
+validator_reasoning_effort = "high"
+preflight_model = "gpt-5.6-luna"
 preflight_reasoning_effort = "low"
 poll_timeout_seconds = 30
 task_timeout_seconds = 1800
