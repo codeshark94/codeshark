@@ -166,7 +166,7 @@ struct DashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "shark.fill")
+                Image(systemName: "terminal.fill")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.tint)
                     .frame(width: 30, height: 30)
