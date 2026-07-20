@@ -538,33 +538,26 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             keyEquivalent: ""
         )
         status.target = self
-        status.attributedTitle = NSAttributedString(
-            string: "● Codeshark is \(statusTitle(for: snapshot).lowercased())",
+        let statusText = NSMutableAttributedString(
+            string: "●",
             attributes: [
-                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                .font: NSFont.systemFont(ofSize: 14),
                 .foregroundColor: statusMenuColor(for: snapshot),
             ]
         )
+        statusText.append(
+            NSAttributedString(
+                string: " Codeshark is \(statusTitle(for: snapshot).lowercased())",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 14),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ]
+            )
+        )
+        status.attributedTitle = statusText
         menu.addItem(status)
         menu.addItem(.separator())
 
-        addSection("Running", to: menu)
-        if snapshot.activeTasks.isEmpty {
-            addSecondary("Ready", to: menu)
-        } else {
-            for task in snapshot.activeTasks.prefix(2) {
-                addStatic(phaseTitle(task.phase), to: menu)
-                addSecondary(
-                    "\(task.project) · \(compactModelName(task.model)) · \(task.reasoningEffort) · \(elapsedText(task.elapsedSeconds))",
-                    to: menu
-                )
-            }
-            if snapshot.activeTasks.count > 2 {
-                addSecondary("\(snapshot.activeTasks.count - 2) more task(s) running", to: menu)
-            }
-        }
-
-        menu.addItem(.separator())
         addSection("Recent", to: menu)
         if snapshot.recentArtifacts.isEmpty {
             addSecondary("No recent delivery", to: menu)
@@ -581,24 +574,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         menu.addItem(.separator())
-        menu.addItem(actionItem("Model Routing…", action: #selector(openModelRouting(_:))))
+        menu.addItem(actionItem("Model Routing", action: #selector(openModelRouting(_:))))
         menu.addItem(usageMenuItem(snapshot: snapshot))
-        menu.addItem(actionItem("Workspace…", action: #selector(openWorkspace(_:))))
-        menu.addItem(actionItem("Logs…", action: #selector(openLogs(_:))))
+        menu.addItem(actionItem("Workspace", action: #selector(openWorkspace(_:))))
+        menu.addItem(actionItem("Logs", action: #selector(openLogs(_:))))
 
         menu.addItem(.separator())
-        menu.addItem(actionItem("Close Menu", action: #selector(closeMenu(_:))))
-        menu.addItem(.separator())
-
-        let quit = actionItem("Quit Codeshark", action: #selector(quitCodeshark))
-        quit.attributedTitle = NSAttributedString(
-            string: "Quit Codeshark",
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
-                .foregroundColor: NSColor.systemRed,
-            ]
-        )
-        menu.addItem(quit)
+        menu.addItem(actionItem("Quit Codeshark", action: #selector(quitCodeshark)))
     }
 
     private func addSection(_ title: String, to target: NSMenu) {
@@ -647,7 +629,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         addSecondary("Last 5 hours · \(recent) phases", to: usage)
         addSecondary("Last 7 days · \(weekly) phases", to: usage)
         usage.addItem(.separator())
-        usage.addItem(actionItem("Open Usage…", action: #selector(openUsage(_:))))
+        usage.addItem(actionItem("Open Usage", action: #selector(openUsage(_:))))
         item.submenu = usage
         return item
     }
@@ -679,10 +661,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     @objc private func openLogs(_ sender: Any?) {
         showLogs()
-    }
-
-    @objc private func closeMenu(_ sender: Any?) {
-        menu.cancelTracking()
     }
 
     private func chooseWorkspace() {
