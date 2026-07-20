@@ -422,6 +422,7 @@ class AgentApp:
                 )
             latest_failure = self.store.latest_failure()
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
+            activity_log = self.store.recent_model_runs()
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
                 json.dumps(
@@ -429,6 +430,29 @@ class AgentApp:
                         "active_task_count": len(active_tasks),
                         "state": "working" if active_tasks else "idle",
                         "queue_count": self.store.pending_count(),
+                        "workspace_path": str(self.config.workdir),
+                        "model_assignments": [
+                            {
+                                "model": self.config.routine_model,
+                                "role": "Routine",
+                                "reasoning_effort": self.config.routine_reasoning_effort,
+                            },
+                            {
+                                "model": self.config.preflight_model,
+                                "role": "Preflight",
+                                "reasoning_effort": self.config.preflight_reasoning_effort,
+                            },
+                            {
+                                "model": self.config.primary_model,
+                                "role": "Primary · Rework",
+                                "reasoning_effort": self.config.primary_reasoning_effort,
+                            },
+                            {
+                                "model": self.config.validator_model,
+                                "role": "Validation · Feedback",
+                                "reasoning_effort": self.config.validator_reasoning_effort,
+                            },
+                        ],
                         "active_tasks": active_summary,
                         "recent_artifacts": self.store.recent_artifact_names(),
                         "last_failure": (
@@ -450,6 +474,26 @@ class AgentApp:
                                 "elapsed_seconds": round(summary.elapsed_seconds, 1),
                             }
                             for summary in model_usage[:4]
+                        ],
+                        "activity_log": [
+                            {
+                                "id": str(run.id),
+                                "phase": run.phase,
+                                "model": run.model,
+                                "reasoning_effort": run.reasoning_effort,
+                                "elapsed_seconds": round(run.elapsed_seconds, 1),
+                                "outcome": (
+                                    "cancelled"
+                                    if run.cancelled
+                                    else "timed out"
+                                    if run.timed_out
+                                    else "completed"
+                                    if run.exit_code == 0
+                                    else "failed"
+                                ),
+                                "finished_at": int(run.finished_at),
+                            }
+                            for run in activity_log
                         ],
                         "updated_at": int(now),
                     },

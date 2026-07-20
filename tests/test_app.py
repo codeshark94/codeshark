@@ -673,12 +673,23 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             (self.config.state_path.parent / "menu-status.json").read_text(encoding="utf-8")
         )
         self.assertEqual(payload["state"], "working")
+        self.assertEqual(payload["workspace_path"], str(self.config.workdir))
+        self.assertEqual(
+            payload["model_assignments"][2],
+            {
+                "model": "gpt-5.6-sol",
+                "role": "Primary · Rework",
+                "reasoning_effort": "high",
+            },
+        )
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
         self.assertEqual(payload["last_failure"]["message"], "brief diagnostic")
         self.assertEqual(payload["model_usage"][0]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["activity_log"][0]["phase"], "primary")
+        self.assertEqual(payload["activity_log"][0]["outcome"], "completed")
         self.assertNotIn("secret request text", json.dumps(payload))
 
     def test_private_follow_up_steers_an_active_safe_task(self) -> None:

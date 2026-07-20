@@ -92,6 +92,19 @@ class ModelRunSummary:
 
 
 @dataclass(frozen=True)
+class ModelRunLog:
+    id: int
+    phase: str
+    model: str
+    reasoning_effort: str
+    elapsed_seconds: float
+    exit_code: int
+    cancelled: bool
+    timed_out: bool
+    finished_at: float
+
+
+@dataclass(frozen=True)
 class TaskFailure:
     task_id: str
     message: str
@@ -705,6 +718,33 @@ class AgentStore:
             )
             for row in rows
         ]
+
+    def recent_model_runs(self, *, limit: int = 4) -> tuple[ModelRunLog, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, phase, model, reasoning_effort, elapsed_seconds, exit_code,
+                       cancelled, timed_out, finished_at
+                FROM model_runs
+                ORDER BY finished_at DESC
+                LIMIT ?
+                """,
+                (max(1, limit),),
+            ).fetchall()
+        return tuple(
+            ModelRunLog(
+                id=row["id"],
+                phase=row["phase"],
+                model=row["model"],
+                reasoning_effort=row["reasoning_effort"],
+                elapsed_seconds=row["elapsed_seconds"],
+                exit_code=row["exit_code"],
+                cancelled=bool(row["cancelled"]),
+                timed_out=bool(row["timed_out"]),
+                finished_at=row["finished_at"],
+            )
+            for row in rows
+        )
 
     def recent_artifact_names(self, *, limit: int = 3) -> tuple[str, ...]:
         with self._connect() as connection:

@@ -26,20 +26,33 @@ struct DashboardFailure: Decodable {
     }
 }
 
-struct DashboardModelUsage: Decodable, Identifiable {
+struct DashboardModelAssignment: Decodable, Identifiable {
     let model: String
     let reasoningEffort: String
-    let phase: String
-    let runs: Int
-    let completed: Int
-    let elapsedSeconds: Double
+    let role: String
 
-    var id: String { "\(model)-\(reasoningEffort)-\(phase)" }
+    var id: String { "\(model)-\(reasoningEffort)-\(role)" }
 
     enum CodingKeys: String, CodingKey {
-        case model, phase, runs, completed
+        case model, role
+        case reasoningEffort = "reasoning_effort"
+    }
+}
+
+struct DashboardActivityLog: Decodable, Identifiable {
+    let id: String
+    let phase: String
+    let model: String
+    let reasoningEffort: String
+    let elapsedSeconds: Double
+    let outcome: String
+    let finishedAt: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, phase, model, outcome
         case reasoningEffort = "reasoning_effort"
         case elapsedSeconds = "elapsed_seconds"
+        case finishedAt = "finished_at"
     }
 }
 
@@ -47,47 +60,57 @@ struct DashboardSnapshot: Decodable {
     let state: String
     let activeTaskCount: Int
     let queueCount: Int
+    let workspacePath: String
+    let modelAssignments: [DashboardModelAssignment]
     let activeTasks: [DashboardTask]
     let recentArtifacts: [String]
     let lastFailure: DashboardFailure?
-    let modelUsage: [DashboardModelUsage]
+    let activityLog: [DashboardActivityLog]
 
     static let empty = DashboardSnapshot(
         state: "starting",
         activeTaskCount: 0,
         queueCount: 0,
+        workspacePath: "",
+        modelAssignments: [],
         activeTasks: [],
         recentArtifacts: [],
         lastFailure: nil,
-        modelUsage: []
+        activityLog: []
     )
 
     enum CodingKeys: String, CodingKey {
         case state
         case activeTaskCount = "active_task_count"
         case queueCount = "queue_count"
+        case workspacePath = "workspace_path"
+        case modelAssignments = "model_assignments"
         case activeTasks = "active_tasks"
         case recentArtifacts = "recent_artifacts"
         case lastFailure = "last_failure"
-        case modelUsage = "model_usage"
+        case activityLog = "activity_log"
     }
 
     init(
         state: String,
         activeTaskCount: Int,
         queueCount: Int,
+        workspacePath: String,
+        modelAssignments: [DashboardModelAssignment],
         activeTasks: [DashboardTask],
         recentArtifacts: [String],
         lastFailure: DashboardFailure?,
-        modelUsage: [DashboardModelUsage]
+        activityLog: [DashboardActivityLog]
     ) {
         self.state = state
         self.activeTaskCount = activeTaskCount
         self.queueCount = queueCount
+        self.workspacePath = workspacePath
+        self.modelAssignments = modelAssignments
         self.activeTasks = activeTasks
         self.recentArtifacts = recentArtifacts
         self.lastFailure = lastFailure
-        self.modelUsage = modelUsage
+        self.activityLog = activityLog
     }
 
     init(from decoder: Decoder) throws {
@@ -95,10 +118,12 @@ struct DashboardSnapshot: Decodable {
         state = try container.decodeIfPresent(String.self, forKey: .state) ?? "starting"
         activeTaskCount = try container.decodeIfPresent(Int.self, forKey: .activeTaskCount) ?? 0
         queueCount = try container.decodeIfPresent(Int.self, forKey: .queueCount) ?? 0
+        workspacePath = try container.decodeIfPresent(String.self, forKey: .workspacePath) ?? ""
+        modelAssignments = try container.decodeIfPresent([DashboardModelAssignment].self, forKey: .modelAssignments) ?? []
         activeTasks = try container.decodeIfPresent([DashboardTask].self, forKey: .activeTasks) ?? []
         recentArtifacts = try container.decodeIfPresent([String].self, forKey: .recentArtifacts) ?? []
         lastFailure = try container.decodeIfPresent(DashboardFailure.self, forKey: .lastFailure)
-        modelUsage = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage) ?? []
+        activityLog = try container.decodeIfPresent([DashboardActivityLog].self, forKey: .activityLog) ?? []
     }
 }
 
@@ -155,6 +180,53 @@ private func elapsedText(_ seconds: Int) -> String {
     return "just now"
 }
 
+private func compactModelName(_ model: String) -> String {
+    model.replacingOccurrences(of: "gpt-5.6-", with: "")
+}
+
+private func workspaceDisplayPath(_ path: String) -> String {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    guard path.hasPrefix(home) else { return path }
+    return "~" + path.dropFirst(home.count)
+}
+
+private func phaseTitle(_ phase: String) -> String {
+    phase.replacingOccurrences(of: "-", with: " ").localizedCapitalized
+}
+
+private func activityIcon(_ outcome: String) -> String {
+    switch outcome {
+    case "completed":
+        return "checkmark.circle.fill"
+    case "cancelled", "timed out":
+        return "pause.circle.fill"
+    default:
+        return "xmark.circle.fill"
+    }
+}
+
+private func activityColor(_ outcome: String) -> Color {
+    switch outcome {
+    case "completed":
+        return .green
+    case "cancelled", "timed out":
+        return .orange
+    default:
+        return .red
+    }
+}
+
+private func timeAgoText(_ timestamp: Int) -> String {
+    let elapsed = max(0, Int(Date().timeIntervalSince1970) - timestamp)
+    if elapsed >= 3600 {
+        return "\(elapsed / 3600)h ago"
+    }
+    if elapsed >= 60 {
+        return "\(elapsed / 60)m ago"
+    }
+    return "now"
+}
+
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
     let openWorkspace: () -> Void
@@ -197,6 +269,40 @@ struct DashboardView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if !snapshot.workspacePath.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("WORKSPACE")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Label(workspaceDisplayPath(snapshot.workspacePath), systemImage: "folder")
+                                .font(.caption.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !snapshot.modelAssignments.isEmpty {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("MODEL ROUTING")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(snapshot.modelAssignments) { assignment in
+                                HStack(spacing: 6) {
+                                    Text(compactModelName(assignment.model))
+                                        .font(.caption.weight(.semibold))
+                                    Text(assignment.role)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(assignment.reasoningEffort)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+
                     if snapshot.activeTasks.isEmpty {
                         Label("Ready for a request", systemImage: "checkmark.circle")
                             .font(.subheadline)
@@ -226,28 +332,34 @@ struct DashboardView: View {
                         }
                     }
 
-                    if !snapshot.modelUsage.isEmpty {
+                    if !snapshot.activityLog.isEmpty {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
-                                Text("MODEL ACTIVITY")
+                                Text("EXECUTION LOG")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text("last 5h")
+                                Text("latest")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
-                            ForEach(snapshot.modelUsage.prefix(3)) { usage in
-                                HStack(spacing: 6) {
-                                    Text(usage.model.replacingOccurrences(of: "gpt-5.6-", with: ""))
-                                        .font(.caption.weight(.medium))
-                                    Text(usage.phase)
+                            ForEach(snapshot.activityLog) { entry in
+                                HStack(alignment: .top, spacing: 7) {
+                                    Image(systemName: activityIcon(entry.outcome))
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(activityColor(entry.outcome))
+                                        .padding(.top, 1)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(phaseTitle(entry.phase)) · \(compactModelName(entry.model))")
+                                            .font(.caption.weight(.medium))
+                                        Text("\(entry.outcome) · \(entry.reasoningEffort) · \(elapsedText(Int(entry.elapsedSeconds)))")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                     Spacer()
-                                    Text("\(usage.completed)/\(usage.runs) · \(Int(usage.elapsedSeconds / 60))m")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
+                                    Text(timeAgoText(entry.finishedAt))
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.tertiary)
                                 }
                             }
                         }
@@ -296,7 +408,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .frame(width: 340, height: 360)
+        .frame(width: 340, height: 320)
     }
 }
 
@@ -316,7 +428,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 340, height: 360)
+        popover.contentSize = NSSize(width: 340, height: 320)
         popover.contentViewController = NSHostingController(
             rootView: DashboardView(
                 model: dashboard,
