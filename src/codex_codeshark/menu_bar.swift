@@ -778,10 +778,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let status = NSMenuItem(
             title: "Codeshark is \(statusTitle(for: snapshot).lowercased())",
-            action: #selector(ignoreMenuItem(_:)),
+            action: nil,
             keyEquivalent: ""
         )
-        status.target = self
+        status.isEnabled = false
         let statusText = NSMutableAttributedString(
             string: "●",
             attributes: [
