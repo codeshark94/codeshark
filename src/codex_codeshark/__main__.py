@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("start", help="start or install the background service")
     commands.add_parser("stop", help="stop the background service")
     commands.add_parser("restart", help="restart the background service")
+    commands.add_parser("restart-when-idle", help=argparse.SUPPRESS)
     commands.add_parser("refresh-menu", help="rebuild and restart only the menu bar")
     commands.add_parser("apply-pending-restart", help=argparse.SUPPRESS)
     commands.add_parser("service-status", help="show the background service status")
@@ -142,6 +143,15 @@ def main() -> int:
         if args.command == "apply-pending-restart":
             status = wait_for_deferred_restart()
             if status is not None:
+                print(f"Service: {status.state}")
+                if status.pid is not None:
+                    print(f"PID: {status.pid}")
+            return 0
+        if args.command == "restart-when-idle":
+            status = restart_when_idle()
+            if status is None:
+                print("Restart: scheduled after active work finishes")
+            else:
                 print(f"Service: {status.state}")
                 if status.pid is not None:
                     print(f"PID: {status.pid}")

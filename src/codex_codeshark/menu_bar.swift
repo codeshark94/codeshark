@@ -1356,6 +1356,7 @@ struct AttentionView: View {
     @ObservedObject var model: DashboardModel
     let showLogs: () -> Void
     let retryTask: (String) -> Void
+    let restartWhenIdle: () -> Void
     let close: () -> Void
 
     private var snapshot: DashboardSnapshot { model.snapshot }
@@ -1365,7 +1366,7 @@ struct AttentionView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Attention")
                     .font(.system(size: 16, weight: .semibold))
-                Text("Failures that may need a retry or local inspection.")
+                Text("Failures that may need a retry, a safe service restart, or local inspection.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -1398,16 +1399,18 @@ struct AttentionView: View {
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.small)
                                     .disabled(failure.retryAvailable != true)
-                                    if failure.retryAvailable == true {
-                                        Text("safe startup retry")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        Text("retry unavailable after task start")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                                    Button("Restart when idle") {
+                                        restartWhenIdle()
                                     }
+                                    .controlSize(.small)
                                 }
+                                Text(
+                                    failure.retryAvailable == true
+                                        ? "Retry is available because the failed turn never started."
+                                        : "Retry is unavailable after a turn starts, to avoid duplicate work."
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             }
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2896,6 +2899,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 model: dashboard,
                 showLogs: { [weak self] in self?.showLogs() },
                 retryTask: { [weak self] taskID in self?.retryTask(taskID) },
+                restartWhenIdle: { [weak self] in self?.restartWhenIdle() },
                 close: { [weak self] in self?.attentionPanel?.close() }
             )
         )
@@ -2909,6 +2913,15 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let result = executeServiceCommand(["retry-task", taskID])
         if result.status != 0 {
             showError(result.output.isEmpty ? "This task can no longer be retried safely." : result.output)
+            return
+        }
+        dashboard.refresh()
+    }
+
+    private func restartWhenIdle() {
+        let result = executeServiceCommand(["restart-when-idle"])
+        if result.status != 0 {
+            showError(result.output.isEmpty ? "Could not schedule a safe restart." : result.output)
             return
         }
         dashboard.refresh()
