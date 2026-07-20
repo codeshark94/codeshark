@@ -422,7 +422,7 @@ class AgentApp:
                 )
             latest_failure = self.store.latest_failure()
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
-            activity_log = self.store.recent_model_runs()
+            activity_log = self.store.recent_model_runs(limit=20)
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
                 json.dumps(
