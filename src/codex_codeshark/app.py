@@ -51,6 +51,14 @@ from .vault import ASSET_KINDS, VaultStore
 
 LOGGER = logging.getLogger(__name__)
 
+_ATTACHED_FILE_PATTERN = re.compile(r"\[Attached workspace file: ([^\]]+)\]")
+_ATTACHMENT_FOLLOW_UP_PATTERN = re.compile(
+    r"(?:\b(?:attached|attachment|file|files|data|these|previous)\b|"
+    r"첨부|파일|데이터|이것|이전)",
+    re.IGNORECASE,
+)
+_AUTOMATIC_ATTACHMENT_REQUEST = "Inspect the attached workspace file and report your findings:"
+
 HELP_TEXT = """Codex-codeshark
 
 Plain text: submit a task or steer active private work
@@ -553,6 +561,12 @@ class AgentApp:
         if self._handle_admin_command(chat_id, command, argument):
             return
 
+        if self._enqueue_attachment_follow_up_task(
+            chat_id,
+            text,
+            reply_to_message_id=reply_to_message_id,
+        ):
+            return
         if self._steer_active_private_task(chat_id, text):
             return
         self._request_owner_onboarding(chat_id)
@@ -1481,6 +1495,70 @@ class AgentApp:
         else:
             self._wake_worker.set()
         return True
+
+    def _enqueue_attachment_follow_up_task(
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        reply_to_message_id: int | None,
+    ) -> bool:
+        """Keep an uploaded-file work request durable instead of steering one file analysis."""
+        if not _ATTACHMENT_FOLLOW_UP_PATTERN.search(prompt):
+            return False
+        cutoff = time.time() - 120
+        project = self.state.active_project(chat_id)
+        with self._status_lock:
+            active_tasks = [
+                item.task
+                for item in self._active_tasks.values()
+                if (
+                    item.task.chat_id == chat_id
+                    and not item.task.restricted
+                    and not item.task.ephemeral
+                    and unpack_project_task(item.task.prompt)[0] == project
+                    and item.task.created_at >= cutoff
+                )
+            ]
+        queued_tasks = [
+            task
+            for task in self.store.list_tasks(limit=self.config.queue_size + 10)
+            if (
+                task.chat_id == chat_id
+                and task.status == "queued"
+                and not task.restricted
+                and not task.ephemeral
+                and task.created_at >= cutoff
+                and unpack_project_task(task.prompt)[0] == project
+            )
+        ]
+        attachment_tasks = active_tasks + queued_tasks
+        paths = list(
+            dict.fromkeys(
+                path
+                for task in attachment_tasks
+                for path in _ATTACHED_FILE_PATTERN.findall(task.prompt)
+            )
+        )
+        if not paths:
+            return False
+        self.store.cancel_queued_tasks(
+            [
+                task.id
+                for task in queued_tasks
+                if _AUTOMATIC_ATTACHMENT_REQUEST in task.prompt
+            ]
+        )
+        file_list = "\n".join(f"- {path}" for path in paths)
+        combined_prompt = (
+            f"{prompt}\n\n[Recently uploaded workspace files for this request]\n{file_list}"
+        )
+        self._request_owner_onboarding(chat_id)
+        return self._enqueue_user_task(
+            chat_id,
+            combined_prompt,
+            reply_to_message_id=reply_to_message_id,
+        )
 
     def _steer_active_private_task(
         self,

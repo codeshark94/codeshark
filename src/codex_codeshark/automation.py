@@ -1015,6 +1015,21 @@ class AgentStore:
             ).fetchall()
         return [self._task(row) for row in rows]
 
+    def cancel_queued_tasks(self, task_ids: list[str]) -> int:
+        """Cancel selected queued tasks without touching active work."""
+        ids = tuple(dict.fromkeys(task_id for task_id in task_ids if task_id))
+        if not ids:
+            return 0
+        placeholders = ", ".join("?" for _ in ids)
+        with self._lock, self._connect() as connection:
+            result = connection.execute(
+                f"UPDATE tasks SET status = 'cancelled', prompt = '', finished_at = ? "
+                f"WHERE status = 'queued' AND id IN ({placeholders})",
+                (time.time(), *ids),
+            )
+            self._prune_tasks(connection)
+        return result.rowcount
+
     def cancel_oldest_queued(self, *, chat_id: int | None = None) -> str | None:
         with self._lock, self._connect() as connection:
             if chat_id is None:

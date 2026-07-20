@@ -646,6 +646,38 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.store.pending_count(), 1)
         self.assertEqual(self.api.messages, [])
 
+    def test_attachment_follow_up_is_queued_with_uploaded_files(self) -> None:
+        runner = FakeCodexRunner()
+        active_task = self.app.store.enqueue_task(
+            123,
+            "Inspect the attached workspace file and report your findings:\n"
+            "[Attached workspace file: .codeshark/inbox/first.xlsx]",
+            source="telegram",
+            ephemeral=False,
+        )
+        active_task = self.app.store.claim_next_task()
+        queued_task = self.app.store.enqueue_task(
+            123,
+            "Inspect the attached workspace file and report your findings:\n"
+            "[Attached workspace file: .codeshark/inbox/second.xlsx]",
+            source="telegram",
+            ephemeral=False,
+        )
+        with self.app._status_lock:
+            self.app._active_tasks[active_task.id] = ActiveTask(active_task, runner)
+
+        self.app._handle_update(
+            self.update(123, "이것들 추가 데이터까지 포함해서 활용 계획 리포트")
+        )
+
+        self.assertEqual(runner.steers, [])
+        self.assertEqual(self.app.store.get_task(queued_task.id).status, "cancelled")
+        follow_up = self.app.store.list_tasks()[0]
+        self.assertEqual(follow_up.status, "queued")
+        self.assertIn("활용 계획 리포트", follow_up.prompt)
+        self.assertIn(".codeshark/inbox/first.xlsx", follow_up.prompt)
+        self.assertIn(".codeshark/inbox/second.xlsx", follow_up.prompt)
+
     def test_figure_revision_follow_up_keeps_steering_and_requires_an_artifact(self) -> None:
         app = AgentApp(replace(self.config, admin_full_access=True), self.api)
         runner = FakeCodexRunner()
