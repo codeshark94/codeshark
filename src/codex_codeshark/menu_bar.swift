@@ -825,12 +825,12 @@ private struct LocalConsoleView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if message.role != "user" {
                     Text("Codeshark")
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(accent)
                 }
                 if !message.text.isEmpty {
                     Text(message.text)
-                        .font(.system(size: 16))
+                        .font(.system(size: 18))
                         .foregroundStyle(.white)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -863,26 +863,31 @@ private struct LocalConsoleView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 7)
-            ForEach(commands) { item in
-                Button {
-                    model.draft = item.command
-                    model.commandPaletteOpen = false
-                } label: {
-                    HStack(spacing: 10) {
-                        mascot(size: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.command).font(.body.weight(.semibold))
-                            Text(item.description).font(.caption).foregroundStyle(muted)
+            ScrollView(showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(commands) { item in
+                        Button {
+                            model.draft = item.command
+                            model.commandPaletteOpen = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                mascot(size: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.command).font(.body.weight(.semibold))
+                                    Text(item.description).font(.caption).foregroundStyle(muted)
+                                }
+                                Spacer()
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
+                        .buttonStyle(.plain)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
+            .frame(maxHeight: 320)
         }
         .frame(width: 330)
         .background(chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -959,14 +964,7 @@ private struct LocalConsoleView: View {
                 }
                 .frame(minHeight: 160, maxHeight: 360)
 
-                ZStack(alignment: .bottomLeading) {
-                    if model.commandPaletteOpen {
-                        commandPalette
-                            .padding(.leading, 8)
-                            .padding(.bottom, 76)
-                            .zIndex(1)
-                    }
-                    VStack(spacing: 8) {
+                VStack(spacing: 8) {
                     if !model.attachments.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
@@ -1025,6 +1023,12 @@ private struct LocalConsoleView: View {
                     }
                 }
                 .padding(.top, 2)
+                .overlay(alignment: .bottomLeading) {
+                    if model.commandPaletteOpen {
+                        commandPalette
+                            .padding(.leading, 8)
+                            .padding(.bottom, 62)
+                    }
                 }
             }
         }
