@@ -247,17 +247,6 @@ private func statusTitle(for snapshot: DashboardSnapshot) -> String {
     }
 }
 
-private func statusColor(for snapshot: DashboardSnapshot) -> Color {
-    switch snapshot.state {
-    case "working":
-        return .accentColor
-    case "idle":
-        return .green
-    default:
-        return .secondary
-    }
-}
-
 private func elapsedText(_ seconds: Int) -> String {
     let minutes = max(0, seconds) / 60
     if minutes >= 60 {
@@ -486,141 +475,11 @@ struct ModelUsageView: View {
     }
 }
 
-struct DashboardView: View {
-    @ObservedObject var model: DashboardModel
-    let chooseWorkspace: () -> Void
-    let configureModels: () -> Void
-    let showUsage: () -> Void
-    let showLogs: () -> Void
-    let close: () -> Void
-    let quit: () -> Void
-
-    private var snapshot: DashboardSnapshot { model.snapshot }
-
-    private var usageSummary: String {
-        let recent = snapshot.modelUsage5h.reduce(0) { $0 + $1.runs }
-        let weekly = snapshot.modelUsage7d.reduce(0) { $0 + $1.runs }
-        return "5h \(recent) phases · 7d \(weekly) phases"
-    }
-
-    @ViewBuilder
-    private func menuAction(
-        _ title: String,
-        subtitle: String? = nil,
-        showsChevron: Bool = true,
-        destructive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body.weight(.medium))
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(destructive ? Color.red.opacity(0.7) : Color.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(destructive ? Color.red : Color.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(destructive ? Color.red : Color.primary)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(statusColor(for: snapshot))
-                    .frame(width: 10, height: 10)
-                Text("Codeshark is \(statusTitle(for: snapshot).lowercased())")
-                    .font(.body.weight(.semibold))
-                Spacer()
-            }
-
-            Divider()
-
-            if snapshot.activeTasks.isEmpty {
-                Text("Ready")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Running")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(Array(snapshot.activeTasks.prefix(1))) { task in
-                        Text(task.phase)
-                            .font(.body.weight(.medium))
-                        Text("\(task.project) · \(compactModelName(task.model)) · \(task.reasoningEffort) · \(elapsedText(task.elapsedSeconds))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    if snapshot.activeTasks.count > 1 {
-                        Text("\(snapshot.activeTasks.count - 1) more task(s) running")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            if !snapshot.recentArtifacts.isEmpty {
-                Divider()
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Recent")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(snapshot.recentArtifacts, id: \.self) { artifact in
-                        Text(artifact)
-                            .font(.body.weight(.medium))
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            Divider()
-
-            menuAction("Model Routing", action: configureModels)
-            menuAction("Usage", subtitle: usageSummary, action: showUsage)
-            menuAction("Workspace", action: chooseWorkspace)
-            menuAction("Logs", action: showLogs)
-
-            if let failure = snapshot.lastFailure {
-                Divider()
-                Text("Last task: \(failure.message)")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-            }
-
-            Divider()
-
-            menuAction("Close Menu", showsChevron: false, action: close)
-            Divider()
-            menuAction("Quit Codeshark", showsChevron: false, destructive: true, action: quit)
-        }
-        .padding(16)
-        .frame(width: 340, height: 500)
-    }
-}
-
-final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private let projectRoot: String
     private let iconPath: String
     private let statusItem = NSStatusBar.system.statusItem(withLength: 32)
-    private let popover = NSPopover()
+    private let menu = NSMenu()
     private let dashboard: DashboardModel
     private var logPanel: NSPanel?
     private var usagePanel: NSPanel?
@@ -637,23 +496,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        popover.behavior = .transient
-        popover.contentSize = NSSize(width: 340, height: 500)
-        popover.contentViewController = NSHostingController(
-            rootView: DashboardView(
-                model: dashboard,
-                chooseWorkspace: { [weak self] in self?.chooseWorkspace() },
-                configureModels: { [weak self] in self?.configureModels() },
-                showUsage: { [weak self] in self?.showUsage() },
-                showLogs: { [weak self] in self?.showLogs() },
-                close: { [weak self] in self?.closePopover() },
-                quit: { [weak self] in self?.quitCodeshark() }
-            )
-        )
+        menu.delegate = self
+        statusItem.menu = menu
 
         if let button = statusItem.button {
-            button.target = self
-            button.action = #selector(togglePopover)
             button.toolTip = "Codeshark: starting"
             if let image = NSImage(contentsOfFile: iconPath) {
                 image.isTemplate = false
@@ -677,14 +523,166 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         statusItem.button?.toolTip = "Codeshark: \(statusTitle(for: dashboard.snapshot).lowercased())"
     }
 
-    @objc private func togglePopover() {
-        guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        dashboard.refresh()
+        rebuildMenu()
+    }
+
+    private func rebuildMenu() {
+        menu.removeAllItems()
+        let snapshot = dashboard.snapshot
+
+        let status = NSMenuItem(
+            title: "Codeshark is \(statusTitle(for: snapshot).lowercased())",
+            action: #selector(ignoreMenuItem(_:)),
+            keyEquivalent: ""
+        )
+        status.target = self
+        status.attributedTitle = NSAttributedString(
+            string: "● Codeshark is \(statusTitle(for: snapshot).lowercased())",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                .foregroundColor: statusMenuColor(for: snapshot),
+            ]
+        )
+        menu.addItem(status)
+        menu.addItem(.separator())
+
+        addSection("Running", to: menu)
+        if snapshot.activeTasks.isEmpty {
+            addSecondary("Ready", to: menu)
         } else {
-            dashboard.refresh()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            for task in snapshot.activeTasks.prefix(2) {
+                addStatic(phaseTitle(task.phase), to: menu)
+                addSecondary(
+                    "\(task.project) · \(compactModelName(task.model)) · \(task.reasoningEffort) · \(elapsedText(task.elapsedSeconds))",
+                    to: menu
+                )
+            }
+            if snapshot.activeTasks.count > 2 {
+                addSecondary("\(snapshot.activeTasks.count - 2) more task(s) running", to: menu)
+            }
         }
+
+        menu.addItem(.separator())
+        addSection("Recent", to: menu)
+        if snapshot.recentArtifacts.isEmpty {
+            addSecondary("No recent delivery", to: menu)
+        } else {
+            for artifact in snapshot.recentArtifacts.prefix(3) {
+                addStatic(artifact, to: menu)
+            }
+        }
+
+        if let failure = snapshot.lastFailure {
+            menu.addItem(.separator())
+            addSection("Last Task", to: menu)
+            addSecondary(failure.message, to: menu)
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(actionItem("Model Routing…", action: #selector(openModelRouting(_:))))
+        menu.addItem(usageMenuItem(snapshot: snapshot))
+        menu.addItem(actionItem("Workspace…", action: #selector(openWorkspace(_:))))
+        menu.addItem(actionItem("Logs…", action: #selector(openLogs(_:))))
+
+        menu.addItem(.separator())
+        menu.addItem(actionItem("Close Menu", action: #selector(closeMenu(_:))))
+        menu.addItem(.separator())
+
+        let quit = actionItem("Quit Codeshark", action: #selector(quitCodeshark))
+        quit.attributedTitle = NSAttributedString(
+            string: "Quit Codeshark",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+                .foregroundColor: NSColor.systemRed,
+            ]
+        )
+        menu.addItem(quit)
+    }
+
+    private func addSection(_ title: String, to target: NSMenu) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        target.addItem(item)
+    }
+
+    private func addStatic(_ title: String, to target: NSMenu) {
+        let item = NSMenuItem(title: title, action: #selector(ignoreMenuItem(_:)), keyEquivalent: "")
+        item.target = self
+        target.addItem(item)
+    }
+
+    private func addSecondary(_ title: String, to target: NSMenu) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        target.addItem(item)
+    }
+
+    private func actionItem(_ title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    private func usageMenuItem(snapshot: DashboardSnapshot) -> NSMenuItem {
+        let item = NSMenuItem(title: "Usage", action: nil, keyEquivalent: "")
+        let usage = NSMenu(title: "Usage")
+        let recent = snapshot.modelUsage5h.reduce(0) { $0 + $1.runs }
+        let weekly = snapshot.modelUsage7d.reduce(0) { $0 + $1.runs }
+        addSecondary("Last 5 hours · \(recent) phases", to: usage)
+        addSecondary("Last 7 days · \(weekly) phases", to: usage)
+        usage.addItem(.separator())
+        usage.addItem(actionItem("Open Usage…", action: #selector(openUsage(_:))))
+        item.submenu = usage
+        return item
+    }
+
+    private func statusMenuColor(for snapshot: DashboardSnapshot) -> NSColor {
+        switch snapshot.state {
+        case "working":
+            return .systemBlue
+        case "idle":
+            return .systemGreen
+        default:
+            return .secondaryLabelColor
+        }
+    }
+
+    @objc private func ignoreMenuItem(_ sender: Any?) {}
+
+    @objc private func openModelRouting(_ sender: Any?) {
+        configureModels()
+    }
+
+    @objc private func openWorkspace(_ sender: Any?) {
+        chooseWorkspace()
+    }
+
+    @objc private func openUsage(_ sender: Any?) {
+        showUsage()
+    }
+
+    @objc private func openLogs(_ sender: Any?) {
+        showLogs()
+    }
+
+    @objc private func closeMenu(_ sender: Any?) {
+        menu.cancelTracking()
     }
 
     private func chooseWorkspace() {
@@ -978,10 +976,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func revealLogFolder() {
         NSWorkspace.shared.open(URL(fileURLWithPath: projectRoot).appendingPathComponent("runtime"))
-    }
-
-    private func closePopover() {
-        popover.performClose(nil)
     }
 
     private func runServiceCommand(_ arguments: [String]) {
