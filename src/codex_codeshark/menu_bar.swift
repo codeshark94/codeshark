@@ -3,7 +3,7 @@ import Cocoa
 final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
     private let projectRoot: String
     private let iconPath: String
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let summaryItem = NSMenuItem(title: "Codeshark: starting", action: nil, keyEquivalent: "")
 
     init(projectRoot: String, iconPath: String) {
@@ -31,7 +31,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         if let button = statusItem.button,
            let image = NSImage(contentsOfFile: iconPath) {
             image.isTemplate = true
-            image.size = NSSize(width: 22, height: 17.7)
+            image.size = NSSize(width: 27, height: 18)
             button.image = image
             button.toolTip = "Codeshark: starting"
         }
