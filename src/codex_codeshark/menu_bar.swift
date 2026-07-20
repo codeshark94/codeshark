@@ -1005,8 +1005,9 @@ struct ModelUsageView: View {
                 Spacer()
                 Button("Close", action: close)
                     .buttonStyle(.bordered)
+                    .frame(minWidth: 84, minHeight: 30)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .trailing)
 
         }
         .padding(16)
