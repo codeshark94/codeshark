@@ -145,10 +145,13 @@ class AgentStoreTests(unittest.TestCase):
             claimed = store.claim_next_task(now=task.created_at + 1)
             self.assertEqual(claimed.id, task.id)
             self.assertEqual(claimed.status, "running")
+            self.assertEqual(store.running_count(), 1)
 
             restored = AgentStore(path)
             self.assertEqual(restored.get_task(task.id).status, "running")
+            self.assertEqual(restored.running_count(), 1)
             restored.recover_interrupted_tasks()
+            self.assertEqual(restored.running_count(), 0)
             recovered = restored.claim_next_task(now=task.created_at + 2)
             self.assertEqual(recovered.id, task.id)
 

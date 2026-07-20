@@ -15,6 +15,7 @@ from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
 from .codex_runner import AccountUsageSnapshot, CodexRunner, RunResult
 from .config import (
     Config,
+    PROJECT_ROOT,
     group_worker_runtime,
     orchestration_profiles,
     prepare_group_runtime,
@@ -50,6 +51,7 @@ from .projects import (
 )
 from .recall import RecallStore
 from .secure_io import atomic_write_text
+from .service import deferred_restart_requested
 from .state import StateStore
 from .telegram_api import TelegramAPI, TelegramError
 from .vault import ASSET_KINDS, VaultStore
@@ -1414,6 +1416,10 @@ class AgentApp:
     ) -> None:
         while True:
             try:
+                if deferred_restart_requested(project_root=PROJECT_ROOT):
+                    self._wake_worker.wait(0.5)
+                    self._wake_worker.clear()
+                    continue
                 self.store.enqueue_due_schedules()
                 task = self.store.claim_next_task()
             except Exception:

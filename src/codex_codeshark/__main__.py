@@ -27,9 +27,11 @@ from .service import (
     read_logs,
     refresh_menu_bar,
     restart_service,
+    restart_when_idle,
     service_status,
     start_service,
     stop_service,
+    wait_for_deferred_restart,
 )
 from .setup_cli import interactive_setup
 from .telegram_api import TelegramAPI, TelegramError
@@ -45,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("stop", help="stop the background service")
     commands.add_parser("restart", help="restart the background service")
     commands.add_parser("refresh-menu", help="rebuild and restart only the menu bar")
+    commands.add_parser("apply-pending-restart", help=argparse.SUPPRESS)
     commands.add_parser("service-status", help="show the background service status")
     workspace = commands.add_parser("set-workspace", help="set the Codeshark workspace directory")
     workspace.add_argument("directory", type=Path)
@@ -117,6 +120,13 @@ def main() -> int:
             refresh_menu_bar()
             print("Menu bar: refreshed")
             return 0
+        if args.command == "apply-pending-restart":
+            status = wait_for_deferred_restart()
+            if status is not None:
+                print(f"Service: {status.state}")
+                if status.pid is not None:
+                    print(f"PID: {status.pid}")
+            return 0
         if args.command in {"start", "stop", "restart", "service-status"}:
             if args.command == "start":
                 status = start_service()
@@ -137,10 +147,10 @@ def main() -> int:
             return 0
         if args.command == "set-workspace":
             config = set_workspace_directory(args.directory)
-            status = restart_service()
-            if not status.running:
-                raise ServiceError(status.detail or "service did not restart")
+            status = restart_when_idle()
             print(f"Workspace: {config.workdir}")
+            if status is None:
+                print("Restart: scheduled after active work finishes")
             return 0
         if args.command == "set-models":
             config = set_model_assignments(
@@ -161,9 +171,7 @@ def main() -> int:
                 finalizer_model=args.finalizer,
                 finalizer_reasoning_effort=args.finalizer_effort,
             )
-            status = restart_service()
-            if not status.running:
-                raise ServiceError(status.detail or "service did not restart")
+            status = restart_when_idle()
             print(
                 "Models: "
                 f"routine={config.routine_model}, primary={config.primary_model}, "
@@ -172,6 +180,8 @@ def main() -> int:
                 f"preflight={config.preflight_model}, research={config.research_model}, "
                 f"finalizer={config.finalizer_model}"
             )
+            if status is None:
+                print("Restart: scheduled after active work finishes")
             return 0
         if args.command == "set-orchestration":
             config = set_orchestration(
@@ -186,12 +196,12 @@ def main() -> int:
                     for tier in ORCHESTRATION_TIERS
                 }
             )
-            status = restart_service()
-            if not status.running:
-                raise ServiceError(status.detail or "service did not restart")
+            status = restart_when_idle()
             print(
                 "Orchestration updated: " + ", ".join(ORCHESTRATION_TIERS)
             )
+            if status is None:
+                print("Restart: scheduled after active work finishes")
             return 0
         if args.command == "export-data":
             result = export_personal_data(args.archive, replace=args.force)

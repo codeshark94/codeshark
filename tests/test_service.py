@@ -4,12 +4,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from codex_codeshark.automation import AgentStore
 from codex_codeshark.service import (
     ServiceStatus,
+    apply_deferred_restart_if_idle,
+    deferred_restart_requested,
     install_service,
     read_logs,
     refresh_menu_bar,
+    request_deferred_restart,
     restart_service,
+    restart_when_idle,
     service_status,
 )
 
@@ -134,6 +139,46 @@ class ServiceTests(unittest.TestCase):
         install_mock.assert_called_once()
         self.assertTrue(result.running)
         self.assertEqual(result.pid, 456)
+
+    def test_deferred_restart_waits_for_the_active_task(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            store = AgentStore(runtime / "agent.db")
+            task = store.enqueue_task(123, "work", source="telegram", ephemeral=False)
+            claimed = store.claim_next_task(now=task.created_at + 1)
+            self.assertEqual(claimed.id, task.id)
+
+            request_deferred_restart(project_root=root)
+            restart = Mock(return_value=ServiceStatus(True, "running", 456))
+            self.assertIsNone(
+                apply_deferred_restart_if_idle(project_root=root, restart=restart)
+            )
+            restart.assert_not_called()
+            self.assertTrue(deferred_restart_requested(project_root=root))
+
+            store.finish_task(task.id, "completed")
+            result = apply_deferred_restart_if_idle(project_root=root, restart=restart)
+
+            self.assertEqual(result, ServiceStatus(True, "running", 456))
+            restart.assert_called_once_with(project_root=root)
+            self.assertFalse(deferred_restart_requested(project_root=root))
+
+    @patch("codex_codeshark.service.subprocess.Popen")
+    def test_restart_when_idle_starts_a_monitor_for_active_work(self, popen_mock: Mock) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            store = AgentStore(runtime / "agent.db")
+            task = store.enqueue_task(123, "work", source="telegram", ephemeral=False)
+            store.claim_next_task(now=task.created_at + 1)
+
+            self.assertIsNone(restart_when_idle(project_root=root))
+
+            self.assertTrue(deferred_restart_requested(project_root=root))
+            popen_mock.assert_called_once()
 
 
 if __name__ == "__main__":

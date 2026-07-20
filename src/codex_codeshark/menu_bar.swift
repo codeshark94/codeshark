@@ -1693,7 +1693,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let confirmation = NSAlert()
         confirmation.messageText = "Set Codeshark workspace?"
         confirmation.informativeText = workspaceDisplayPath(directory.path)
-            + "\n\nThis changes Codeshark's working directory for new tasks. Codeshark will restart to apply it; active work is safely returned to the queue."
+            + "\n\nThis changes Codeshark's working directory for new tasks. It saves now and restarts automatically after active work finishes."
         confirmation.addButton(withTitle: "Set Workspace")
         confirmation.addButton(withTitle: "Cancel")
         guard confirmation.runModal() == .alertFirstButtonReturn else { return }
@@ -1726,7 +1726,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         title.frame = NSRect(x: 16, y: 484, width: 588, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Choose a model and a supported reasoning effort for each role. Applying restarts Codeshark.")
+        let detail = NSTextField(wrappingLabelWithString: "Settings save now; Codeshark restarts automatically after active work finishes.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
         detail.frame = NSRect(x: 16, y: 452, width: 588, height: 18)
@@ -1944,7 +1944,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         title.frame = NSRect(x: 16, y: 294, width: 728, height: 20)
         content.addSubview(title)
         let detail = NSTextField(
-            wrappingLabelWithString: "Quick: one pass. Routine: scoped checks. Review begins at Standard; feedback and finalization require it."
+            wrappingLabelWithString: "Quick: one pass. Routine: scoped checks. Review begins at Standard. Settings restart after active work finishes."
         )
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor

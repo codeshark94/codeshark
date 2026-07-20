@@ -48,6 +48,30 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(load_config(config_path).task_timeout_seconds, 0)
 
+    def test_rejects_short_enabled_task_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        "task_timeout_seconds = 29",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ConfigError, "0 \\(disabled\\) or between 30"):
+                load_config(config_path)
+
     def test_sets_workspace_directory_without_rewriting_other_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

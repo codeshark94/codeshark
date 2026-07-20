@@ -11,7 +11,9 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
+from .automation import AgentStore
 from .config import PROJECT_ROOT
 from .secure_io import (
     atomic_write_bytes,
@@ -27,6 +29,8 @@ MENU_PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{MENU_LABEL}.plis
 INSTALL_ROOT = Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "app"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _TOKEN_PATTERN = re.compile(r"\b[0-9]{6,}:[A-Za-z0-9_-]+\b")
+_DEFERRED_RESTART_MARKER = ".restart-pending"
+_DEFERRED_RESTART_CLAIM = ".restart-applying"
 
 
 class ServiceError(RuntimeError):
@@ -57,6 +61,98 @@ def _menu_plist_path(agent_plist_path: Path) -> Path:
     if agent_plist_path == PLIST_PATH:
         return MENU_PLIST_PATH
     return agent_plist_path.with_name(f"{MENU_LABEL}.plist")
+
+
+def _restart_marker_paths(project_root: Path) -> tuple[Path, Path]:
+    runtime = project_root / "runtime"
+    return runtime / _DEFERRED_RESTART_MARKER, runtime / _DEFERRED_RESTART_CLAIM
+
+
+def deferred_restart_requested(*, project_root: Path = PROJECT_ROOT) -> bool:
+    pending, applying = _restart_marker_paths(project_root)
+    for marker in (pending, applying):
+        if marker.exists() or marker.is_symlink():
+            ensure_private_file(marker)
+            return True
+    return False
+
+
+def request_deferred_restart(*, project_root: Path = PROJECT_ROOT) -> None:
+    runtime = project_root / "runtime"
+    ensure_private_directory(runtime)
+    pending, applying = _restart_marker_paths(project_root)
+    if applying.exists() or applying.is_symlink():
+        ensure_private_file(applying)
+        return
+    atomic_write_bytes(pending, b"pending\n")
+
+
+def _restore_deferred_restart(claim: Path, pending: Path) -> None:
+    if claim.exists() or claim.is_symlink():
+        ensure_private_file(claim)
+        os.replace(claim, pending)
+
+
+def apply_deferred_restart_if_idle(
+    *,
+    project_root: Path = PROJECT_ROOT,
+    restart: Callable[..., ServiceStatus] | None = None,
+) -> ServiceStatus | None:
+    """Restart only after every active task has reached a terminal state."""
+    pending, claim = _restart_marker_paths(project_root)
+    if not deferred_restart_requested(project_root=project_root):
+        return None
+    if AgentStore(project_root / "runtime" / "agent.db").running_count():
+        return None
+    try:
+        os.replace(pending, claim)
+    except FileNotFoundError:
+        return None
+    try:
+        restart_operation = restart or restart_service
+        status = restart_operation(project_root=project_root)
+        if not status.running:
+            raise ServiceError(status.detail or "service did not restart")
+    except Exception:
+        _restore_deferred_restart(claim, pending)
+        raise
+    claim.unlink(missing_ok=True)
+    return status
+
+
+def wait_for_deferred_restart(
+    *,
+    project_root: Path = PROJECT_ROOT,
+    poll_seconds: float = 0.5,
+) -> ServiceStatus | None:
+    while deferred_restart_requested(project_root=project_root):
+        status = apply_deferred_restart_if_idle(project_root=project_root)
+        if status is not None:
+            return status
+        time.sleep(poll_seconds)
+    return None
+
+
+def restart_when_idle(*, project_root: Path = PROJECT_ROOT) -> ServiceStatus | None:
+    """Restart now when idle, otherwise let a detached monitor restart after active work."""
+    request_deferred_restart(project_root=project_root)
+    status = apply_deferred_restart_if_idle(project_root=project_root)
+    if status is not None:
+        return status
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "codex_codeshark", "apply-pending-restart"],
+            cwd=project_root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pending, _ = _restart_marker_paths(project_root)
+        pending.unlink(missing_ok=True)
+        raise
+    return None
 
 
 def _wait_for_status(*, running: bool, timeout: float = 5.0) -> ServiceStatus:

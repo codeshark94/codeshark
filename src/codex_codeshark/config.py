@@ -328,7 +328,7 @@ def load_config(path: Path | None = None) -> Config:
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
         raise ConfigError("poll_timeout_seconds must be between 1 and 50")
-    if not 0 <= task_timeout <= 86400:
+    if task_timeout != 0 and not 30 <= task_timeout <= 86400:
         raise ConfigError("task_timeout_seconds must be 0 (disabled) or between 30 and 86400")
     if queue_size < 1:
         raise ConfigError("queue_size must be positive")

@@ -1195,6 +1195,13 @@ class AgentStore:
             ).fetchone()
             return int(row["count"])
 
+    def running_count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM tasks WHERE status = 'running'"
+            ).fetchone()
+            return int(row["count"])
+
     def restricted_pending_count(self) -> int:
         with self._connect() as connection:
             row = connection.execute(
