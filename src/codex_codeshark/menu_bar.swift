@@ -800,7 +800,7 @@ private struct LocalConsoleView: View {
                 .frame(width: 36, height: 36)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(URL(fileURLWithPath: path).lastPathComponent)
-                        .font(.subheadline.weight(.medium))
+                        .font(.system(size: 15, weight: .medium))
                         .lineLimit(1)
                     Text("File · Open in Finder")
                         .font(.caption)
@@ -830,7 +830,7 @@ private struct LocalConsoleView: View {
                 }
                 if !message.text.isEmpty {
                     Text(message.text)
-                        .font(.body)
+                        .font(.system(size: 16))
                         .foregroundStyle(.white)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -897,11 +897,11 @@ private struct LocalConsoleView: View {
                 HStack(spacing: 11) {
                     mascot(size: 38)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Codeshark").font(.title3.weight(.semibold)).foregroundStyle(.white)
+                        Text("Codeshark").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
                         HStack(spacing: 5) {
                             Circle().fill(isWorking ? accent : .green).frame(width: 6, height: 6)
                             Text(isWorking ? "working locally" : "local direct session")
-                                .font(.caption).foregroundStyle(muted)
+                                .font(.system(size: 13)).foregroundStyle(muted)
                         }
                     }
                     Spacer()
@@ -931,7 +931,7 @@ private struct LocalConsoleView: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text("Codeshark").font(.caption.weight(.semibold)).foregroundStyle(accent)
                                     Text("Start a direct task here. Files and results stay in your local workspace.")
-                                        .font(.subheadline)
+                                        .font(.system(size: 15))
                                         .foregroundStyle(.white)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
@@ -984,11 +984,11 @@ private struct LocalConsoleView: View {
                             }
                         }
                     }
-                    HStack(alignment: .bottom, spacing: 9) {
+                    HStack(alignment: .center, spacing: 9) {
                         Button { model.commandPaletteOpen.toggle() } label: {
                             Image(systemName: "line.3.horizontal")
                                 .font(.system(size: 17, weight: .semibold))
-                                .frame(width: 42, height: 42)
+                                .frame(width: 46, height: 46)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.white)
@@ -996,7 +996,7 @@ private struct LocalConsoleView: View {
                         Button(action: chooseFiles) {
                             Image(systemName: "paperclip")
                                 .font(.system(size: 17, weight: .medium))
-                                .frame(width: 42, height: 42)
+                                .frame(width: 46, height: 46)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.white)
@@ -1004,16 +1004,16 @@ private struct LocalConsoleView: View {
                         .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
                         TextField("Write a message…", text: $model.draft, axis: .vertical)
                             .textFieldStyle(.plain)
-                            .font(.body)
+                            .font(.system(size: 16))
                             .foregroundStyle(.white)
-                            .lineLimit(1...2)
-                            .frame(minHeight: 42, maxHeight: 58)
+                            .lineLimit(1)
+                            .frame(height: 46)
                             .padding(.horizontal, 13)
                         .background(composer, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
                         Button { model.send() } label: {
                             Image(systemName: model.sending ? "hourglass" : "arrow.up")
-                                .font(.system(size: 16, weight: .bold)).frame(width: 42, height: 42)
+                                .font(.system(size: 16, weight: .bold)).frame(width: 46, height: 46)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.white)
@@ -1024,9 +1024,7 @@ private struct LocalConsoleView: View {
                         Text(model.status).font(.caption).foregroundStyle(muted)
                     }
                 }
-                .padding(8)
-                .background(chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 23, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
+                .padding(.top, 2)
                 }
             }
         }
