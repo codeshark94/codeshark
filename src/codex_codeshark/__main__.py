@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 
 from .app import AgentApp
-from .automation import AgentStore
 from .config import (
     ConfigError,
     ORCHESTRATION_TIERS,
@@ -23,7 +22,7 @@ from .config import (
     validate_mcp_policy,
 )
 from .doctor import run_doctor
-from .local_console import local_history, local_security_summary, submit_local_request
+from .local_console import local_history, submit_local_request
 from .migration import MigrationError, export_personal_data, import_personal_data
 from .personal_sync import PersonalDataSync, PersonalSyncError
 from .service import (
@@ -53,12 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("refresh-menu", help="rebuild and restart only the menu bar")
     commands.add_parser("apply-pending-restart", help=argparse.SUPPRESS)
     commands.add_parser("service-status", help="show the background service status")
-    commands.add_parser("security-status", help=argparse.SUPPRESS)
     security = commands.add_parser("set-security", help="set Codeshark execution security settings")
     security.add_argument("--network", required=True, choices=("true", "false"))
     security.add_argument("--admin-full-access", required=True, choices=("true", "false"))
-    disable_group = commands.add_parser("disable-group", help=argparse.SUPPRESS)
-    disable_group.add_argument("chat_id", type=int)
     local_history_parser = commands.add_parser("local-history", help=argparse.SUPPRESS)
     local_history_parser.add_argument("--limit", type=int, default=100)
     local_send = commands.add_parser("local-send", help=argparse.SUPPRESS)
@@ -142,9 +138,6 @@ def main() -> int:
                 if status.pid is not None:
                     print(f"PID: {status.pid}")
             return 0
-        if args.command == "security-status":
-            print(json.dumps(local_security_summary(load_config()), ensure_ascii=False))
-            return 0
         if args.command == "set-security":
             config = set_security_settings(
                 network_access=args.network == "true",
@@ -158,13 +151,6 @@ def main() -> int:
             )
             if status is None:
                 print("Restart: scheduled after active work finishes")
-            return 0
-        if args.command == "disable-group":
-            config = load_config()
-            disabled = AgentStore(config.state_path.parent / "agent.db").disable_group(args.chat_id)
-            if not disabled:
-                raise ConfigError("group is not enabled")
-            print(f"Group disabled: {args.chat_id}")
             return 0
         if args.command == "local-history":
             messages = local_history(load_config(), limit=args.limit)

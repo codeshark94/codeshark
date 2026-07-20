@@ -80,17 +80,3 @@ def submit_local_request(
 
 def local_history(config: Config, *, limit: int = 100) -> list[LocalConversationMessage]:
     return AgentStore(config.state_path.parent / "agent.db").list_local_messages(limit=limit)
-
-
-def local_security_summary(config: Config) -> dict[str, object]:
-    store = AgentStore(config.state_path.parent / "agent.db")
-    groups = store.list_groups()
-    return {
-        "sandbox": "workspace-write",
-        "network_access": config.codex_network_access,
-        "admin_full_access": config.admin_full_access,
-        "groups": [
-            {"chat_id": group.chat_id, "title": group.title, "enabled_at": int(group.enabled_at)}
-            for group in groups
-        ],
-    }
