@@ -623,6 +623,11 @@ class AgentApp:
                             "sandbox": "workspace-write",
                             "network_access": self.config.codex_network_access,
                             "admin_full_access": self.config.admin_full_access,
+                            "admin_auto_approve_actions": self.config.admin_auto_approve_actions,
+                            "admin_mcp_enabled": self.config.admin_mcp_enabled,
+                            "admin_delegated_write_access": self.config.admin_delegated_write_access,
+                            "group_network_access": self.config.group_network_access,
+                            "group_workspace_write": self.config.group_workspace_write,
                             "telegram": "Keychain credential · one paired administrator",
                             "groups": [
                                 {
@@ -917,10 +922,18 @@ class AgentApp:
             model=model,
             model_reasoning_effort=reasoning_effort,
             role=role,
-            additional_write_roots=self._administrator_write_roots,
+            additional_write_roots=(
+                self._administrator_write_roots
+                if self.config.admin_delegated_write_access
+                else ()
+            ),
             mcp_known_servers=self.config.mcp_known_servers,
-            mcp_allowed_tools=self.config.mcp_allowed_tools,
+            mcp_allowed_tools=(
+                self.config.mcp_allowed_tools if self.config.admin_mcp_enabled else ()
+            ),
             network_access=self.config.codex_network_access,
+            restricted_network_access=self.config.group_network_access,
+            restricted_workspace_write=self.config.group_workspace_write,
         )
 
     def _quarantine_legacy_automatic_learning(self) -> None:
@@ -1536,7 +1549,9 @@ class AgentApp:
                 task = replace(task, prompt=scope_task_prompt(project, request))
                 self._set_active_task_project(task)
         full_access = self.config.admin_full_access and not task.restricted
-        effective_approval = task.approved or full_access
+        effective_approval = task.approved or (
+            self.config.admin_auto_approve_actions and not task.restricted
+        )
         local_console = task.source == LOCAL_CONSOLE_SOURCE
         file_delivery_requested = not task.restricted and self._file_delivery_requested(request)
         figure_revision = not task.restricted and self._is_figure_revision(request)
@@ -1590,7 +1605,11 @@ class AgentApp:
                     if effective_approval
                     else (*self.config.read_only_roots, *self._administrator_write_roots)
                 ),
-                delegated_roots=self._administrator_write_roots if effective_approval else (),
+                delegated_roots=(
+                    self._administrator_write_roots
+                    if effective_approval and self.config.admin_delegated_write_access
+                    else ()
+                ),
                 agent_repository_root=self.config.agent_repository_root,
                 agent_name=self._agent_name(),
                 owner_profile=self._owner_profile(),
@@ -2246,7 +2265,7 @@ class AgentApp:
         self._backup_personal_data()
 
     def _requires_admin_approval(self, prompt: str) -> bool:
-        return not self.config.admin_full_access and (
+        return not self.config.admin_auto_approve_actions and (
             self.risk_policy.requires_approval(prompt)
             or self._requires_writable_cross_validation(prompt)
         )

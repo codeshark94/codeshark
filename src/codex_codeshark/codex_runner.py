@@ -148,6 +148,8 @@ class CodexRunner:
         mcp_known_servers: tuple[str, ...] = (),
         mcp_allowed_tools: tuple[tuple[str, tuple[str, ...]], ...] = (),
         network_access: bool = False,
+        restricted_network_access: bool = True,
+        restricted_workspace_write: bool = True,
     ) -> None:
         self.binary = binary
         self.profile = profile
@@ -162,6 +164,8 @@ class CodexRunner:
         self.mcp_known_servers = mcp_known_servers
         self.mcp_allowed_tools = dict(mcp_allowed_tools)
         self.network_access = network_access
+        self.restricted_network_access = restricted_network_access
+        self.restricted_workspace_write = restricted_workspace_write
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
         self._cancel_requested = False
@@ -203,7 +207,8 @@ class CodexRunner:
         return env
 
     def _restricted_config_args(self) -> list[str]:
-        filesystem = '{":minimal"="read",":workspace_roots"={"."="write"}}'
+        workspace_permission = "write" if self.restricted_workspace_write else "read"
+        filesystem = f'{{":minimal"="read",":workspace_roots"={{"."="{workspace_permission}"}}}}'
         args = [
             "-c",
             'default_permissions="codeshark_group"',
@@ -212,11 +217,12 @@ class CodexRunner:
             "-c",
             f"permissions.codeshark_group.filesystem={filesystem}",
             "-c",
-            "permissions.codeshark_group.network.enabled=true",
+            "permissions.codeshark_group.network.enabled="
+            + str(self.restricted_network_access).lower(),
             "-c",
             'approval_policy="never"',
             "-c",
-            'web_search="live"',
+            'web_search="live"' if self.restricted_network_access else 'web_search="disabled"',
             "-c",
             "features.apps=false",
             "-c",

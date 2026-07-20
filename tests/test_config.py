@@ -129,14 +129,26 @@ class ConfigTests(unittest.TestCase):
             updated = set_security_settings(
                 network_access=True,
                 admin_full_access=True,
+                admin_auto_approve_actions=True,
+                admin_mcp_enabled=False,
+                admin_delegated_write_access=False,
+                group_network_access=False,
+                group_workspace_write=False,
                 config_path=config_path,
             )
 
             self.assertTrue(updated.codex_network_access)
             self.assertTrue(updated.admin_full_access)
+            self.assertTrue(updated.admin_auto_approve_actions)
+            self.assertFalse(updated.admin_mcp_enabled)
+            self.assertFalse(updated.admin_delegated_write_access)
+            self.assertFalse(updated.group_network_access)
+            self.assertFalse(updated.group_workspace_write)
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("codex_network_access = true", text)
             self.assertIn("admin_full_access = true", text)
+            self.assertIn("admin_mcp_enabled = false", text)
+            self.assertIn("group_workspace_write = false", text)
             self.assertIn('primary_model = "gpt-5.6-sol"', text)
 
     def test_sets_model_assignments_without_rewriting_other_settings(self) -> None:

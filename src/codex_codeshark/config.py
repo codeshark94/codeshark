@@ -114,6 +114,11 @@ class Config:
     memory_max_chars: int = 12000
     codex_network_access: bool = False
     admin_full_access: bool = False
+    admin_auto_approve_actions: bool = False
+    admin_mcp_enabled: bool = True
+    admin_delegated_write_access: bool = True
+    group_network_access: bool = True
+    group_workspace_write: bool = True
     attachment_max_bytes: int = 10_000_000
     read_only_roots: tuple[Path, ...] = ()
     delegated_roots: tuple[Path, ...] = ()
@@ -325,6 +330,13 @@ def load_config(path: Path | None = None) -> Config:
     memory_max_chars = _require_int(data, "memory_max_chars", 12000)
     codex_network_access = _require_bool(data, "codex_network_access", False)
     admin_full_access = _require_bool(data, "admin_full_access", False)
+    admin_auto_approve_actions = _require_bool(
+        data, "admin_auto_approve_actions", admin_full_access
+    )
+    admin_mcp_enabled = _require_bool(data, "admin_mcp_enabled", True)
+    admin_delegated_write_access = _require_bool(data, "admin_delegated_write_access", True)
+    group_network_access = _require_bool(data, "group_network_access", True)
+    group_workspace_write = _require_bool(data, "group_workspace_write", True)
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
         raise ConfigError("poll_timeout_seconds must be between 1 and 50")
@@ -477,6 +489,11 @@ def load_config(path: Path | None = None) -> Config:
         memory_max_chars=memory_max_chars,
         codex_network_access=codex_network_access,
         admin_full_access=admin_full_access,
+        admin_auto_approve_actions=admin_auto_approve_actions,
+        admin_mcp_enabled=admin_mcp_enabled,
+        admin_delegated_write_access=admin_delegated_write_access,
+        group_network_access=group_network_access,
+        group_workspace_write=group_workspace_write,
         attachment_max_bytes=attachment_max_bytes,
         read_only_roots=tuple(read_only_roots),
         delegated_roots=tuple(delegated_roots),
@@ -608,10 +625,24 @@ def set_security_settings(
     *,
     network_access: bool,
     admin_full_access: bool,
+    admin_auto_approve_actions: bool,
+    admin_mcp_enabled: bool,
+    admin_delegated_write_access: bool,
+    group_network_access: bool,
+    group_workspace_write: bool,
     config_path: Path | None = None,
 ) -> Config:
-    """Persist the two administrator-controlled execution permissions."""
-    if not isinstance(network_access, bool) or not isinstance(admin_full_access, bool):
+    """Persist the administrator and non-administrator group permission switches."""
+    values = (
+        network_access,
+        admin_full_access,
+        admin_auto_approve_actions,
+        admin_mcp_enabled,
+        admin_delegated_write_access,
+        group_network_access,
+        group_workspace_write,
+    )
+    if any(not isinstance(value, bool) for value in values):
         raise ConfigError("security settings must be true or false")
     path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
     try:
@@ -622,7 +653,13 @@ def set_security_settings(
     assignments = {
         "codex_network_access": network_access,
         "admin_full_access": admin_full_access,
+        "admin_auto_approve_actions": admin_auto_approve_actions,
+        "admin_mcp_enabled": admin_mcp_enabled,
+        "admin_delegated_write_access": admin_delegated_write_access,
+        "group_network_access": group_network_access,
+        "group_workspace_write": group_workspace_write,
     }
+    missing_settings: list[str] = []
     for setting, value in assignments.items():
         rendered = str(value).lower()
         updated, replacements = re.subn(
@@ -630,8 +667,22 @@ def set_security_settings(
             f"{setting} = {rendered}",
             updated,
         )
-        if replacements != 1:
+        if replacements > 1:
             raise ConfigError(f"config must contain exactly one {setting} setting")
+        if replacements == 0:
+            missing_settings.append(f"{setting} = {rendered}")
+    if missing_settings:
+        first_table = re.search(r"(?m)^\[", updated)
+        if first_table is None:
+            updated = updated.rstrip() + "\n" + "\n".join(missing_settings) + "\n"
+        else:
+            updated = (
+                updated[: first_table.start()].rstrip()
+                + "\n"
+                + "\n".join(missing_settings)
+                + "\n\n"
+                + updated[first_table.start() :]
+            )
     if updated == original:
         return load_config(path)
     atomic_write_text(path, updated)
@@ -1081,6 +1132,11 @@ def write_local_config(
             "memory_max_chars = 12000",
             "codex_network_access = false",
             "admin_full_access = false",
+            "admin_auto_approve_actions = false",
+            "admin_mcp_enabled = true",
+            "admin_delegated_write_access = true",
+            "group_network_access = true",
+            "group_workspace_write = true",
             "attachment_max_bytes = 10000000",
             "read_only_roots = []",
             "delegated_roots = []",

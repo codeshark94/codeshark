@@ -55,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     security = commands.add_parser("set-security", help="set Codeshark execution security settings")
     security.add_argument("--network", required=True, choices=("true", "false"))
     security.add_argument("--admin-full-access", required=True, choices=("true", "false"))
+    security.add_argument("--admin-auto-approve-actions", required=True, choices=("true", "false"))
+    security.add_argument("--admin-mcp-enabled", required=True, choices=("true", "false"))
+    security.add_argument("--admin-delegated-write-access", required=True, choices=("true", "false"))
+    security.add_argument("--group-network-access", required=True, choices=("true", "false"))
+    security.add_argument("--group-workspace-write", required=True, choices=("true", "false"))
     local_history_parser = commands.add_parser("local-history", help=argparse.SUPPRESS)
     local_history_parser.add_argument("--limit", type=int, default=100)
     local_send = commands.add_parser("local-send", help=argparse.SUPPRESS)
@@ -142,12 +147,21 @@ def main() -> int:
             config = set_security_settings(
                 network_access=args.network == "true",
                 admin_full_access=args.admin_full_access == "true",
+                admin_auto_approve_actions=args.admin_auto_approve_actions == "true",
+                admin_mcp_enabled=args.admin_mcp_enabled == "true",
+                admin_delegated_write_access=args.admin_delegated_write_access == "true",
+                group_network_access=args.group_network_access == "true",
+                group_workspace_write=args.group_workspace_write == "true",
             )
             status = restart_when_idle()
             print(
                 "Security: "
                 f"network={'enabled' if config.codex_network_access else 'disabled'}, "
-                f"administrator={'full' if config.admin_full_access else 'approval-gated'}"
+                f"administrator={'full' if config.admin_full_access else 'workspace'}, "
+                f"auto-approval={'enabled' if config.admin_auto_approve_actions else 'required'}, "
+                f"MCP={'enabled' if config.admin_mcp_enabled else 'disabled'}, "
+                f"group-network={'enabled' if config.group_network_access else 'disabled'}, "
+                f"group-write={'enabled' if config.group_workspace_write else 'read-only'}"
             )
             if status is None:
                 print("Restart: scheduled after active work finishes")

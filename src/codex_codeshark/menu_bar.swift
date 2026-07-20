@@ -127,6 +127,11 @@ struct DashboardSecurity: Decodable {
     let sandbox: String
     let networkAccess: Bool
     let adminFullAccess: Bool
+    let adminAutoApproveActions: Bool
+    let adminMcpEnabled: Bool
+    let adminDelegatedWriteAccess: Bool
+    let groupNetworkAccess: Bool
+    let groupWorkspaceWrite: Bool
     let telegram: String
     let groups: [DashboardSecurityGroup]
 
@@ -134,6 +139,49 @@ struct DashboardSecurity: Decodable {
         case sandbox, telegram, groups
         case networkAccess = "network_access"
         case adminFullAccess = "admin_full_access"
+        case adminAutoApproveActions = "admin_auto_approve_actions"
+        case adminMcpEnabled = "admin_mcp_enabled"
+        case adminDelegatedWriteAccess = "admin_delegated_write_access"
+        case groupNetworkAccess = "group_network_access"
+        case groupWorkspaceWrite = "group_workspace_write"
+    }
+
+    init(
+        sandbox: String,
+        networkAccess: Bool,
+        adminFullAccess: Bool,
+        adminAutoApproveActions: Bool,
+        adminMcpEnabled: Bool,
+        adminDelegatedWriteAccess: Bool,
+        groupNetworkAccess: Bool,
+        groupWorkspaceWrite: Bool,
+        telegram: String,
+        groups: [DashboardSecurityGroup]
+    ) {
+        self.sandbox = sandbox
+        self.networkAccess = networkAccess
+        self.adminFullAccess = adminFullAccess
+        self.adminAutoApproveActions = adminAutoApproveActions
+        self.adminMcpEnabled = adminMcpEnabled
+        self.adminDelegatedWriteAccess = adminDelegatedWriteAccess
+        self.groupNetworkAccess = groupNetworkAccess
+        self.groupWorkspaceWrite = groupWorkspaceWrite
+        self.telegram = telegram
+        self.groups = groups
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sandbox = try container.decodeIfPresent(String.self, forKey: .sandbox) ?? "workspace-write"
+        networkAccess = try container.decodeIfPresent(Bool.self, forKey: .networkAccess) ?? false
+        adminFullAccess = try container.decodeIfPresent(Bool.self, forKey: .adminFullAccess) ?? false
+        adminAutoApproveActions = try container.decodeIfPresent(Bool.self, forKey: .adminAutoApproveActions) ?? adminFullAccess
+        adminMcpEnabled = try container.decodeIfPresent(Bool.self, forKey: .adminMcpEnabled) ?? true
+        adminDelegatedWriteAccess = try container.decodeIfPresent(Bool.self, forKey: .adminDelegatedWriteAccess) ?? true
+        groupNetworkAccess = try container.decodeIfPresent(Bool.self, forKey: .groupNetworkAccess) ?? true
+        groupWorkspaceWrite = try container.decodeIfPresent(Bool.self, forKey: .groupWorkspaceWrite) ?? true
+        telegram = try container.decodeIfPresent(String.self, forKey: .telegram) ?? "Keychain credential"
+        groups = try container.decodeIfPresent([DashboardSecurityGroup].self, forKey: .groups) ?? []
     }
 }
 
@@ -684,117 +732,147 @@ private final class LocalConsoleModel: ObservableObject {
 
 private struct LocalConsoleView: View {
     @ObservedObject var model: LocalConsoleModel
+    @ObservedObject var dashboard: DashboardModel
     let chooseFiles: () -> Void
     let revealArtifacts: ([String]) -> Void
+    let revealWorkspace: () -> Void
     let close: () -> Void
 
     private func bubbleColor(_ role: String) -> Color {
-        switch role {
-        case "user": return .blue.opacity(0.24)
-        case "system": return .secondary.opacity(0.12)
-        default: return .secondary.opacity(0.18)
-        }
+        role == "user" ? .blue.opacity(0.80) : role == "system" ? .secondary.opacity(0.10) : .secondary.opacity(0.16)
     }
 
+    private func foreground(_ role: String) -> Color {
+        role == "user" ? .white : .primary
+    }
+
+    private var isWorking: Bool { dashboard.snapshot.state == "working" }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Codeshark")
-                        .font(.title3.weight(.semibold))
-                    Text("Direct local session · separate from Telegram")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        ZStack {
+            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+            VStack(spacing: 14) {
+                HStack(spacing: 11) {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(.blue.gradient, in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Codeshark").font(.title3.weight(.semibold))
+                        HStack(spacing: 5) {
+                            Circle().fill(isWorking ? .blue : .green).frame(width: 6, height: 6)
+                            Text(isWorking ? "Working locally" : "Ready · local session")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button(action: revealWorkspace) { Image(systemName: "folder") }
+                        .buttonStyle(.bordered).help("Reveal workspace")
+                    Button("Close", action: close).buttonStyle(.bordered)
                 }
-                Spacer()
-                Button("Close", action: close)
-                    .buttonStyle(.bordered)
-            }
+                .padding(.horizontal, 2)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if model.messages.isEmpty {
-                        ContentUnavailableView(
-                            "Start a local task",
-                            systemImage: "bubble.left.and.bubble.right",
-                            description: Text("This uses the same Codeshark workspace and delivery flow without Telegram."))
-                            .frame(maxWidth: .infinity, minHeight: 250)
-                    } else {
-                        ForEach(model.messages) { message in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(message.role == "user" ? "You" : message.role == "system" ? "Codeshark" : "Codeshark")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                if !message.text.isEmpty {
+                Divider()
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if model.messages.isEmpty {
+                            VStack(spacing: 12) {
+                                Image(systemName: "sparkles").font(.system(size: 28, weight: .medium)).foregroundStyle(.blue)
+                                Text("Start a direct Codeshark task").font(.headline)
+                                Text("Use the same workspace, models, and output delivery without Telegram.")
+                                    .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 360)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 290)
+                        } else {
+                            ForEach(model.messages) { message in
+                                if message.role == "system" {
                                     Text(message.text)
-                                        .font(.body)
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                ForEach(message.attachments, id: \.self) { path in
-                                    Button(URL(fileURLWithPath: path).lastPathComponent) {
-                                        revealArtifacts([path])
+                                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .background(bubbleColor(message.role), in: Capsule())
+                                        .frame(maxWidth: .infinity)
+                                } else {
+                                    HStack(alignment: .bottom, spacing: 8) {
+                                        if message.role == "user" { Spacer(minLength: 70) }
+                                        VStack(alignment: .leading, spacing: 7) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: message.role == "user" ? "person.fill" : "bolt.fill")
+                                                Text(message.role == "user" ? "You" : "Codeshark")
+                                                Text(timeAgoText(message.createdAt)).font(.caption2).opacity(0.78)
+                                            }
+                                            .font(.caption.weight(.semibold)).foregroundStyle(foreground(message.role).opacity(0.82))
+                                            if !message.text.isEmpty {
+                                                Text(message.text).font(.body).textSelection(.enabled)
+                                                    .foregroundStyle(foreground(message.role)).frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                            ForEach(message.attachments, id: \.self) { path in
+                                                Button {
+                                                    revealArtifacts([path])
+                                                } label: {
+                                                    HStack(spacing: 6) {
+                                                        Image(systemName: "doc.fill")
+                                                        Text(URL(fileURLWithPath: path).lastPathComponent).lineLimit(1)
+                                                        Spacer(minLength: 4)
+                                                        Image(systemName: "arrow.up.forward.app")
+                                                    }
+                                                    .font(.caption.weight(.medium)).foregroundStyle(foreground(message.role))
+                                                    .padding(.horizontal, 9).padding(.vertical, 7)
+                                                    .background(.black.opacity(message.role == "user" ? 0.16 : 0.07), in: RoundedRectangle(cornerRadius: 7))
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(11).frame(maxWidth: 470, alignment: .leading)
+                                        .background(bubbleColor(message.role), in: RoundedRectangle(cornerRadius: 14))
+                                        if message.role != "user" { Spacer(minLength: 70) }
                                     }
-                                    .buttonStyle(.link)
-                                    .font(.caption)
                                 }
                             }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(bubbleColor(message.role), in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
+                    .padding(.horizontal, 2).padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
-            }
-            .frame(minHeight: 300)
+                .frame(minHeight: 310)
 
-            if !model.attachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(model.attachments, id: \.self) { path in
-                            HStack(spacing: 4) {
-                                Text(URL(fileURLWithPath: path).lastPathComponent)
-                                    .lineLimit(1)
-                                Button {
-                                    model.removeAttachment(path)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
+                VStack(spacing: 8) {
+                    if !model.attachments.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(model.attachments, id: \.self) { path in
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "paperclip")
+                                        Text(URL(fileURLWithPath: path).lastPathComponent).lineLimit(1)
+                                        Button { model.removeAttachment(path) } label: { Image(systemName: "xmark.circle.fill") }
+                                            .buttonStyle(.plain)
+                                    }
+                                    .font(.caption).padding(.horizontal, 9).padding(.vertical, 6)
+                                    .background(.quaternary, in: Capsule())
                                 }
-                                .buttonStyle(.plain)
                             }
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.quaternary, in: Capsule())
                         }
                     }
+                    HStack(alignment: .bottom, spacing: 9) {
+                        Button(action: chooseFiles) { Image(systemName: "paperclip").frame(width: 20, height: 20) }
+                            .buttonStyle(.bordered)
+                        TextEditor(text: $model.draft).font(.body).frame(minHeight: 42, maxHeight: 78)
+                        Button { model.send() } label: {
+                            Image(systemName: model.sending ? "hourglass" : "arrow.up")
+                                .font(.system(size: 13, weight: .bold)).frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.borderedProminent).clipShape(Circle())
+                        .disabled(model.sending || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
+                    }
+                    if !model.status.isEmpty {
+                        Text(model.status).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-            }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                Button(action: chooseFiles) {
-                    Image(systemName: "paperclip")
-                }
-                .buttonStyle(.bordered)
-                TextEditor(text: $model.draft)
-                    .font(.body)
-                    .frame(minHeight: 42, maxHeight: 78)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                Button(model.sending ? "Sending…" : "Send") {
-                    model.send()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.sending || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
-            }
-            if !model.status.isEmpty {
-                Text(model.status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
         }
         .padding(16)
-        .frame(minWidth: 600, minHeight: 560, alignment: .topLeading)
+        .frame(minWidth: 640, minHeight: 600, alignment: .topLeading)
     }
 }
 
@@ -1747,11 +1825,17 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var attentionPanel: NSPanel?
     private var modelRoutingPanel: NSPanel?
     private var orchestrationPanel: NSPanel?
+    private var settingsPanel: NSPanel?
     private var securityPanel: NSPanel?
     private var localConsolePanel: NSPanel?
     private var localConsoleModel: LocalConsoleModel?
     private var securityNetworkAccess: NSButton?
     private var securityAdminFullAccess: NSButton?
+    private var securityAdminAutoApprove: NSButton?
+    private var securityAdminMcp: NSButton?
+    private var securityAdminDelegatedWrite: NSButton?
+    private var securityGroupNetwork: NSButton?
+    private var securityGroupWorkspaceWrite: NSButton?
     private var modelPickers: [String: NSPopUpButton] = [:]
     private var reasoningPickers: [String: NSPopUpButton] = [:]
     private var orchestrationPreflight: [String: NSButton] = [:]
@@ -1823,7 +1907,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             addSecondary(failure.message, to: menu)
         }
 
-        menu.addItem(.separator())
         menu.addItem(actionItem("Open Codeshark", action: #selector(openLocalConsole(_:))))
         menu.addItem(.separator())
         let taskTitle = snapshot.queueCount > 0 || snapshot.activeTaskCount > 0
@@ -1836,11 +1919,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let attentionTitle = attentionCount > 0 ? "Attention · \(attentionCount)" : "Attention"
         menu.addItem(actionItem(attentionTitle, action: #selector(openAttention(_:))))
         menu.addItem(.separator())
-        menu.addItem(actionItem("Model Routing", action: #selector(openModelRouting(_:))))
-        menu.addItem(actionItem("Orchestration", action: #selector(openOrchestration(_:))))
-        menu.addItem(actionItem("Security Settings", action: #selector(openSecurity(_:))))
+        menu.addItem(actionItem("Settings…", action: #selector(openSettings(_:))))
         menu.addItem(usageMenuItem(snapshot: snapshot))
-        menu.addItem(actionItem("Workspace", action: #selector(openWorkspace(_:))))
         menu.addItem(actionItem("Logs", action: #selector(openLogs(_:))))
 
         menu.addItem(.separator())
@@ -1909,16 +1989,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
     }
 
-    @objc private func openModelRouting(_ sender: Any?) {
-        configureModels()
-    }
-
     @objc private func openLocalConsole(_ sender: Any?) {
         showLocalConsole()
     }
 
-    @objc private func openSecurity(_ sender: Any?) {
-        configureSecurity()
+    @objc private func openSettings(_ sender: Any?) {
+        showSettings()
     }
 
     @objc private func openTasks(_ sender: Any?) {
@@ -1937,20 +2013,97 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         showAttention()
     }
 
-    @objc private func openOrchestration(_ sender: Any?) {
-        configureOrchestration()
-    }
-
-    @objc private func openWorkspace(_ sender: Any?) {
-        chooseWorkspace()
-    }
-
     @objc private func openUsage(_ sender: Any?) {
         showUsage()
     }
 
     @objc private func openLogs(_ sender: Any?) {
         showLogs()
+    }
+
+    private func showSettings() {
+        dashboard.refresh()
+        if let panel = settingsPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 390),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Settings"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        let content = NSView(frame: panel.contentView?.bounds ?? .zero)
+        let title = NSTextField(labelWithString: "Settings")
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.frame = NSRect(x: 18, y: 350, width: 484, height: 23)
+        content.addSubview(title)
+        let detail = NSTextField(wrappingLabelWithString: "Configure where Codeshark works, how it routes work, and what it is allowed to do.")
+        detail.font = .systemFont(ofSize: 12)
+        detail.textColor = .secondaryLabelColor
+        detail.frame = NSRect(x: 18, y: 320, width: 484, height: 22)
+        content.addSubview(detail)
+
+        func row(_ title: String, _ detail: String, _ action: Selector, y: CGFloat) {
+            let button = NSButton(title: title, target: self, action: action)
+            button.bezelStyle = .rounded
+            button.frame = NSRect(x: 18, y: y + 7, width: 150, height: 28)
+            content.addSubview(button)
+            let label = NSTextField(wrappingLabelWithString: detail)
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = .secondaryLabelColor
+            label.frame = NSRect(x: 180, y: y, width: 322, height: 38)
+            content.addSubview(label)
+        }
+        let workspace = dashboard.snapshot.workspacePath.isEmpty
+            ? "Choose the working folder for new tasks."
+            : workspaceDisplayPath(dashboard.snapshot.workspacePath)
+        row("Workspace…", workspace, #selector(openSettingsWorkspace), y: 258)
+        row("Model Routing…", "Assign models and reasoning effort to every orchestration role.", #selector(openSettingsModels), y: 204)
+        row("Orchestration…", "Choose the supporting stages and feedback loops for each task tier.", #selector(openSettingsOrchestration), y: 150)
+        row("Security…", "Set administrator, connector, network, and group-sandbox permissions.", #selector(openSettingsSecurity), y: 96)
+
+        let separator = NSBox(frame: NSRect(x: 18, y: 44, width: 484, height: 1))
+        separator.boxType = .separator
+        content.addSubview(separator)
+        let close = NSButton(title: "Close", target: self, action: #selector(closeSettings))
+        close.bezelStyle = .rounded
+        close.frame = NSRect(x: 418, y: 9, width: 84, height: 26)
+        content.addSubview(close)
+        panel.contentView = content
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsPanel = panel
+    }
+
+    @objc private func closeSettings() {
+        settingsPanel?.close()
+    }
+
+    @objc private func openSettingsWorkspace() {
+        settingsPanel?.close()
+        chooseWorkspace()
+    }
+
+    @objc private func openSettingsModels() {
+        settingsPanel?.close()
+        configureModels()
+    }
+
+    @objc private func openSettingsOrchestration() {
+        settingsPanel?.close()
+        configureOrchestration()
+    }
+
+    @objc private func openSettingsSecurity() {
+        settingsPanel?.close()
+        configureSecurity()
     }
 
     private func configureSecurity() {
@@ -1964,11 +2117,16 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             sandbox: "workspace-write",
             networkAccess: false,
             adminFullAccess: false,
+            adminAutoApproveActions: false,
+            adminMcpEnabled: true,
+            adminDelegatedWriteAccess: true,
+            groupNetworkAccess: true,
+            groupWorkspaceWrite: true,
             telegram: "Keychain credential · one paired administrator",
             groups: []
         )
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 600),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -1981,82 +2139,94 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Security Settings")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 444, width: 588, height: 21)
+        title.frame = NSRect(x: 20, y: 558, width: 660, height: 21)
         content.addSubview(title)
-        let detail = NSTextField(wrappingLabelWithString: "Changes save now and the service restarts after active work finishes. The menu bar stays available.")
+        let detail = NSTextField(wrappingLabelWithString: "Each switch has an independent effect. Changes save now and apply after active work finishes; the menu bar remains available.")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 410, width: 588, height: 28)
+        detail.frame = NSRect(x: 20, y: 522, width: 660, height: 28)
         content.addSubview(detail)
 
-        let execution = NSTextField(labelWithString: "EXECUTION")
+        let execution = NSTextField(labelWithString: "ADMINISTRATOR EXECUTION")
         execution.font = .systemFont(ofSize: 10, weight: .semibold)
         execution.textColor = .secondaryLabelColor
-        execution.frame = NSRect(x: 16, y: 383, width: 180, height: 14)
+        execution.frame = NSRect(x: 20, y: 492, width: 240, height: 14)
         content.addSubview(execution)
-        let sandbox = NSTextField(labelWithString: "Sandbox · \(security.sandbox) (fixed)")
-        sandbox.font = .systemFont(ofSize: 12)
-        sandbox.frame = NSRect(x: 16, y: 358, width: 280, height: 18)
+        let sandbox = NSTextField(labelWithString: "Default sandbox · \(security.sandbox)")
+        sandbox.font = .systemFont(ofSize: 11)
+        sandbox.textColor = .secondaryLabelColor
+        sandbox.frame = NSRect(x: 420, y: 491, width: 260, height: 16)
         content.addSubview(sandbox)
+
+        func toggle(_ title: String, checked: Bool, y: CGFloat) -> NSButton {
+            let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            button.state = checked ? .on : .off
+            button.font = .systemFont(ofSize: 12)
+            button.frame = NSRect(x: 20, y: y, width: 500, height: 20)
+            content.addSubview(button)
+            return button
+        }
         let network = NSButton(checkboxWithTitle: "Allow network access", target: nil, action: nil)
         network.state = security.networkAccess ? .on : .off
         network.font = .systemFont(ofSize: 12)
-        network.frame = NSRect(x: 16, y: 329, width: 250, height: 20)
+        network.frame = NSRect(x: 20, y: 458, width: 500, height: 20)
         content.addSubview(network)
-        let fullAccess = NSButton(checkboxWithTitle: "Allow administrator full filesystem access", target: nil, action: nil)
-        fullAccess.state = security.adminFullAccess ? .on : .off
-        fullAccess.font = .systemFont(ofSize: 12)
-        fullAccess.frame = NSRect(x: 16, y: 302, width: 330, height: 20)
-        content.addSubview(fullAccess)
+        let fullAccess = toggle("Allow administrator full filesystem access", checked: security.adminFullAccess, y: 430)
+        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, y: 402)
+        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, y: 374)
+        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, y: 346)
         securityNetworkAccess = network
         securityAdminFullAccess = fullAccess
-
-        let telegram = NSTextField(labelWithString: "TELEGRAM")
-        telegram.font = .systemFont(ofSize: 10, weight: .semibold)
-        telegram.textColor = .secondaryLabelColor
-        telegram.frame = NSRect(x: 16, y: 267, width: 180, height: 14)
-        content.addSubview(telegram)
-        let telegramPolicy = NSTextField(wrappingLabelWithString: "\(security.telegram). Private and group conversations have separate persistent sessions.")
-        telegramPolicy.font = .systemFont(ofSize: 12)
-        telegramPolicy.textColor = .labelColor
-        telegramPolicy.frame = NSRect(x: 16, y: 232, width: 588, height: 30)
-        content.addSubview(telegramPolicy)
+        securityAdminAutoApprove = autoApprove
+        securityAdminMcp = mcp
+        securityAdminDelegatedWrite = delegatedWrite
 
         let groups = NSTextField(labelWithString: "GROUP CHAT")
         groups.font = .systemFont(ofSize: 10, weight: .semibold)
         groups.textColor = .secondaryLabelColor
-        groups.frame = NSRect(x: 16, y: 199, width: 180, height: 14)
+        groups.frame = NSRect(x: 20, y: 312, width: 180, height: 14)
         content.addSubview(groups)
+        let groupNetwork = toggle("Allow non-admin group network research", checked: security.groupNetworkAccess, y: 278)
+        let groupWrite = toggle("Allow non-admin group sandbox file writes", checked: security.groupWorkspaceWrite, y: 250)
+        securityGroupNetwork = groupNetwork
+        securityGroupWorkspaceWrite = groupWrite
         let enabledGroups = security.groups.isEmpty
             ? "No enabled groups."
             : security.groups.prefix(3).map { "\($0.title) (\($0.chatID))" }.joined(separator: " · ")
         let groupSummary = NSTextField(wrappingLabelWithString: "Enabled: \(enabledGroups)")
-        groupSummary.font = .systemFont(ofSize: 12)
-        groupSummary.frame = NSRect(x: 16, y: 165, width: 588, height: 28)
+        groupSummary.font = .systemFont(ofSize: 11)
+        groupSummary.textColor = .secondaryLabelColor
+        groupSummary.frame = NSRect(x: 20, y: 211, width: 660, height: 28)
         content.addSubview(groupSummary)
-        let groupPolicy = NSTextField(wrappingLabelWithString: "Requests must mention or reply to Codeshark. Non-admin members stay isolated: group sandbox only, no administrator memory, credentials, project roots, or MCP.")
+
+        let fixed = NSTextField(labelWithString: "FIXED BOUNDARIES")
+        fixed.font = .systemFont(ofSize: 10, weight: .semibold)
+        fixed.textColor = .secondaryLabelColor
+        fixed.frame = NSRect(x: 20, y: 178, width: 180, height: 14)
+        content.addSubview(fixed)
+        let groupPolicy = NSTextField(wrappingLabelWithString: "\(security.telegram). Group requests must mention or reply to Codeshark. Non-admin group work remains isolated from administrator memory, credentials, project roots, and MCP.")
         groupPolicy.font = .systemFont(ofSize: 11)
         groupPolicy.textColor = .secondaryLabelColor
-        groupPolicy.frame = NSRect(x: 16, y: 112, width: 588, height: 44)
+        groupPolicy.frame = NSRect(x: 20, y: 130, width: 660, height: 42)
         content.addSubview(groupPolicy)
 
         let local = NSTextField(wrappingLabelWithString: "Local console: actions sent through Open Codeshark are direct owner requests on this Mac, with a separate session and the same configured sandbox.")
         local.font = .systemFont(ofSize: 11)
         local.textColor = .secondaryLabelColor
-        local.frame = NSRect(x: 16, y: 69, width: 588, height: 32)
+        local.frame = NSRect(x: 20, y: 78, width: 660, height: 32)
         content.addSubview(local)
 
-        let separator = NSBox(frame: NSRect(x: 16, y: 43, width: 588, height: 1))
+        let separator = NSBox(frame: NSRect(x: 20, y: 43, width: 660, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
         let close = NSButton(title: "Close", target: self, action: #selector(closeSecurity))
         close.bezelStyle = .rounded
-        close.frame = NSRect(x: 16, y: 9, width: 84, height: 26)
+        close.frame = NSRect(x: 20, y: 9, width: 84, height: 26)
         content.addSubview(close)
         let apply = NSButton(title: "Apply", target: self, action: #selector(applySecurity))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 520, y: 9, width: 84, height: 26)
+        apply.frame = NSRect(x: 596, y: 9, width: 84, height: 26)
         content.addSubview(apply)
         panel.contentView = content
         panel.center()
@@ -2070,7 +2240,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func applySecurity() {
-        guard let network = securityNetworkAccess, let fullAccess = securityAdminFullAccess else {
+        guard let network = securityNetworkAccess,
+              let fullAccess = securityAdminFullAccess,
+              let autoApprove = securityAdminAutoApprove,
+              let mcp = securityAdminMcp,
+              let delegatedWrite = securityAdminDelegatedWrite,
+              let groupNetwork = securityGroupNetwork,
+              let groupWrite = securityGroupWorkspaceWrite
+        else {
             showError("Could not read the security settings.")
             return
         }
@@ -2079,6 +2256,11 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "set-security",
             "--network", network.state == .on ? "true" : "false",
             "--admin-full-access", fullAccess.state == .on ? "true" : "false",
+            "--admin-auto-approve-actions", autoApprove.state == .on ? "true" : "false",
+            "--admin-mcp-enabled", mcp.state == .on ? "true" : "false",
+            "--admin-delegated-write-access", delegatedWrite.state == .on ? "true" : "false",
+            "--group-network-access", groupNetwork.state == .on ? "true" : "false",
+            "--group-workspace-write", groupWrite.state == .on ? "true" : "false",
         ])
     }
 
@@ -2105,8 +2287,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         panel.contentViewController = NSHostingController(
             rootView: LocalConsoleView(
                 model: model,
+                dashboard: dashboard,
                 chooseFiles: { [weak self] in self?.chooseLocalFiles() },
                 revealArtifacts: { [weak self] paths in self?.revealArtifacts(paths) },
+                revealWorkspace: { [weak self] in self?.revealWorkspace() },
                 close: { [weak self] in self?.localConsolePanel?.close() }
             )
         )
@@ -2737,6 +2921,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             modelPickers = [:]
             reasoningPickers = [:]
             modelOptions = []
+        } else if window == settingsPanel {
+            settingsPanel = nil
         } else if window == orchestrationPanel {
             orchestrationPanel = nil
             orchestrationPreflight = [:]
@@ -2748,6 +2934,11 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             securityPanel = nil
             securityNetworkAccess = nil
             securityAdminFullAccess = nil
+            securityAdminAutoApprove = nil
+            securityAdminMcp = nil
+            securityAdminDelegatedWrite = nil
+            securityGroupNetwork = nil
+            securityGroupWorkspaceWrite = nil
         } else if window == localConsolePanel {
             localConsolePanel = nil
             localConsoleModel = nil

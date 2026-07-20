@@ -735,6 +735,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(payload["state"], "working")
         self.assertEqual(payload["workspace_path"], str(self.config.workdir))
+        self.assertEqual(
+            payload["security"]["admin_mcp_enabled"], self.config.admin_mcp_enabled
+        )
+        self.assertEqual(
+            payload["security"]["group_workspace_write"], self.config.group_workspace_write
+        )
         self.assertEqual(payload["model_assignments"][3]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["model_assignments"][1]["role"], "Planner / Triage")
         self.assertEqual(payload["model_assignments"][3]["role"], "Primary")
@@ -820,7 +826,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn(".codeshark/inbox/second.xlsx", follow_up.prompt)
 
     def test_figure_revision_follow_up_keeps_steering_and_requires_an_artifact(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=True,
+            ),
+            self.api,
+        )
         runner = FakeCodexRunner()
         task = app.store.enqueue_task(
             123,
@@ -1115,7 +1128,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(runner.prompts[0][4])
 
     def test_full_access_admin_runs_private_mutation_without_approval(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=True,
+            ),
+            self.api,
+        )
         runner = FakeCodexRunner()
         app.runner = runner
         app._handle_update(self.update(123, "Install a plugin and create a file"))
@@ -1125,9 +1145,25 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(runner.prompts[0][4])
         self.assertTrue(runner.prompts[0][5])
 
+    def test_full_filesystem_access_can_still_require_action_approval(self) -> None:
+        app = AgentApp(
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=False,
+            ),
+            self.api,
+        )
+
+        app._handle_update(self.update(123, "Install a plugin and create a file"))
+
+        self.assertEqual(app.store.list_tasks()[0].status, "awaiting_approval")
+
     def test_full_access_admin_keeps_capabilities_in_enabled_group(self) -> None:
         group_id = -100123
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app._bot_username = "codex_codeshark_bot"
         app.store.enable_group(group_id, "Engineering", 123)
         runner = FakeCodexRunner()
@@ -1212,7 +1248,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("never stretch width and height independently", runner.prompts[0][0])
 
     def test_figure_revision_routes_to_rendered_artifact_delivery(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         deliverables = app.config.workdir / ".codeshark" / "deliverables"
         deliverables.mkdir(parents=True)
         figure = deliverables / "fig8-revised.pdf"
@@ -1239,7 +1277,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual((manifest.phase, manifest.delivery_state), ("completed", "delivered"))
 
     def test_figure_revision_without_a_new_artifact_is_not_accepted(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app.runner = FakeCodexRunner(
             RunResult(0, "No concrete issues to fix.", "thread-new", "")
         )
@@ -1274,7 +1314,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("configured Figma MCP", runner.prompts[0][0])
 
     def test_manuscript_authoring_uses_editorial_qa_feedback_loop(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner()
         app.runner = runner
@@ -1655,7 +1697,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.messages, [(123, "The report is complete.")])
 
     def test_cross_validation_runs_primary_validator_and_reconciliation_sessions(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
             RunResult(
@@ -1817,7 +1861,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(manuscript.feedback_iterations, 0)
 
     def test_deep_workflow_reworks_until_a_fresh_verifier_passes(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app.state.mark_owner_onboarding_requested()
         primary = FakeCodexRunner(
             RunResult(
@@ -1932,7 +1978,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
 
     def test_cross_validation_retries_with_a_fresh_validator_session(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
             RunResult(
@@ -1979,7 +2027,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.messages, [(123, "Corrected final answer.")])
 
     def test_cross_validation_failure_returns_primary_recovery_not_validator_output(self) -> None:
-        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
             RunResult(

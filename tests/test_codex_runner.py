@@ -72,6 +72,24 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIn('mcp_servers.github.enabled_tools=["list_issues"]', command)
         self.assertIn("mcp_servers.docs.enabled=false", command)
 
+    def test_group_permission_switches_can_disable_network_and_writes(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            restricted_workdir=Path("/tmp/group-workspace"),
+            restricted_codex_home=Path("/tmp/group-codex-home"),
+            timeout_seconds=60,
+            restricted_network_access=False,
+            restricted_workspace_write=False,
+        )
+
+        command = runner.build_command("summarize", None, restricted=True)
+
+        self.assertIn('permissions.codeshark_group.filesystem={":minimal"="read",":workspace_roots"={"."="read"}}', command)
+        self.assertIn("permissions.codeshark_group.network.enabled=false", command)
+        self.assertIn('web_search="disabled"', command)
+
     def test_app_server_command_pins_configured_model(self) -> None:
         runner = CodexRunner(
             binary=Path("/tmp/codex"),
