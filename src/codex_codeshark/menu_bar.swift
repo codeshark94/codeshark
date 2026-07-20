@@ -656,6 +656,7 @@ private final class LocalConsoleModel: ObservableObject {
     @Published private(set) var messages: [LocalConsoleMessage] = []
     @Published var draft = ""
     @Published var attachments: [String] = []
+    @Published var commandPaletteOpen = false
     @Published private(set) var status = ""
     @Published private(set) var sending = false
 
@@ -732,113 +733,230 @@ private final class LocalConsoleModel: ObservableObject {
     }
 }
 
+private struct LocalConsoleCommand: Identifiable {
+    let command: String
+    let description: String
+
+    var id: String { command }
+}
+
 private struct LocalConsoleView: View {
     @ObservedObject var model: LocalConsoleModel
     @ObservedObject var dashboard: DashboardModel
+    let mascotPath: String
     let chooseFiles: () -> Void
     let revealArtifacts: ([String]) -> Void
     let revealWorkspace: () -> Void
-    let close: () -> Void
 
-    private func bubbleColor(_ role: String) -> Color {
-        role == "user" ? .blue.opacity(0.80) : role == "system" ? .secondary.opacity(0.10) : .secondary.opacity(0.16)
-    }
-
-    private func foreground(_ role: String) -> Color {
-        role == "user" ? .white : .primary
-    }
+    private let canvas = Color(red: 0.024, green: 0.055, blue: 0.082)
+    private let chrome = Color(red: 0.045, green: 0.098, blue: 0.145)
+    private let incoming = Color(red: 0.094, green: 0.174, blue: 0.246)
+    private let outgoing = Color(red: 0.180, green: 0.385, blue: 0.640)
+    private let composer = Color(red: 0.040, green: 0.090, blue: 0.137)
+    private let accent = Color(red: 0.180, green: 0.650, blue: 1.000)
+    private let muted = Color(red: 0.660, green: 0.735, blue: 0.820)
+    private let commands = [
+        LocalConsoleCommand(command: "/help", description: "Show local console shortcuts"),
+        LocalConsoleCommand(command: "/status", description: "Check task and session status"),
+        LocalConsoleCommand(command: "/new", description: "Start a fresh task context"),
+        LocalConsoleCommand(command: "/project", description: "Set or inspect the active project"),
+        LocalConsoleCommand(command: "/deliveries", description: "Open recent completed files"),
+        LocalConsoleCommand(command: "/model_usage", description: "Open model usage"),
+    ]
 
     private var isWorking: Bool { dashboard.snapshot.state == "working" }
 
+    @ViewBuilder
+    private func mascot(size: CGFloat) -> some View {
+        if let image = NSImage(contentsOfFile: mascotPath) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+        } else {
+            Image(systemName: "terminal.fill")
+                .font(.system(size: size * 0.42, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(accent, in: Circle())
+        }
+    }
+
+    private func attachmentCard(_ path: String, role: String) -> some View {
+        Button {
+            revealArtifacts([path])
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(role == "user" ? .white.opacity(0.18) : accent.opacity(0.16))
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(role == "user" ? .white : accent)
+                }
+                .frame(width: 36, height: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(URL(fileURLWithPath: path).lastPathComponent)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    Text("File · Open in Finder")
+                        .font(.caption)
+                        .foregroundStyle(role == "user" ? .white.opacity(0.70) : muted)
+                }
+                Spacer(minLength: 2)
+            }
+            .foregroundStyle(.white)
+            .padding(9)
+            .background(.black.opacity(role == "user" ? 0.16 : 0.11), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func messageBubble(_ message: LocalConsoleMessage) -> some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            if message.role != "user" {
+                mascot(size: 28)
+            } else {
+                Spacer(minLength: 74)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                if message.role != "user" {
+                    Text("Codeshark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
+                }
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(message.attachments, id: \.self) { path in
+                    attachmentCard(path, role: message.role)
+                }
+                Text(timeAgoText(message.createdAt))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.63))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 560, alignment: .leading)
+            .background(message.role == "user" ? outgoing : incoming, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            if message.role == "user" {
+                Spacer(minLength: 8)
+            } else {
+                Spacer(minLength: 74)
+            }
+        }
+    }
+
+    private var commandPalette: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Commands")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 7)
+            ForEach(commands) { item in
+                Button {
+                    model.draft = item.command
+                    model.commandPaletteOpen = false
+                } label: {
+                    HStack(spacing: 10) {
+                        mascot(size: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.command).font(.body.weight(.semibold))
+                            Text(item.description).font(.caption).foregroundStyle(muted)
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(width: 330)
+        .background(chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
+        .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
+    }
+
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
-            VStack(spacing: 14) {
+            canvas.ignoresSafeArea()
+            VStack(spacing: 12) {
                 HStack(spacing: 11) {
-                    Image(systemName: "chevron.left.forwardslash.chevron.right")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
-                        .background(.blue.gradient, in: RoundedRectangle(cornerRadius: 10))
+                    mascot(size: 42)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Codeshark").font(.title3.weight(.semibold))
+                        Text("Codeshark").font(.title3.weight(.semibold)).foregroundStyle(.white)
                         HStack(spacing: 5) {
-                            Circle().fill(isWorking ? .blue : .green).frame(width: 6, height: 6)
-                            Text(isWorking ? "Working locally" : "Ready · local session")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Circle().fill(isWorking ? accent : .green).frame(width: 6, height: 6)
+                            Text(isWorking ? "working locally" : "local direct session")
+                                .font(.caption).foregroundStyle(muted)
                         }
                     }
                     Spacer()
-                    Button(action: revealWorkspace) { Image(systemName: "folder") }
-                        .buttonStyle(.bordered).help("Reveal workspace")
-                    Button("Close", action: close).buttonStyle(.bordered)
+                    Menu {
+                        Button("Open workspace", action: revealWorkspace)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(chrome, in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                    }
+                    .menuStyle(.borderlessButton)
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 8)
+                .background(chrome.opacity(0.86), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
 
-                Divider()
+                Rectangle().fill(.white.opacity(0.10)).frame(height: 1)
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         if model.messages.isEmpty {
-                            VStack(spacing: 12) {
-                                Image(systemName: "sparkles").font(.system(size: 28, weight: .medium)).foregroundStyle(.blue)
-                                Text("Start a direct Codeshark task").font(.headline)
-                                Text("Use the same workspace, models, and output delivery without Telegram.")
-                                    .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 360)
+                            VStack(spacing: 14) {
+                                mascot(size: 62)
+                                Text("Start a direct Codeshark task").font(.headline).foregroundStyle(.white)
+                                Text("The same local workspace, models, attachments, and delivered files — without Telegram.")
+                                    .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(muted).frame(maxWidth: 380)
                             }
                             .frame(maxWidth: .infinity, minHeight: 290)
                         } else {
                             ForEach(model.messages) { message in
                                 if message.role == "system" {
                                     Text(message.text)
-                                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                                        .font(.caption.weight(.medium)).foregroundStyle(muted)
                                         .padding(.horizontal, 12).padding(.vertical, 6)
-                                        .background(bubbleColor(message.role), in: Capsule())
+                                        .background(.white.opacity(0.08), in: Capsule())
                                         .frame(maxWidth: .infinity)
                                 } else {
-                                    HStack(alignment: .bottom, spacing: 8) {
-                                        if message.role == "user" { Spacer(minLength: 70) }
-                                        VStack(alignment: .leading, spacing: 7) {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: message.role == "user" ? "person.fill" : "bolt.fill")
-                                                Text(message.role == "user" ? "You" : "Codeshark")
-                                                Text(timeAgoText(message.createdAt)).font(.caption2).opacity(0.78)
-                                            }
-                                            .font(.caption.weight(.semibold)).foregroundStyle(foreground(message.role).opacity(0.82))
-                                            if !message.text.isEmpty {
-                                                Text(message.text).font(.body).textSelection(.enabled)
-                                                    .foregroundStyle(foreground(message.role)).frame(maxWidth: .infinity, alignment: .leading)
-                                            }
-                                            ForEach(message.attachments, id: \.self) { path in
-                                                Button {
-                                                    revealArtifacts([path])
-                                                } label: {
-                                                    HStack(spacing: 6) {
-                                                        Image(systemName: "doc.fill")
-                                                        Text(URL(fileURLWithPath: path).lastPathComponent).lineLimit(1)
-                                                        Spacer(minLength: 4)
-                                                        Image(systemName: "arrow.up.forward.app")
-                                                    }
-                                                    .font(.caption.weight(.medium)).foregroundStyle(foreground(message.role))
-                                                    .padding(.horizontal, 9).padding(.vertical, 7)
-                                                    .background(.black.opacity(message.role == "user" ? 0.16 : 0.07), in: RoundedRectangle(cornerRadius: 7))
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                        .padding(11).frame(maxWidth: 470, alignment: .leading)
-                                        .background(bubbleColor(message.role), in: RoundedRectangle(cornerRadius: 14))
-                                        if message.role != "user" { Spacer(minLength: 70) }
-                                    }
+                                    messageBubble(message)
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal, 2).padding(.vertical, 2)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
                 }
                 .frame(minHeight: 310)
 
-                VStack(spacing: 8) {
+                ZStack(alignment: .bottomLeading) {
+                    if model.commandPaletteOpen {
+                        commandPalette
+                            .padding(.leading, 8)
+                            .padding(.bottom, 76)
+                            .zIndex(1)
+                    }
+                    VStack(spacing: 8) {
                     if !model.attachments.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
@@ -849,32 +967,71 @@ private struct LocalConsoleView: View {
                                         Button { model.removeAttachment(path) } label: { Image(systemName: "xmark.circle.fill") }
                                             .buttonStyle(.plain)
                                     }
+                                    .foregroundStyle(.white)
                                     .font(.caption).padding(.horizontal, 9).padding(.vertical, 6)
-                                    .background(.quaternary, in: Capsule())
+                                    .background(.white.opacity(0.11), in: Capsule())
                                 }
                             }
                         }
                     }
                     HStack(alignment: .bottom, spacing: 9) {
-                        Button(action: chooseFiles) { Image(systemName: "paperclip").frame(width: 20, height: 20) }
-                            .buttonStyle(.bordered)
-                        TextEditor(text: $model.draft).font(.body).frame(minHeight: 42, maxHeight: 78)
+                        Button { model.commandPaletteOpen.toggle() } label: {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 42, height: 42)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(accent, in: Circle())
+                        Button(action: chooseFiles) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 17, weight: .medium))
+                                .frame(width: 42, height: 42)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(chrome, in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
+                        ZStack(alignment: .topLeading) {
+                            if model.draft.isEmpty {
+                                Text("Write a message…")
+                                    .font(.body)
+                                    .foregroundStyle(muted)
+                                    .padding(.horizontal, 13)
+                                    .padding(.vertical, 12)
+                                    .allowsHitTesting(false)
+                            }
+                            TextEditor(text: $model.draft)
+                                .font(.body)
+                                .foregroundStyle(.white)
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 43, maxHeight: 84)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                        }
+                        .background(composer, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
                         Button { model.send() } label: {
                             Image(systemName: model.sending ? "hourglass" : "arrow.up")
-                                .font(.system(size: 13, weight: .bold)).frame(width: 30, height: 30)
+                                .font(.system(size: 16, weight: .bold)).frame(width: 42, height: 42)
                         }
-                        .buttonStyle(.borderedProminent).clipShape(Circle())
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(model.sending ? .white.opacity(0.18) : accent, in: Circle())
                         .disabled(model.sending || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
                     }
                     if !model.status.isEmpty {
-                        Text(model.status).font(.caption).foregroundStyle(.secondary)
+                        Text(model.status).font(.caption).foregroundStyle(muted)
                     }
                 }
-                .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(10)
+                .background(chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
+                }
             }
         }
         .padding(16)
-        .frame(minWidth: 640, minHeight: 600, alignment: .topLeading)
+        .frame(minWidth: 700, minHeight: 650, alignment: .topLeading)
     }
 }
 
@@ -2297,13 +2454,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             self?.executeServiceCommand(arguments) ?? (status: 1, output: "Codeshark is unavailable.")
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 650),
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 760),
             styleMask: [.titled, .closable, .utilityWindow, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Codeshark"
-        panel.minSize = NSSize(width: 600, height: 560)
+        panel.minSize = NSSize(width: 700, height: 650)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.delegate = self
@@ -2311,10 +2468,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             rootView: LocalConsoleView(
                 model: model,
                 dashboard: dashboard,
+                mascotPath: iconPath,
                 chooseFiles: { [weak self] in self?.chooseLocalFiles() },
                 revealArtifacts: { [weak self] paths in self?.revealArtifacts(paths) },
-                revealWorkspace: { [weak self] in self?.revealWorkspace() },
-                close: { [weak self] in self?.localConsolePanel?.close() }
+                revealWorkspace: { [weak self] in self?.revealWorkspace() }
             )
         )
         localConsoleModel = model
