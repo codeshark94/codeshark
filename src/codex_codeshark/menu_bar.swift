@@ -1176,7 +1176,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         title.frame = NSRect(x: 20, y: 407, width: 750, height: 24)
         content.addSubview(title)
         let detail = NSTextField(
-            wrappingLabelWithString: "Primary always owns the task. Choose the supporting roles for five general tiers; feedback and finalization require independent review. Applying restarts Codeshark."
+            wrappingLabelWithString: "Quick responds in one pass; Routine executes with scoped checks. Independent review begins at Standard. Choose supporting roles; feedback and finalization require independent review. Applying restarts Codeshark."
         )
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
@@ -1186,9 +1186,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         for (title, x, width) in [
             ("PLANNER", 170, 90),
             ("RESEARCH", 285, 90),
-            ("INDEPENDENT REVIEW", 395, 120),
-            ("REWORK LOOPS", 545, 100),
-            ("FINALIZER", 675, 80),
+            ("INDEPENDENT REVIEW", 375, 160),
+            ("REWORK LOOPS", 545, 110),
+            ("FINALIZER", 675, 90),
         ] {
             let header = NSTextField(labelWithString: title)
             header.font = .systemFont(ofSize: 11, weight: .semibold)
