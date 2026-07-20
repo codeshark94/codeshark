@@ -42,9 +42,16 @@ class FakeTelegramAPI:
 
 
 class FakeCodexRunner:
-    def __init__(self, result: RunResult | None = None) -> None:
+    def __init__(
+        self,
+        result: RunResult | None = None,
+        *,
+        triage_message: str | None = None,
+    ) -> None:
         self.model = "test-model"
         self.prompts = []
+        self.triage_prompts = []
+        self.triage_message = triage_message
         self.deleted_sessions = []
         self.delete_error = None
         self.steers = []
@@ -68,10 +75,44 @@ class FakeCodexRunner:
         approved=False,
         full_access=False,
     ) -> RunResult:
+        if prompt.startswith("[Codeshark task triage]"):
+            self.triage_prompts.append((prompt, thread_id, ephemeral, restricted, approved, full_access))
+            return RunResult(
+                exit_code=0,
+                message=self.triage_message or self._default_triage_message(prompt),
+                thread_id=None,
+                stderr="",
+            )
         self.prompts.append((prompt, thread_id, ephemeral, restricted, approved, full_access))
         if len(self.results) > 1:
             return self.results.pop(0)
         return self.results[0]
+
+    @staticmethod
+    def _default_triage_message(prompt: str) -> str:
+        request = prompt.partition("[Original request]\n")[2].partition("\n[/Original request]")[0]
+        lower = request.lower()
+        if ("이미지" in request or "fig" in lower) and any(
+            term in request for term in ("배치", "비율", "색", "마커", "범례")
+        ):
+            tier = "routine"
+        elif "high-assurance" in lower or "high assurance" in lower:
+            tier = "high_assurance"
+        elif "논문" in request or "manuscript" in lower or "paper" in lower:
+            tier = "high_assurance"
+        elif "multi-agent" in lower or "다단계" in request:
+            tier = "deep"
+        elif any(term in lower for term in ("analyze", "research", "review", "audit", "report")) or any(
+            term in request for term in ("분석", "조사", "리뷰", "검증", "보고서")
+        ):
+            tier = "standard"
+        elif any(term in lower for term in ("fix", "implement", "build", "edit", "create")) or any(
+            term in request for term in ("수정", "구현", "만들", "작성")
+        ):
+            tier = "routine"
+        else:
+            tier = "quick"
+        return json.dumps({"tier": tier, "confidence": "high", "reason": "test"})
 
     def cancel(self) -> bool:
         return False
@@ -675,6 +716,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["state"], "working")
         self.assertEqual(payload["workspace_path"], str(self.config.workdir))
         self.assertEqual(payload["model_assignments"][3]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][1]["role"], "Planner / Triage")
         self.assertEqual(payload["model_assignments"][3]["role"], "Primary")
         self.assertEqual(payload["model_assignments"][3]["reasoning_effort"], "high")
         self.assertEqual(payload["model_assignments"][3]["recent_total_tokens"], 0)
@@ -1060,11 +1102,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         request = "Fig8 마커를 SEM 사진과 같은 색으로 구분하고 범례 차트에 넣어"
         app._handle_update(self.update(123, request))
         task = app.store.claim_next_task()
-        plan = app._workflow_plan(task, request)
         app._execute_task(task)
 
         manifest = app.store.get_task_manifest(task.id)
-        self.assertEqual(plan.tier, "figure-revision")
         self.assertIn("Academic figure layout 학술 그림 배치", app.runner.prompts[0][0])
         self.assertIn("Concrete figure revision", app.runner.prompts[0][0])
         self.assertIn("CODESHARK_SEND_FILE", app.runner.prompts[0][0])
@@ -1116,12 +1156,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         app._handle_update(self.update(123, request))
         task = app.store.claim_next_task()
-        plan = app._workflow_plan(task, request)
         app._execute_task(task)
 
-        self.assertEqual(plan.tier, "high-assurance")
-        self.assertTrue(plan.uses_preflight)
-        self.assertEqual(plan.feedback_iterations, 2)
+        self.assertEqual(len(runner.triage_prompts), 1)
         self.assertTrue(
             any("Journal manuscript editorial QA 논문 원고 검수" in prompt[0] for prompt in runner.prompts)
         )
@@ -1562,32 +1599,51 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertFalse(self.app._cross_validation_requested("Push the existing branch."))
 
-    def test_task_router_selects_a_chain_by_request_weight(self) -> None:
-        def plan_for(request: str):
+    def test_triage_agent_selects_a_chain_by_request_weight(self) -> None:
+        def plan_for(request: str, tier: str):
             task = self.app.store.enqueue_task(
                 123,
                 request,
                 source="test",
                 ephemeral=False,
             )
-            return self.app._workflow_plan(task, request)
+            runner = FakeCodexRunner(
+                triage_message=json.dumps({"tier": tier, "confidence": "high", "reason": "test"})
+            )
+            plan = self.app._workflow_plan(task, request, runner)
+            self.assertEqual(len(runner.triage_prompts), 1)
+            _, _, ephemeral, restricted, approved, full_access = runner.triage_prompts[0]
+            self.assertTrue(ephemeral)
+            self.assertFalse(restricted)
+            self.assertFalse(approved)
+            self.assertFalse(full_access)
+            return plan
 
-        self.assertEqual(plan_for("What is the current status?").tier, "quick")
-        self.assertEqual(plan_for("Fix the README typo.").tier, "routine")
+        self.assertEqual(plan_for("What is the current status?", "quick").tier, "quick")
+        self.assertEqual(plan_for("Fix the README typo.", "routine").tier, "routine")
         self.assertEqual(
-            plan_for("Analyze the failure pattern and report the root cause.").tier,
+            plan_for("Analyze the failure pattern and report the root cause.", "standard").tier,
             "standard",
         )
-        deep = plan_for("Run a multi-agent comprehensive review.")
+        deep = plan_for("Run a multi-agent comprehensive review.", "deep")
         self.assertEqual(deep.tier, "deep")
         self.assertTrue(deep.uses_preflight)
         self.assertEqual(deep.feedback_iterations, 1)
-        manuscript = plan_for("논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.")
+        manuscript = plan_for(
+            "논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.", "high_assurance"
+        )
         self.assertEqual(manuscript.tier, "high-assurance")
         self.assertTrue(manuscript.uses_preflight)
         self.assertEqual(manuscript.feedback_iterations, 2)
 
-    def test_task_router_uses_saved_orchestration_settings(self) -> None:
+    def test_invalid_triage_response_falls_back_to_standard(self) -> None:
+        task = self.app.store.enqueue_task(123, "ambiguous request", source="test", ephemeral=False)
+        plan = self.app._workflow_plan(task, "ambiguous request", FakeCodexRunner(triage_message="not JSON"))
+
+        self.assertEqual(plan.tier, "standard")
+        self.assertTrue(plan.uses_validator)
+
+    def test_triage_agent_uses_saved_orchestration_settings(self) -> None:
         app = AgentApp(
             replace(
                 self.config,
@@ -1610,19 +1666,27 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             self.api,
         )
 
-        def plan_for(request: str):
+        def plan_for(request: str, tier: str):
             task = app.store.enqueue_task(123, request, source="test", ephemeral=False)
-            return app._workflow_plan(task, request)
+            return app._workflow_plan(
+                task,
+                request,
+                FakeCodexRunner(
+                    triage_message=json.dumps({"tier": tier, "confidence": "high", "reason": "test"})
+                ),
+            )
 
-        standard = plan_for("Analyze the failure pattern and report the root cause.")
+        standard = plan_for("Analyze the failure pattern and report the root cause.", "standard")
         self.assertTrue(standard.uses_preflight)
         self.assertFalse(standard.uses_research)
         self.assertTrue(standard.uses_validator)
-        deep = plan_for("Run a multi-agent comprehensive review.")
+        deep = plan_for("Run a multi-agent comprehensive review.", "deep")
         self.assertFalse(deep.uses_preflight)
         self.assertTrue(deep.uses_research)
         self.assertEqual(deep.feedback_iterations, 1)
-        manuscript = plan_for("논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.")
+        manuscript = plan_for(
+            "논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.", "high_assurance"
+        )
         self.assertFalse(manuscript.uses_preflight)
         self.assertEqual(manuscript.feedback_iterations, 0)
 

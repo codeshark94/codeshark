@@ -985,7 +985,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let roles = [
             ("Quick / Routine", "Routine", "gpt-5.6-luna", "medium"),
-            ("Planner", "Preflight", "gpt-5.6-luna", "low"),
+            ("Planner / Triage", "Preflight", "gpt-5.6-luna", "low"),
             ("Research", "Research", "gpt-5.6-luna", "medium"),
             ("Primary", "Primary", "gpt-5.6-sol", "high"),
             ("Rework", "Rework", "gpt-5.6-sol", "high"),

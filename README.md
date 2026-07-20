@@ -193,7 +193,7 @@ worker_count = 8
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
-Codeshark uses five general task tiers: Quick, Routine, Standard, Deep, and High assurance. Standard adds independent validation; Deep adds planning and a bounded correction loop; High assurance also adds an independent research pass. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
+Codeshark uses five general task tiers: Quick, Routine, Standard, Deep, and High assurance. A bounded Planner/Triage agent selects the tier before administrator work begins in a read-only, network-disabled, ephemeral session; its prompt prohibits tool use and it has no MCP or persistent session. Standard adds independent validation; Deep adds planning and a bounded correction loop; High assurance also adds an independent research pass. If Triage fails to return a valid structured decision, Codeshark safely falls back to Standard. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
 
 ```toml
 routine_model = "gpt-5.6-luna"
