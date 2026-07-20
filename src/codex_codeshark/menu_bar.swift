@@ -19,6 +19,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Workspace", action: #selector(openWorkspace), keyEquivalent: "")
         menu.addItem(withTitle: "Open Service Logs", action: #selector(openLogs), keyEquivalent: "")
+        menu.addItem(.separator())
+        let quitItem = menu.addItem(
+            withTitle: "Quit Codeshark",
+            action: #selector(quitCodeshark),
+            keyEquivalent: "q"
+        )
+        quitItem.target = self
         statusItem.menu = menu
 
         if let button = statusItem.button,
@@ -69,6 +76,20 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
 
     @objc private func openLogs() {
         NSWorkspace.shared.open(URL(fileURLWithPath: projectRoot).appendingPathComponent("runtime"))
+    }
+
+    @objc private func quitCodeshark() {
+        let launchAgents = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents")
+        let command = Process()
+        command.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        command.arguments = [
+            "bootout",
+            "gui/\(getuid())",
+            launchAgents.appendingPathComponent("com.codeshark.agent.plist").path,
+            launchAgents.appendingPathComponent("com.codeshark.status.plist").path,
+        ]
+        try? command.run()
     }
 
 }
