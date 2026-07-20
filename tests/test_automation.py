@@ -53,6 +53,7 @@ class AgentStoreTests(unittest.TestCase):
             store.record_model_run(
                 task_id="task-1",
                 phase="primary",
+                role="Primary",
                 model="gpt-5.6-sol",
                 reasoning_effort="high",
                 started_at=100.0,
@@ -71,6 +72,7 @@ class AgentStoreTests(unittest.TestCase):
             store.record_model_run(
                 task_id="task-2",
                 phase="validator",
+                role="Validation",
                 model="gpt-5.6-terra",
                 reasoning_effort="high",
                 started_at=200.0,
@@ -92,6 +94,11 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(summaries[1].model, "gpt-5.6-terra")
             self.assertEqual(summaries[1].completed, 0)
             self.assertEqual(summaries[1].measured_runs, 0)
+
+            role_usage = store.model_role_usage(since=150.0)
+            self.assertEqual(role_usage[0].role, "Primary")
+            self.assertEqual(role_usage[0].total_tokens, 160)
+            self.assertEqual(role_usage[1].role, "Validation")
 
     def test_persists_and_recovers_running_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

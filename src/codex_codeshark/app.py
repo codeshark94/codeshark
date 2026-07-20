@@ -348,6 +348,7 @@ class AgentApp:
                 worker_index,
                 model=self.config.routine_model,
                 reasoning_effort=self.config.routine_reasoning_effort,
+                role="Routine",
             )
             for worker_index in range(config.worker_count)
         )
@@ -356,6 +357,7 @@ class AgentApp:
                 worker_index,
                 model=self.config.primary_model,
                 reasoning_effort=self.config.primary_reasoning_effort,
+                role="Primary",
             )
             for worker_index in range(config.worker_count)
         )
@@ -364,6 +366,7 @@ class AgentApp:
                 worker_index,
                 model=self.config.rework_model,
                 reasoning_effort=self.config.rework_reasoning_effort,
+                role="Rework",
             )
             for worker_index in range(config.worker_count)
         )
@@ -372,6 +375,7 @@ class AgentApp:
                 worker_index,
                 model=self.config.validator_model,
                 reasoning_effort=self.config.validator_reasoning_effort,
+                role="Validation",
             )
             for worker_index in range(config.worker_count)
         )
@@ -380,6 +384,7 @@ class AgentApp:
                 worker_index,
                 model=self.config.feedback_model,
                 reasoning_effort=self.config.feedback_reasoning_effort,
+                role="Feedback",
             )
             for worker_index in range(config.worker_count)
         )
@@ -388,6 +393,7 @@ class AgentApp:
                 worker_index,
                 model=self.config.preflight_model,
                 reasoning_effort=self.config.preflight_reasoning_effort,
+                role="Preflight",
             )
             for worker_index in range(config.worker_count)
         )
@@ -493,6 +499,21 @@ class AgentApp:
             latest_failure = self.store.latest_failure()
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
             weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
+            weekly_role_usage = {
+                item.role: item
+                for item in self.store.model_role_usage(since=now - 7 * 24 * 60 * 60)
+            }
+
+            def assignment(role: str, model: str, reasoning_effort: str) -> dict[str, object]:
+                usage = weekly_role_usage.get(role)
+                return {
+                    "model": model,
+                    "role": role,
+                    "reasoning_effort": reasoning_effort,
+                    "recent_total_tokens": usage.total_tokens if usage else 0,
+                    "recent_measured_turns": usage.measured_runs if usage else 0,
+                    "recent_runs": usage.runs if usage else 0,
+                }
             activity_log = self.store.recent_model_runs(limit=20)
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
@@ -503,37 +524,54 @@ class AgentApp:
                         "queue_count": self.store.pending_count(),
                         "workspace_path": str(self.config.workdir),
                         "model_assignments": [
-                            {
-                                "model": self.config.routine_model,
-                                "role": "Routine",
-                                "reasoning_effort": self.config.routine_reasoning_effort,
-                            },
-                            {
-                                "model": self.config.preflight_model,
-                                "role": "Preflight",
-                                "reasoning_effort": self.config.preflight_reasoning_effort,
-                            },
-                            {
-                                "model": self.config.primary_model,
-                                "role": "Primary",
-                                "reasoning_effort": self.config.primary_reasoning_effort,
-                            },
-                            {
-                                "model": self.config.rework_model,
-                                "role": "Rework",
-                                "reasoning_effort": self.config.rework_reasoning_effort,
-                            },
-                            {
-                                "model": self.config.validator_model,
-                                "role": "Validation",
-                                "reasoning_effort": self.config.validator_reasoning_effort,
-                            },
-                            {
-                                "model": self.config.feedback_model,
-                                "role": "Feedback",
-                                "reasoning_effort": self.config.feedback_reasoning_effort,
-                            },
+                            assignment(
+                                "Routine",
+                                self.config.routine_model,
+                                self.config.routine_reasoning_effort,
+                            ),
+                            assignment(
+                                "Preflight",
+                                self.config.preflight_model,
+                                self.config.preflight_reasoning_effort,
+                            ),
+                            assignment(
+                                "Primary",
+                                self.config.primary_model,
+                                self.config.primary_reasoning_effort,
+                            ),
+                            assignment(
+                                "Rework",
+                                self.config.rework_model,
+                                self.config.rework_reasoning_effort,
+                            ),
+                            assignment(
+                                "Validation",
+                                self.config.validator_model,
+                                self.config.validator_reasoning_effort,
+                            ),
+                            assignment(
+                                "Feedback",
+                                self.config.feedback_model,
+                                self.config.feedback_reasoning_effort,
+                            ),
                         ],
+                        "orchestration": {
+                            "standard": {
+                                "uses_preflight": self.config.standard_uses_preflight,
+                                "uses_validator": self.config.standard_uses_validator,
+                                "feedback_iterations": self.config.standard_feedback_iterations,
+                            },
+                            "deep": {
+                                "uses_preflight": self.config.deep_uses_preflight,
+                                "uses_validator": self.config.deep_uses_validator,
+                                "feedback_iterations": self.config.deep_feedback_iterations,
+                            },
+                            "manuscript": {
+                                "uses_preflight": self.config.manuscript_uses_preflight,
+                                "uses_validator": self.config.manuscript_uses_validator,
+                                "feedback_iterations": self.config.manuscript_feedback_iterations,
+                            },
+                        },
                         "active_tasks": active_summary,
                         "recent_artifacts": self.store.recent_artifact_names(),
                         "last_failure": (
@@ -688,6 +726,7 @@ class AgentApp:
         *,
         model: str,
         reasoning_effort: str | None,
+        role: str,
     ) -> CodexRunner:
         group_workdir, group_codex_home = group_worker_runtime(self.config, worker_index)
         return CodexRunner(
@@ -699,6 +738,7 @@ class AgentApp:
             timeout_seconds=self.config.task_timeout_seconds,
             model=model,
             model_reasoning_effort=reasoning_effort,
+            role=role,
             additional_write_roots=self._administrator_write_roots,
             mcp_known_servers=self.config.mcp_known_servers,
             mcp_allowed_tools=self.config.mcp_allowed_tools,
@@ -2000,21 +2040,26 @@ class AgentApp:
         if self._is_manuscript_authoring(request):
             return WorkflowPlan(
                 "manuscript",
-                uses_preflight=True,
-                uses_validator=True,
-                feedback_iterations=2,
+                uses_preflight=self.config.manuscript_uses_preflight,
+                uses_validator=self.config.manuscript_uses_validator,
+                feedback_iterations=self.config.manuscript_feedback_iterations,
             )
         if self._is_figure_revision(request):
             return WorkflowPlan("figure-revision", uses_preflight=False, uses_validator=False)
         if _DEEP_WORKFLOW_CUE.search(request):
             return WorkflowPlan(
                 "deep",
-                uses_preflight=True,
-                uses_validator=True,
-                feedback_iterations=2,
+                uses_preflight=self.config.deep_uses_preflight,
+                uses_validator=self.config.deep_uses_validator,
+                feedback_iterations=self.config.deep_feedback_iterations,
             )
         if _CROSS_VALIDATION_TERM.search(request) or _STANDARD_WORKFLOW_CUE.search(request):
-            return WorkflowPlan("standard", uses_preflight=False, uses_validator=True)
+            return WorkflowPlan(
+                "standard",
+                uses_preflight=self.config.standard_uses_preflight,
+                uses_validator=self.config.standard_uses_validator,
+                feedback_iterations=self.config.standard_feedback_iterations,
+            )
         if _SUBSTANTIVE_TASK_CUE.search(request):
             return WorkflowPlan("focused", uses_preflight=False, uses_validator=False)
         return WorkflowPlan("direct", uses_preflight=False, uses_validator=False)
@@ -2410,6 +2455,7 @@ class AgentApp:
         self.store.record_model_run(
             task_id=task_id,
             phase=phase,
+            role=getattr(runner, "role", "Unassigned"),
             model=getattr(runner, "model", None) or "default",
             reasoning_effort=getattr(runner, "model_reasoning_effort", None)
             or "default",

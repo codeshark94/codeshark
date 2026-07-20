@@ -15,6 +15,7 @@ from codex_codeshark.config import (
     prompt_and_store_bot_token,
     prepare_group_runtime,
     set_model_assignments,
+    set_orchestration,
     set_workspace_directory,
     validate_mcp_policy,
     write_codex_profile,
@@ -144,6 +145,47 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.rework_reasoning_effort, "xhigh")
             self.assertEqual(updated.feedback_model, "gpt-5.4-mini")
             self.assertEqual(updated.feedback_reasoning_effort, "high")
+
+    def test_sets_orchestration_without_rewriting_model_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        'primary_model = "gpt-5.6-sol"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            updated = set_orchestration(
+                standard_uses_preflight=True,
+                standard_uses_validator=True,
+                standard_feedback_iterations=1,
+                deep_uses_preflight=True,
+                deep_uses_validator=True,
+                deep_feedback_iterations=3,
+                manuscript_uses_preflight=False,
+                manuscript_uses_validator=True,
+                manuscript_feedback_iterations=0,
+                config_path=config_path,
+            )
+
+            self.assertTrue(updated.standard_uses_preflight)
+            self.assertEqual(updated.deep_feedback_iterations, 3)
+            self.assertFalse(updated.manuscript_uses_preflight)
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn('primary_model = "gpt-5.6-sol"', text)
+            self.assertIn("standard_feedback_iterations = 1", text)
 
     def test_validates_bot_token_without_echoing_invalid_value(self) -> None:
         token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456"

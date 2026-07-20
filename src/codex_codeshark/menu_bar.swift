@@ -30,13 +30,37 @@ struct DashboardModelAssignment: Decodable, Identifiable {
     let model: String
     let reasoningEffort: String
     let role: String
+    let recentTotalTokens: Int?
+    let recentMeasuredTurns: Int?
+    let recentRuns: Int?
 
     var id: String { "\(model)-\(reasoningEffort)-\(role)" }
 
     enum CodingKeys: String, CodingKey {
         case model, role
         case reasoningEffort = "reasoning_effort"
+        case recentTotalTokens = "recent_total_tokens"
+        case recentMeasuredTurns = "recent_measured_turns"
+        case recentRuns = "recent_runs"
     }
+}
+
+struct DashboardOrchestrationTier: Decodable {
+    let usesPreflight: Bool
+    let usesValidator: Bool
+    let feedbackIterations: Int
+
+    enum CodingKeys: String, CodingKey {
+        case usesPreflight = "uses_preflight"
+        case usesValidator = "uses_validator"
+        case feedbackIterations = "feedback_iterations"
+    }
+}
+
+struct DashboardOrchestration: Decodable {
+    let standard: DashboardOrchestrationTier
+    let deep: DashboardOrchestrationTier
+    let manuscript: DashboardOrchestrationTier
 }
 
 struct DashboardActivityLog: Decodable, Identifiable {
@@ -187,6 +211,7 @@ struct DashboardSnapshot: Decodable {
     let modelUsage5h: [DashboardModelUsage]
     let modelUsage7d: [DashboardModelUsage]
     let accountUsage: DashboardAccountUsage?
+    let orchestration: DashboardOrchestration?
 
     static let empty = DashboardSnapshot(
         state: "starting",
@@ -200,7 +225,8 @@ struct DashboardSnapshot: Decodable {
         activityLog: [],
         modelUsage5h: [],
         modelUsage7d: [],
-        accountUsage: nil
+        accountUsage: nil,
+        orchestration: nil
     )
 
     enum CodingKeys: String, CodingKey {
@@ -216,6 +242,7 @@ struct DashboardSnapshot: Decodable {
         case modelUsage5h = "model_usage_5h"
         case modelUsage7d = "model_usage_7d"
         case accountUsage = "account_usage"
+        case orchestration
     }
 
     init(
@@ -230,7 +257,8 @@ struct DashboardSnapshot: Decodable {
         activityLog: [DashboardActivityLog],
         modelUsage5h: [DashboardModelUsage],
         modelUsage7d: [DashboardModelUsage],
-        accountUsage: DashboardAccountUsage?
+        accountUsage: DashboardAccountUsage?,
+        orchestration: DashboardOrchestration?
     ) {
         self.state = state
         self.activeTaskCount = activeTaskCount
@@ -244,6 +272,7 @@ struct DashboardSnapshot: Decodable {
         self.modelUsage5h = modelUsage5h
         self.modelUsage7d = modelUsage7d
         self.accountUsage = accountUsage
+        self.orchestration = orchestration
     }
 
     init(from decoder: Decoder) throws {
@@ -260,6 +289,7 @@ struct DashboardSnapshot: Decodable {
         modelUsage5h = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage5h) ?? []
         modelUsage7d = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage7d) ?? []
         accountUsage = try container.decodeIfPresent(DashboardAccountUsage.self, forKey: .accountUsage)
+        orchestration = try container.decodeIfPresent(DashboardOrchestration.self, forKey: .orchestration)
     }
 }
 
@@ -463,6 +493,13 @@ struct ModelUsageView: View {
         let grouped = Dictionary(grouping: entries) {
             "\($0.model)-\($0.reasoningEffort)"
         }
+        var routingOrder: [String: Int] = [:]
+        for (index, assignment) in model.snapshot.modelAssignments.enumerated() {
+            let key = "\(assignment.model)-\(assignment.reasoningEffort)"
+            if routingOrder[key] == nil {
+                routingOrder[key] = index
+            }
+        }
         return grouped.values.map { entries in
             ModelUsageGroup(
                 model: entries[0].model,
@@ -473,7 +510,11 @@ struct ModelUsageView: View {
                 totalTokens: entries.reduce(0) { $0 + ($1.totalTokens ?? 0) }
             )
         }
-        .sorted { $0.totalTokens > $1.totalTokens }
+        .sorted {
+            let left = routingOrder[$0.id] ?? Int.max
+            let right = routingOrder[$1.id] ?? Int.max
+            return left == right ? $0.id < $1.id : left < right
+        }
     }
 
     private var totalTokens: Int {
@@ -587,8 +628,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var logPanel: NSPanel?
     private var usagePanel: NSPanel?
     private var modelRoutingPanel: NSPanel?
+    private var orchestrationPanel: NSPanel?
     private var modelPickers: [String: NSPopUpButton] = [:]
     private var reasoningPickers: [String: NSPopUpButton] = [:]
+    private var orchestrationPreflight: [String: NSButton] = [:]
+    private var orchestrationValidation: [String: NSButton] = [:]
+    private var orchestrationFeedback: [String: NSPopUpButton] = [:]
     private var modelOptions: [CodexModelOption] = []
 
     init(projectRoot: String, iconPath: String) {
@@ -678,6 +723,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         menu.addItem(.separator())
         menu.addItem(actionItem("Model Routing", action: #selector(openModelRouting(_:))))
+        menu.addItem(actionItem("Orchestration", action: #selector(openOrchestration(_:))))
         menu.addItem(usageMenuItem(snapshot: snapshot))
         menu.addItem(actionItem("Workspace", action: #selector(openWorkspace(_:))))
         menu.addItem(actionItem("Logs", action: #selector(openLogs(_:))))
@@ -760,6 +806,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         configureModels()
     }
 
+    @objc private func openOrchestration(_ sender: Any?) {
+        configureOrchestration()
+    }
+
     @objc private func openWorkspace(_ sender: Any?) {
         chooseWorkspace()
     }
@@ -804,7 +854,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 500),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -817,24 +867,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Model Routing")
         title.font = .systemFont(ofSize: 17, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 387, width: 580, height: 24)
+        title.frame = NSRect(x: 20, y: 447, width: 580, height: 24)
         content.addSubview(title)
 
         let detail = NSTextField(wrappingLabelWithString: "Choose a model and a supported reasoning effort for each role. Applying restarts Codeshark.")
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 345, width: 580, height: 34)
+        detail.frame = NSRect(x: 20, y: 405, width: 580, height: 34)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 11, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 185, y: 318, width: 235, height: 16)
+        modelHeader.frame = NSRect(x: 185, y: 378, width: 235, height: 16)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 11, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 430, y: 318, width: 170, height: 16)
+        effortHeader.frame = NSRect(x: 430, y: 378, width: 170, height: 16)
         content.addSubview(effortHeader)
 
         let roles = [
@@ -849,25 +899,31 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         modelPickers = [:]
         reasoningPickers = [:]
         for (index, role) in roles.enumerated() {
-            let y = 275 - (index * 38)
+            let y = 325 - (index * 48)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 13, weight: .medium)
-            label.frame = NSRect(x: 20, y: y + 4, width: 155, height: 20)
+            label.frame = NSRect(x: 20, y: y + 21, width: 155, height: 18)
             content.addSubview(label)
 
-            let current = dashboard.snapshot.modelAssignments
-                .first(where: { $0.role == role.1 })?.model ?? role.2
-            let currentEffort = dashboard.snapshot.modelAssignments
-                .first(where: { $0.role == role.1 })?.reasoningEffort ?? role.3
+            let assignment = dashboard.snapshot.modelAssignments.first(where: { $0.role == role.1 })
+            let current = assignment?.model ?? role.2
+            let currentEffort = assignment?.reasoningEffort ?? role.3
+            let recentUsage = NSTextField(
+                labelWithString: "7d · \(tokenText(assignment?.recentTotalTokens ?? 0)) · \(assignment?.recentMeasuredTurns ?? 0)/\(assignment?.recentRuns ?? 0) turns"
+            )
+            recentUsage.font = .systemFont(ofSize: 10)
+            recentUsage.textColor = .secondaryLabelColor
+            recentUsage.frame = NSRect(x: 20, y: y + 4, width: 155, height: 14)
+            content.addSubview(recentUsage)
             let modelPicker = modelPicker(
                 current,
                 role: role.1,
-                frame: NSRect(x: 185, y: y, width: 235, height: 28)
+                frame: NSRect(x: 185, y: y + 10, width: 235, height: 28)
             )
             let effortPicker = reasoningPicker(
                 model: current,
                 current: currentEffort,
-                frame: NSRect(x: 430, y: y, width: 170, height: 28)
+                frame: NSRect(x: 430, y: y + 10, width: 170, height: 28)
             )
             content.addSubview(modelPicker)
             content.addSubview(effortPicker)
@@ -994,6 +1050,141 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         ])
     }
 
+    private func configureOrchestration() {
+        dashboard.refresh()
+        if let panel = orchestrationPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 570, height: 360),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Orchestration"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+
+        let content = NSView(frame: panel.contentView?.bounds ?? .zero)
+        let title = NSTextField(labelWithString: "Orchestration")
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.frame = NSRect(x: 20, y: 307, width: 520, height: 24)
+        content.addSubview(title)
+        let detail = NSTextField(
+            wrappingLabelWithString: "Choose the stages for each task tier. Feedback loops require validation. Applying restarts Codeshark."
+        )
+        detail.font = .systemFont(ofSize: 13)
+        detail.textColor = .secondaryLabelColor
+        detail.frame = NSRect(x: 20, y: 267, width: 520, height: 34)
+        content.addSubview(detail)
+
+        for (title, x, width) in [
+            ("PREFLIGHT", 170, 110),
+            ("VALIDATION", 300, 110),
+            ("FEEDBACK LOOPS", 430, 120),
+        ] {
+            let header = NSTextField(labelWithString: title)
+            header.font = .systemFont(ofSize: 11, weight: .semibold)
+            header.textColor = .secondaryLabelColor
+            header.frame = NSRect(x: CGFloat(x), y: 238, width: CGFloat(width), height: 16)
+            content.addSubview(header)
+        }
+
+        let tiers = [("standard", "Standard"), ("deep", "Deep"), ("manuscript", "Manuscript")]
+        orchestrationPreflight = [:]
+        orchestrationValidation = [:]
+        orchestrationFeedback = [:]
+        for (index, tier) in tiers.enumerated() {
+            let y = 178 - (index * 52)
+            let values = orchestrationValues(for: tier.0)
+            let label = NSTextField(labelWithString: tier.1)
+            label.font = .systemFont(ofSize: 14, weight: .medium)
+            label.frame = NSRect(x: 20, y: y + 5, width: 130, height: 22)
+            content.addSubview(label)
+            let preflight = checkbox(checked: values.usesPreflight, frame: NSRect(x: 190, y: y + 3, width: 22, height: 22))
+            let validation = checkbox(checked: values.usesValidator, frame: NSRect(x: 320, y: y + 3, width: 22, height: 22))
+            let feedback = NSPopUpButton(frame: NSRect(x: 450, y: y, width: 80, height: 28), pullsDown: false)
+            feedback.addItems(withTitles: ["0", "1", "2", "3", "4", "5"])
+            feedback.selectItem(withTitle: String(values.feedbackIterations))
+            content.addSubview(preflight)
+            content.addSubview(validation)
+            content.addSubview(feedback)
+            orchestrationPreflight[tier.0] = preflight
+            orchestrationValidation[tier.0] = validation
+            orchestrationFeedback[tier.0] = feedback
+        }
+
+        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 520, height: 1))
+        separator.boxType = .separator
+        content.addSubview(separator)
+        let close = NSButton(title: "Close", target: self, action: #selector(closeOrchestration))
+        close.bezelStyle = .rounded
+        close.frame = NSRect(x: 20, y: 15, width: 90, height: 28)
+        content.addSubview(close)
+        let apply = NSButton(title: "Apply", target: self, action: #selector(applyOrchestration))
+        apply.bezelStyle = .rounded
+        apply.keyEquivalent = "\r"
+        apply.frame = NSRect(x: 450, y: 15, width: 90, height: 28)
+        content.addSubview(apply)
+        panel.contentView = content
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        orchestrationPanel = panel
+    }
+
+    private func orchestrationValues(for tier: String) -> DashboardOrchestrationTier {
+        let configured = dashboard.snapshot.orchestration
+        switch tier {
+        case "standard":
+            return configured?.standard ?? DashboardOrchestrationTier(usesPreflight: false, usesValidator: true, feedbackIterations: 0)
+        case "deep":
+            return configured?.deep ?? DashboardOrchestrationTier(usesPreflight: true, usesValidator: true, feedbackIterations: 2)
+        default:
+            return configured?.manuscript ?? DashboardOrchestrationTier(usesPreflight: true, usesValidator: true, feedbackIterations: 2)
+        }
+    }
+
+    private func checkbox(checked: Bool, frame: NSRect) -> NSButton {
+        let button = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+        button.state = checked ? .on : .off
+        button.frame = frame
+        return button
+    }
+
+    @objc private func closeOrchestration() {
+        orchestrationPanel?.orderOut(nil)
+    }
+
+    @objc private func applyOrchestration() {
+        let tiers = ["standard", "deep", "manuscript"]
+        var arguments = ["set-orchestration"]
+        for tier in tiers {
+            guard let preflight = orchestrationPreflight[tier],
+                  let validation = orchestrationValidation[tier],
+                  let feedback = orchestrationFeedback[tier]?.titleOfSelectedItem,
+                  let loops = Int(feedback)
+            else {
+                showError("Could not read the orchestration settings.")
+                return
+            }
+            if loops > 0 && validation.state != .on {
+                showError("\(tier.capitalized) feedback loops require validation.")
+                return
+            }
+            arguments += [
+                "--\(tier)-preflight", preflight.state == .on ? "true" : "false",
+                "--\(tier)-validation", validation.state == .on ? "true" : "false",
+                "--\(tier)-feedback-loops", String(loops),
+            ]
+        }
+        orchestrationPanel?.orderOut(nil)
+        runServiceCommand(arguments)
+    }
+
     private func showUsage() {
         dashboard.refresh()
         if let panel = usagePanel {
@@ -1060,6 +1251,11 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             modelPickers = [:]
             reasoningPickers = [:]
             modelOptions = []
+        } else if window == orchestrationPanel {
+            orchestrationPanel = nil
+            orchestrationPreflight = [:]
+            orchestrationValidation = [:]
+            orchestrationFeedback = [:]
         } else if window == usagePanel {
             usagePanel = nil
         } else if window == logPanel {

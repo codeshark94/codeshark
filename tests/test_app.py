@@ -674,14 +674,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(payload["state"], "working")
         self.assertEqual(payload["workspace_path"], str(self.config.workdir))
-        self.assertEqual(
-            payload["model_assignments"][2],
-            {
-                "model": "gpt-5.6-sol",
-                "role": "Primary",
-                "reasoning_effort": "high",
-            },
-        )
+        self.assertEqual(payload["model_assignments"][2]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Primary")
+        self.assertEqual(payload["model_assignments"][2]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][2]["recent_total_tokens"], 0)
         self.assertEqual(payload["model_assignments"][3]["role"], "Rework")
         self.assertEqual(payload["model_assignments"][4]["role"], "Validation")
         self.assertEqual(payload["model_assignments"][5]["role"], "Feedback")
@@ -1562,6 +1558,37 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(manuscript.tier, "manuscript")
         self.assertTrue(manuscript.uses_preflight)
         self.assertEqual(manuscript.feedback_iterations, 2)
+
+    def test_task_router_uses_saved_orchestration_settings(self) -> None:
+        app = AgentApp(
+            replace(
+                self.config,
+                standard_uses_preflight=True,
+                standard_uses_validator=False,
+                standard_feedback_iterations=0,
+                deep_uses_preflight=False,
+                deep_uses_validator=True,
+                deep_feedback_iterations=1,
+                manuscript_uses_preflight=False,
+                manuscript_uses_validator=True,
+                manuscript_feedback_iterations=0,
+            ),
+            self.api,
+        )
+
+        def plan_for(request: str):
+            task = app.store.enqueue_task(123, request, source="test", ephemeral=False)
+            return app._workflow_plan(task, request)
+
+        standard = plan_for("Analyze the failure pattern and report the root cause.")
+        self.assertTrue(standard.uses_preflight)
+        self.assertFalse(standard.uses_validator)
+        deep = plan_for("Run a multi-agent high-assurance review of this migration.")
+        self.assertFalse(deep.uses_preflight)
+        self.assertEqual(deep.feedback_iterations, 1)
+        manuscript = plan_for("논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.")
+        self.assertFalse(manuscript.uses_preflight)
+        self.assertEqual(manuscript.feedback_iterations, 0)
 
     def test_deep_workflow_reworks_until_a_fresh_verifier_passes(self) -> None:
         app = AgentApp(replace(self.config, admin_full_access=True), self.api)

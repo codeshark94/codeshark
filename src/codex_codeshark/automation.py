@@ -99,6 +99,16 @@ class ModelRunSummary:
 
 
 @dataclass(frozen=True)
+class ModelRoleUsage:
+    role: str
+    model: str
+    reasoning_effort: str
+    runs: int
+    measured_runs: int
+    total_tokens: int
+
+
+@dataclass(frozen=True)
 class ModelRunLog:
     id: int
     phase: str
@@ -396,6 +406,7 @@ class AgentStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT,
                     phase TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'Unassigned',
                     model TEXT NOT NULL,
                     reasoning_effort TEXT NOT NULL,
                     started_at REAL NOT NULL,
@@ -474,6 +485,7 @@ class AgentStore:
                 for row in connection.execute("PRAGMA table_info(model_runs)").fetchall()
             }
             for name in (
+                "role",
                 "token_usage_recorded",
                 "input_tokens",
                 "cached_input_tokens",
@@ -483,9 +495,14 @@ class AgentStore:
                 "total_tokens",
             ):
                 if name not in model_run_columns:
-                    connection.execute(
-                        f"ALTER TABLE model_runs ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0"
-                    )
+                    if name == "role":
+                        connection.execute(
+                            "ALTER TABLE model_runs ADD COLUMN role TEXT NOT NULL DEFAULT 'Unassigned'"
+                        )
+                    else:
+                        connection.execute(
+                            f"ALTER TABLE model_runs ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0"
+                        )
             self._prune_tasks(connection)
             self._prune_schedules(connection)
             self._prune_deliveries(connection)
@@ -688,6 +705,7 @@ class AgentStore:
         *,
         task_id: str | None,
         phase: str,
+        role: str = "Unassigned",
         model: str,
         reasoning_effort: str,
         started_at: float,
@@ -707,15 +725,16 @@ class AgentStore:
             connection.execute(
                 """
                 INSERT INTO model_runs
-                    (task_id, phase, model, reasoning_effort, started_at, finished_at,
+                    (task_id, phase, role, model, reasoning_effort, started_at, finished_at,
                      elapsed_seconds, exit_code, cancelled, timed_out, token_usage_recorded,
                      input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens,
                      reasoning_output_tokens, total_tokens)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
                     phase,
+                    role,
                     model,
                     reasoning_effort,
                     started_at,
@@ -733,6 +752,32 @@ class AgentStore:
                     max(0, total_tokens),
                 ),
             )
+
+    def model_role_usage(self, *, since: float) -> list[ModelRoleUsage]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT role, model, reasoning_effort, COUNT(*) AS runs,
+                       SUM(token_usage_recorded) AS measured_runs,
+                       SUM(total_tokens) AS total_tokens
+                FROM model_runs
+                WHERE finished_at >= ?
+                GROUP BY role, model, reasoning_effort
+                ORDER BY role, model, reasoning_effort
+                """,
+                (since,),
+            ).fetchall()
+        return [
+            ModelRoleUsage(
+                role=row["role"],
+                model=row["model"],
+                reasoning_effort=row["reasoning_effort"],
+                runs=row["runs"],
+                measured_runs=row["measured_runs"],
+                total_tokens=row["total_tokens"],
+            )
+            for row in rows
+        ]
 
     def model_run_summaries(self, *, since: float | None = None) -> list[ModelRunSummary]:
         filters = ""

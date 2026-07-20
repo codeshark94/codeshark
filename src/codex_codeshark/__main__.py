@@ -11,6 +11,7 @@ from .config import (
     load_bot_token,
     load_config,
     set_model_assignments,
+    set_orchestration,
     set_workspace_directory,
     validate_codex_profile,
     validate_codex_version,
@@ -58,6 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--feedback-effort", required=True)
     models.add_argument("--preflight", required=True)
     models.add_argument("--preflight-effort", required=True)
+    orchestration = commands.add_parser(
+        "set-orchestration", help="set task-tier multi-agent orchestration"
+    )
+    for tier in ("standard", "deep", "manuscript"):
+        orchestration.add_argument(f"--{tier}-preflight", required=True, choices=("true", "false"))
+        orchestration.add_argument(f"--{tier}-validation", required=True, choices=("true", "false"))
+        orchestration.add_argument(f"--{tier}-feedback-loops", required=True, type=int)
     logs = commands.add_parser("logs", help="show sanitized background service logs")
     logs.add_argument("--lines", type=int, default=100)
     for name, help_text in (
@@ -149,6 +157,28 @@ def main() -> int:
                 f"rework={config.rework_model}, validator={config.validator_model}, "
                 f"feedback={config.feedback_model}, "
                 f"preflight={config.preflight_model}"
+            )
+            return 0
+        if args.command == "set-orchestration":
+            config = set_orchestration(
+                standard_uses_preflight=args.standard_preflight == "true",
+                standard_uses_validator=args.standard_validation == "true",
+                standard_feedback_iterations=args.standard_feedback_loops,
+                deep_uses_preflight=args.deep_preflight == "true",
+                deep_uses_validator=args.deep_validation == "true",
+                deep_feedback_iterations=args.deep_feedback_loops,
+                manuscript_uses_preflight=args.manuscript_preflight == "true",
+                manuscript_uses_validator=args.manuscript_validation == "true",
+                manuscript_feedback_iterations=args.manuscript_feedback_loops,
+            )
+            status = restart_service()
+            if not status.running:
+                raise ServiceError(status.detail or "service did not restart")
+            print(
+                "Orchestration: "
+                f"standard={int(config.standard_uses_preflight)}/{int(config.standard_uses_validator)}/{config.standard_feedback_iterations}; "
+                f"deep={int(config.deep_uses_preflight)}/{int(config.deep_uses_validator)}/{config.deep_feedback_iterations}; "
+                f"manuscript={int(config.manuscript_uses_preflight)}/{int(config.manuscript_uses_validator)}/{config.manuscript_feedback_iterations}"
             )
             return 0
         if args.command == "export-data":

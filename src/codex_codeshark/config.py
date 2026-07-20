@@ -61,6 +61,15 @@ class Config:
     feedback_reasoning_effort: str = "high"
     preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
+    standard_uses_preflight: bool = False
+    standard_uses_validator: bool = True
+    standard_feedback_iterations: int = 0
+    deep_uses_preflight: bool = True
+    deep_uses_validator: bool = True
+    deep_feedback_iterations: int = 2
+    manuscript_uses_preflight: bool = True
+    manuscript_uses_validator: bool = True
+    manuscript_feedback_iterations: int = 2
     poll_timeout_seconds: int = 30
     task_timeout_seconds: int = 1800
     queue_size: int = 20
@@ -157,6 +166,15 @@ def load_config(path: Path | None = None) -> Config:
     preflight_reasoning_effort = _require_reasoning_effort(
         data, "preflight_reasoning_effort", "low"
     )
+    standard_uses_preflight = _require_bool(data, "standard_uses_preflight", False)
+    standard_uses_validator = _require_bool(data, "standard_uses_validator", True)
+    standard_feedback_iterations = _require_int(data, "standard_feedback_iterations", 0)
+    deep_uses_preflight = _require_bool(data, "deep_uses_preflight", True)
+    deep_uses_validator = _require_bool(data, "deep_uses_validator", True)
+    deep_feedback_iterations = _require_int(data, "deep_feedback_iterations", 2)
+    manuscript_uses_preflight = _require_bool(data, "manuscript_uses_preflight", True)
+    manuscript_uses_validator = _require_bool(data, "manuscript_uses_validator", True)
+    manuscript_feedback_iterations = _require_int(data, "manuscript_feedback_iterations", 2)
     if not workdir.is_absolute() or not workdir.is_dir():
         raise ConfigError(f"workdir must be an existing absolute directory: {workdir}")
     if not codex_binary.is_absolute() or not codex_binary.is_file():
@@ -193,6 +211,15 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError("memory_max_chars must be between 1000 and 20000")
     if not 1_000_000 <= attachment_max_bytes <= 50_000_000:
         raise ConfigError("attachment_max_bytes must be between 1 MB and 50 MB")
+    for tier, uses_validator, feedback_iterations in (
+        ("standard", standard_uses_validator, standard_feedback_iterations),
+        ("deep", deep_uses_validator, deep_feedback_iterations),
+        ("manuscript", manuscript_uses_validator, manuscript_feedback_iterations),
+    ):
+        if not 0 <= feedback_iterations <= 5:
+            raise ConfigError(f"{tier}_feedback_iterations must be between 0 and 5")
+        if feedback_iterations and not uses_validator:
+            raise ConfigError(f"{tier} feedback requires {tier}_uses_validator = true")
 
     raw_read_only_roots = data.get("read_only_roots", [])
     if not isinstance(raw_read_only_roots, list) or len(raw_read_only_roots) > 20:
@@ -284,6 +311,15 @@ def load_config(path: Path | None = None) -> Config:
         feedback_reasoning_effort=feedback_reasoning_effort,
         preflight_model=preflight_model,
         preflight_reasoning_effort=preflight_reasoning_effort,
+        standard_uses_preflight=standard_uses_preflight,
+        standard_uses_validator=standard_uses_validator,
+        standard_feedback_iterations=standard_feedback_iterations,
+        deep_uses_preflight=deep_uses_preflight,
+        deep_uses_validator=deep_uses_validator,
+        deep_feedback_iterations=deep_feedback_iterations,
+        manuscript_uses_preflight=manuscript_uses_preflight,
+        manuscript_uses_validator=manuscript_uses_validator,
+        manuscript_feedback_iterations=manuscript_feedback_iterations,
         poll_timeout_seconds=poll_timeout,
         task_timeout_seconds=task_timeout,
         queue_size=queue_size,
@@ -389,6 +425,90 @@ def set_model_assignments(
             raise ConfigError(f"config must contain exactly one quoted {setting} setting")
         if replacements == 0:
             missing_settings.append(f"{setting} = {json.dumps(value)}")
+    if missing_settings:
+        first_table = re.search(r"(?m)^\[", updated)
+        if first_table is None:
+            updated = updated.rstrip() + "\n" + "\n".join(missing_settings) + "\n"
+        else:
+            updated = (
+                updated[: first_table.start()].rstrip()
+                + "\n"
+                + "\n".join(missing_settings)
+                + "\n\n"
+                + updated[first_table.start() :]
+            )
+    if updated == original:
+        return load_config(path)
+    atomic_write_text(path, updated)
+    try:
+        return load_config(path)
+    except ConfigError:
+        atomic_write_text(path, original)
+        raise
+
+
+def set_orchestration(
+    *,
+    standard_uses_preflight: bool,
+    standard_uses_validator: bool,
+    standard_feedback_iterations: int,
+    deep_uses_preflight: bool,
+    deep_uses_validator: bool,
+    deep_feedback_iterations: int,
+    manuscript_uses_preflight: bool,
+    manuscript_uses_validator: bool,
+    manuscript_feedback_iterations: int,
+    config_path: Path | None = None,
+) -> Config:
+    """Persist the task-tier orchestration without rewriting unrelated settings."""
+    assignments: dict[str, bool | int] = {
+        "standard_uses_preflight": standard_uses_preflight,
+        "standard_uses_validator": standard_uses_validator,
+        "standard_feedback_iterations": standard_feedback_iterations,
+        "deep_uses_preflight": deep_uses_preflight,
+        "deep_uses_validator": deep_uses_validator,
+        "deep_feedback_iterations": deep_feedback_iterations,
+        "manuscript_uses_preflight": manuscript_uses_preflight,
+        "manuscript_uses_validator": manuscript_uses_validator,
+        "manuscript_feedback_iterations": manuscript_feedback_iterations,
+    }
+    stage_values = [
+        value
+        for name, value in assignments.items()
+        if name.endswith("uses_preflight") or name.endswith("uses_validator")
+    ]
+    if any(not isinstance(value, bool) for value in stage_values):
+        raise ConfigError("orchestration stage settings must be true or false")
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 5
+        for name, value in assignments.items()
+        if name.endswith("feedback_iterations")
+    ):
+        raise ConfigError("orchestration feedback iterations must be between 0 and 5")
+    for tier in ("standard", "deep", "manuscript"):
+        if (
+            assignments[f"{tier}_feedback_iterations"]
+            and not assignments[f"{tier}_uses_validator"]
+        ):
+            raise ConfigError(f"{tier} feedback requires validation")
+    path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
+    try:
+        original = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"cannot read config: {exc}") from exc
+    updated = original
+    missing_settings: list[str] = []
+    for setting, value in assignments.items():
+        rendered = str(value).lower()
+        updated, replacements = re.subn(
+            rf"(?m)^{setting}\s*=\s*(?:true|false|\d+)\s*$",
+            f"{setting} = {rendered}",
+            updated,
+        )
+        if replacements > 1:
+            raise ConfigError(f"config must contain exactly one {setting} setting")
+        if replacements == 0:
+            missing_settings.append(f"{setting} = {rendered}")
     if missing_settings:
         first_table = re.search(r"(?m)^\[", updated)
         if first_table is None:
@@ -709,6 +829,15 @@ def write_local_config(
             'feedback_reasoning_effort = "high"',
             'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
+            "standard_uses_preflight = false",
+            "standard_uses_validator = true",
+            "standard_feedback_iterations = 0",
+            "deep_uses_preflight = true",
+            "deep_uses_validator = true",
+            "deep_feedback_iterations = 2",
+            "manuscript_uses_preflight = true",
+            "manuscript_uses_validator = true",
+            "manuscript_feedback_iterations = 2",
             "poll_timeout_seconds = 30",
             "task_timeout_seconds = 1800",
             "queue_size = 20",

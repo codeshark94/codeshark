@@ -143,6 +143,7 @@ class CodexRunner:
         timeout_seconds: int,
         model: str | None = None,
         model_reasoning_effort: str | None = None,
+        role: str = "Unassigned",
         additional_write_roots: tuple[Path, ...] = (),
         mcp_known_servers: tuple[str, ...] = (),
         mcp_allowed_tools: tuple[tuple[str, tuple[str, ...]], ...] = (),
@@ -156,6 +157,7 @@ class CodexRunner:
         self.timeout_seconds = timeout_seconds
         self.model = model
         self.model_reasoning_effort = model_reasoning_effort
+        self.role = role
         self.additional_write_roots = additional_write_roots
         self.mcp_known_servers = mcp_known_servers
         self.mcp_allowed_tools = dict(mcp_allowed_tools)
