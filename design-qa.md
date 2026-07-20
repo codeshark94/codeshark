@@ -31,6 +31,7 @@
 - Initial implementation: replaced the generic macOS panel with Telegram-style header, conversation bubbles, document cards, command palette, and composer; added the bundled mascot throughout.
 - Compactness correction: switched the local chat avatar from the monochrome menu-bar template to `assets/codeshark-mascot.png`; reduced the default panel to 680 × 620 pt, capped the conversation area at 360 pt, turned the empty state into a compact received bubble, and replaced the oversized editor with a one-to-two-line message field.
 - Composer correction: increased conversation, header, and input text; made the menu, attachment, input, and send controls a shared 46 pt centered row; removed the enclosing composer frame.
+- Palette correction: replaced the deep navy canvas and chrome with macOS system graphite colors; changed received bubbles to charcoal and retained blue only for accent and sent-message states.
 - Post-change verification: Swift typecheck, unit tests, doctor, and deployed menu restart passed. Screenshot capture was blocked by the UI automation boundary, so no visual pass was claimed.
 
 **Implementation checklist**

@@ -748,13 +748,13 @@ private struct LocalConsoleView: View {
     let revealArtifacts: ([String]) -> Void
     let revealWorkspace: () -> Void
 
-    private let canvas = Color(red: 0.024, green: 0.055, blue: 0.082)
-    private let chrome = Color(red: 0.045, green: 0.098, blue: 0.145)
-    private let incoming = Color(red: 0.094, green: 0.174, blue: 0.246)
-    private let outgoing = Color(red: 0.180, green: 0.385, blue: 0.640)
-    private let composer = Color(red: 0.040, green: 0.090, blue: 0.137)
-    private let accent = Color(red: 0.180, green: 0.650, blue: 1.000)
-    private let muted = Color(red: 0.660, green: 0.735, blue: 0.820)
+    private let canvas = Color(nsColor: .windowBackgroundColor)
+    private let chrome = Color(nsColor: .controlBackgroundColor)
+    private let incoming = Color(red: 0.175, green: 0.180, blue: 0.195)
+    private let outgoing = Color(red: 0.190, green: 0.405, blue: 0.640)
+    private let composer = Color(red: 0.130, green: 0.135, blue: 0.150)
+    private let accent = Color(nsColor: .systemBlue)
+    private let muted = Color(nsColor: .secondaryLabelColor)
     private let commands = [
         LocalConsoleCommand(command: "/help", description: "Show local console shortcuts"),
         LocalConsoleCommand(command: "/status", description: "Check task and session status"),
