@@ -285,6 +285,74 @@ def load_config(path: Path | None = None) -> Config:
     )
 
 
+def set_workspace_directory(directory: Path, *, config_path: Path | None = None) -> Config:
+    """Persist a validated workspace directory without rewriting unrelated settings."""
+    workspace = directory.expanduser().resolve()
+    if not workspace.is_dir():
+        raise ConfigError(f"workspace directory must exist: {workspace}")
+    path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
+    try:
+        original = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"cannot read config: {exc}") from exc
+    updated, replacements = re.subn(
+        r'(?m)^workdir\s*=\s*"(?:[^"\\\\]|\\\\.)*"\s*$',
+        f"workdir = {json.dumps(str(workspace))}",
+        original,
+    )
+    if replacements != 1:
+        raise ConfigError("config must contain exactly one quoted workdir setting")
+    if updated == original:
+        return load_config(path)
+    atomic_write_text(path, updated)
+    try:
+        return load_config(path)
+    except ConfigError:
+        atomic_write_text(path, original)
+        raise
+
+
+def set_model_assignments(
+    *,
+    routine_model: str,
+    primary_model: str,
+    validator_model: str,
+    preflight_model: str,
+    config_path: Path | None = None,
+) -> Config:
+    """Persist the role-specific model routing without rewriting unrelated settings."""
+    assignments = {
+        "routine_model": routine_model,
+        "primary_model": primary_model,
+        "validator_model": validator_model,
+        "preflight_model": preflight_model,
+    }
+    if any(not _MODEL_ID_PATTERN.fullmatch(model) for model in assignments.values()):
+        raise ConfigError("model assignments must be valid model identifiers")
+    path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
+    try:
+        original = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"cannot read config: {exc}") from exc
+    updated = original
+    for setting, model in assignments.items():
+        updated, replacements = re.subn(
+            rf'(?m)^{setting}\s*=\s*"(?:[^"\\\\]|\\\\.)*"\s*$',
+            f"{setting} = {json.dumps(model)}",
+            updated,
+        )
+        if replacements != 1:
+            raise ConfigError(f"config must contain exactly one quoted {setting} setting")
+    if updated == original:
+        return load_config(path)
+    atomic_write_text(path, updated)
+    try:
+        return load_config(path)
+    except ConfigError:
+        atomic_write_text(path, original)
+        raise
+
+
 def configured_mcp_servers(
     codex_profile: str,
     *,

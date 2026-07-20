@@ -14,6 +14,8 @@ from codex_codeshark.config import (
     load_config,
     prompt_and_store_bot_token,
     prepare_group_runtime,
+    set_model_assignments,
+    set_workspace_directory,
     validate_mcp_policy,
     write_codex_profile,
     write_local_config,
@@ -21,6 +23,76 @@ from codex_codeshark.config import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_sets_workspace_directory_without_rewriting_other_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            old_workspace = root / "old-workspace"
+            old_workspace.mkdir()
+            new_workspace = root / "new-workspace"
+            new_workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{old_workspace}"',
+                        f'codex_binary = "{binary}"',
+                        'primary_model = "gpt-5.6-sol"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            updated = set_workspace_directory(new_workspace, config_path=config_path)
+
+            self.assertEqual(updated.workdir, new_workspace.resolve())
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn(f'workdir = "{new_workspace.resolve()}"', text)
+            self.assertIn('primary_model = "gpt-5.6-sol"', text)
+
+    def test_sets_model_assignments_without_rewriting_other_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        'routine_model = "gpt-5.6-luna"',
+                        'primary_model = "gpt-5.6-sol"',
+                        'validator_model = "gpt-5.6-terra"',
+                        'preflight_model = "gpt-5.6-luna"',
+                        "worker_count = 8",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            updated = set_model_assignments(
+                routine_model="gpt-5.6-terra",
+                primary_model="gpt-5.6-sol",
+                validator_model="gpt-5.6-luna",
+                preflight_model="gpt-5.6-terra",
+                config_path=config_path,
+            )
+
+            self.assertEqual(updated.routine_model, "gpt-5.6-terra")
+            self.assertEqual(updated.primary_model, "gpt-5.6-sol")
+            self.assertEqual(updated.validator_model, "gpt-5.6-luna")
+            self.assertEqual(updated.preflight_model, "gpt-5.6-terra")
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn("worker_count = 8", text)
+
     def test_validates_bot_token_without_echoing_invalid_value(self) -> None:
         token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456"
         self.assertEqual(validate_bot_token(f"  {token}\n"), token)

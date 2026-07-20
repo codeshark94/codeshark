@@ -10,6 +10,8 @@ from .config import (
     PROJECT_ROOT,
     load_bot_token,
     load_config,
+    set_model_assignments,
+    set_workspace_directory,
     validate_codex_profile,
     validate_codex_version,
     validate_mcp_policy,
@@ -39,6 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("stop", help="stop the background service")
     commands.add_parser("restart", help="restart the background service")
     commands.add_parser("service-status", help="show the background service status")
+    workspace = commands.add_parser("set-workspace", help="set the Codeshark workspace directory")
+    workspace.add_argument("directory", type=Path)
+    models = commands.add_parser("set-models", help="set the role-specific Codeshark models")
+    models.add_argument("--routine", required=True)
+    models.add_argument("--primary", required=True)
+    models.add_argument("--validator", required=True)
+    models.add_argument("--preflight", required=True)
     logs = commands.add_parser("logs", help="show sanitized background service logs")
     logs.add_argument("--lines", type=int, default=100)
     for name, help_text in (
@@ -94,6 +103,29 @@ def main() -> int:
             return 0 if status.running or args.command == "stop" else 1
         if args.command == "logs":
             print(read_logs(args.lines))
+            return 0
+        if args.command == "set-workspace":
+            config = set_workspace_directory(args.directory)
+            status = restart_service()
+            if not status.running:
+                raise ServiceError(status.detail or "service did not restart")
+            print(f"Workspace: {config.workdir}")
+            return 0
+        if args.command == "set-models":
+            config = set_model_assignments(
+                routine_model=args.routine,
+                primary_model=args.primary,
+                validator_model=args.validator,
+                preflight_model=args.preflight,
+            )
+            status = restart_service()
+            if not status.running:
+                raise ServiceError(status.detail or "service did not restart")
+            print(
+                "Models: "
+                f"routine={config.routine_model}, primary={config.primary_model}, "
+                f"validator={config.validator_model}, preflight={config.preflight_model}"
+            )
             return 0
         if args.command == "export-data":
             result = export_personal_data(args.archive, replace=args.force)

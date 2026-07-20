@@ -227,10 +227,76 @@ private func timeAgoText(_ timestamp: Int) -> String {
     return "now"
 }
 
+struct ExecutionLogView: View {
+    @ObservedObject var model: DashboardModel
+    let revealLogFolder: () -> Void
+    let close: () -> Void
+
+    private var snapshot: DashboardSnapshot { model.snapshot }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Execution Log")
+                    .font(.headline)
+                Text("Recent model phases")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if snapshot.activityLog.isEmpty {
+                        Label("No execution phases recorded yet", systemImage: "text.alignleft")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(snapshot.activityLog) { entry in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: activityIcon(entry.outcome))
+                                    .font(.subheadline)
+                                    .foregroundStyle(activityColor(entry.outcome))
+                                    .padding(.top, 2)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("\(phaseTitle(entry.phase)) · \(compactModelName(entry.model))")
+                                        .font(.subheadline.weight(.medium))
+                                    Text("\(entry.outcome) · \(entry.reasoningEffort) · \(elapsedText(Int(entry.elapsedSeconds)))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(timeAgoText(entry.finishedAt))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Button("Reveal Files", action: revealLogFolder)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Close", action: close)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(16)
+        .frame(width: 380, height: 360)
+    }
+}
+
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
-    let openWorkspace: () -> Void
-    let openLogs: () -> Void
+    let chooseWorkspace: () -> Void
+    let configureModels: () -> Void
+    let showLogs: () -> Void
+    let close: () -> Void
     let quit: () -> Void
 
     private var snapshot: DashboardSnapshot { model.snapshot }
@@ -269,24 +335,17 @@ struct DashboardView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if !snapshot.workspacePath.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("WORKSPACE")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Label(workspaceDisplayPath(snapshot.workspacePath), systemImage: "folder")
-                                .font(.caption.monospaced())
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
                     if !snapshot.modelAssignments.isEmpty {
                         VStack(alignment: .leading, spacing: 7) {
-                            Text("MODEL ROUTING")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text("MODEL ROUTING")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Configure…", action: configureModels)
+                                    .buttonStyle(.borderless)
+                                    .font(.caption)
+                            }
                             ForEach(snapshot.modelAssignments) { assignment in
                                 HStack(spacing: 6) {
                                     Text(compactModelName(assignment.model))
@@ -332,39 +391,6 @@ struct DashboardView: View {
                         }
                     }
 
-                    if !snapshot.activityLog.isEmpty {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack {
-                                Text("EXECUTION LOG")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text("latest")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            ForEach(snapshot.activityLog) { entry in
-                                HStack(alignment: .top, spacing: 7) {
-                                    Image(systemName: activityIcon(entry.outcome))
-                                        .font(.caption)
-                                        .foregroundStyle(activityColor(entry.outcome))
-                                        .padding(.top, 1)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("\(phaseTitle(entry.phase)) · \(compactModelName(entry.model))")
-                                            .font(.caption.weight(.medium))
-                                        Text("\(entry.outcome) · \(entry.reasoningEffort) · \(elapsedText(Int(entry.elapsedSeconds)))")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(timeAgoText(entry.finishedAt))
-                                        .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                    }
-
                     if !snapshot.recentArtifacts.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("RECENT DELIVERY")
@@ -398,11 +424,13 @@ struct DashboardView: View {
             Divider()
 
             HStack(spacing: 8) {
-                Button("Workspace", action: openWorkspace)
+                Button("Workspace…", action: chooseWorkspace)
                     .buttonStyle(.bordered)
-                Button("Logs", action: openLogs)
+                Button("Logs", action: showLogs)
                     .buttonStyle(.bordered)
                 Spacer()
+                Button("Close", action: close)
+                    .buttonStyle(.bordered)
                 Button("Quit", role: .destructive, action: quit)
                     .buttonStyle(.bordered)
             }
@@ -418,6 +446,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: 32)
     private let popover = NSPopover()
     private let dashboard: DashboardModel
+    private var logPanel: NSPanel?
 
     init(projectRoot: String, iconPath: String) {
         self.projectRoot = projectRoot
@@ -432,8 +461,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(
             rootView: DashboardView(
                 model: dashboard,
-                openWorkspace: { [weak self] in self?.openWorkspace() },
-                openLogs: { [weak self] in self?.openLogs() },
+                chooseWorkspace: { [weak self] in self?.chooseWorkspace() },
+                configureModels: { [weak self] in self?.configureModels() },
+                showLogs: { [weak self] in self?.showLogs() },
+                close: { [weak self] in self?.closePopover() },
                 quit: { [weak self] in self?.quitCodeshark() }
             )
         )
@@ -474,12 +505,188 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func openWorkspace() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: projectRoot).appendingPathComponent("workspace"))
+    private func chooseWorkspace() {
+        dashboard.refresh()
+        let chooser = NSOpenPanel()
+        chooser.canChooseFiles = false
+        chooser.canChooseDirectories = true
+        chooser.allowsMultipleSelection = false
+        chooser.message = "Choose the folder Codeshark should use for new work."
+        if !dashboard.snapshot.workspacePath.isEmpty {
+            chooser.directoryURL = URL(fileURLWithPath: dashboard.snapshot.workspacePath)
+        }
+        guard chooser.runModal() == .OK, let directory = chooser.url else { return }
+
+        let confirmation = NSAlert()
+        confirmation.messageText = "Use this workspace?"
+        confirmation.informativeText = workspaceDisplayPath(directory.path)
+            + "\n\nCodeshark will restart to apply the change. Active work is safely returned to the queue."
+        confirmation.addButton(withTitle: "Set Workspace")
+        confirmation.addButton(withTitle: "Cancel")
+        guard confirmation.runModal() == .alertFirstButtonReturn else { return }
+
+        runServiceCommand(["set-workspace", directory.path])
     }
 
-    @objc private func openLogs() {
+    private func configureModels() {
+        dashboard.refresh()
+        let alert = NSAlert()
+        alert.messageText = "Model Routing"
+        alert.informativeText = "Choose the model assigned to each role. Codeshark restarts to apply the changes."
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+
+        let routine = modelPicker(currentModel(for: "Routine", fallback: "gpt-5.6-luna"))
+        let preflight = modelPicker(currentModel(for: "Preflight", fallback: "gpt-5.6-luna"))
+        let primary = modelPicker(currentModel(for: "Primary · Rework", fallback: "gpt-5.6-sol"))
+        let validator = modelPicker(currentModel(for: "Validation · Feedback", fallback: "gpt-5.6-terra"))
+        let form = NSStackView(views: [
+            modelRow("Routine", picker: routine),
+            modelRow("Preflight", picker: preflight),
+            modelRow("Primary / Rework", picker: primary),
+            modelRow("Validation / Feedback", picker: validator),
+        ])
+        form.orientation = .vertical
+        form.spacing = 8
+        form.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 0, right: 0)
+        alert.accessoryView = form
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        runServiceCommand([
+            "set-models",
+            "--routine", routine.titleOfSelectedItem ?? "gpt-5.6-luna",
+            "--preflight", preflight.titleOfSelectedItem ?? "gpt-5.6-luna",
+            "--primary", primary.titleOfSelectedItem ?? "gpt-5.6-sol",
+            "--validator", validator.titleOfSelectedItem ?? "gpt-5.6-terra",
+        ])
+    }
+
+    private func modelPicker(_ current: String) -> NSPopUpButton {
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 165, height: 26), pullsDown: false)
+        var models = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
+        if !models.contains(current) {
+            models.insert(current, at: 0)
+        }
+        picker.addItems(withTitles: models)
+        picker.selectItem(withTitle: current)
+        return picker
+    }
+
+    private func modelRow(_ title: String, picker: NSPopUpButton) -> NSStackView {
+        let label = NSTextField(labelWithString: title)
+        label.frame = NSRect(x: 0, y: 0, width: 130, height: 20)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        let row = NSStackView(views: [label, picker])
+        row.orientation = .horizontal
+        row.spacing = 10
+        return row
+    }
+
+    private func currentModel(for role: String, fallback: String) -> String {
+        dashboard.snapshot.modelAssignments.first(where: { $0.role == role })?.model ?? fallback
+    }
+
+    private func showLogs() {
+        dashboard.refresh()
+        if let panel = logPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 360),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Execution Log"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.contentViewController = NSHostingController(
+            rootView: ExecutionLogView(
+                model: dashboard,
+                revealLogFolder: { [weak self] in self?.revealLogFolder() },
+                close: { [weak self] in self?.logPanel?.close() }
+            )
+        )
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        logPanel = panel
+    }
+
+    private func revealLogFolder() {
         NSWorkspace.shared.open(URL(fileURLWithPath: projectRoot).appendingPathComponent("runtime"))
+    }
+
+    private func closePopover() {
+        popover.performClose(nil)
+    }
+
+    private func runServiceCommand(_ arguments: [String]) {
+        guard let python = servicePython() else {
+            showError("Could not find the Codeshark service Python runtime.")
+            return
+        }
+        let command = Process()
+        let output = Pipe()
+        command.executableURL = URL(fileURLWithPath: python)
+        command.arguments = ["-m", "codex_codeshark"] + arguments
+        command.environment = [
+            "PYTHONPATH": deployedSourceRoot(),
+            "CODEX_CODESHARK_HOME": projectRoot,
+            "TELEGRAM_CODEX_CONFIG": URL(fileURLWithPath: projectRoot)
+                .appendingPathComponent("config.local.toml").path,
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1",
+            "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+        ]
+        command.standardOutput = output
+        command.standardError = output
+        do {
+            try command.run()
+            command.waitUntilExit()
+        } catch {
+            showError("Could not apply the setting: \(error.localizedDescription)")
+            return
+        }
+        if command.terminationStatus != 0 {
+            let detail = String(
+                data: output.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? ""
+            showError(detail.isEmpty ? "Could not apply the setting." : detail)
+        }
+    }
+
+    private func deployedSourceRoot() -> String {
+        URL(fileURLWithPath: CommandLine.arguments[0])
+            .deletingLastPathComponent()
+            .appendingPathComponent("src")
+            .path
+    }
+
+    private func servicePython() -> String? {
+        let plist = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.codeshark.agent.plist")
+        guard let data = try? Data(contentsOf: plist),
+              let payload = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dictionary = payload as? [String: Any],
+              let arguments = dictionary["ProgramArguments"] as? [String],
+              let python = arguments.first,
+              FileManager.default.isExecutableFile(atPath: python)
+        else {
+            return nil
+        }
+        return python
+    }
+
+    private func showError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Codeshark"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     @objc private func quitCodeshark() {
