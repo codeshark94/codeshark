@@ -156,6 +156,7 @@ class ModelRoleUsage:
 @dataclass(frozen=True)
 class ModelRunLog:
     id: int
+    task_id: str | None
     phase: str
     model: str
     reasoning_effort: str
@@ -1069,7 +1070,7 @@ class AgentStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, phase, model, reasoning_effort, elapsed_seconds, exit_code,
+                SELECT id, task_id, phase, model, reasoning_effort, elapsed_seconds, exit_code,
                        cancelled, timed_out, finished_at
                 FROM model_runs
                 ORDER BY finished_at DESC
@@ -1080,6 +1081,7 @@ class AgentStore:
         return tuple(
             ModelRunLog(
                 id=row["id"],
+                task_id=row["task_id"],
                 phase=row["phase"],
                 model=row["model"],
                 reasoning_effort=row["reasoning_effort"],
@@ -1091,6 +1093,27 @@ class AgentStore:
             )
             for row in rows
         )
+
+    def task_execution_phases(self, task_ids: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+        """Return recorded execution phases in run order for dashboard task summaries."""
+        unique_task_ids = tuple(dict.fromkeys(task_id for task_id in task_ids if task_id))
+        if not unique_task_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in unique_task_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT task_id, phase
+                FROM model_runs
+                WHERE task_id IN ({placeholders})
+                ORDER BY finished_at, id
+                """,
+                unique_task_ids,
+            ).fetchall()
+        phases: dict[str, list[str]] = {task_id: [] for task_id in unique_task_ids}
+        for row in rows:
+            phases[row["task_id"]].append(row["phase"])
+        return {task_id: tuple(items) for task_id, items in phases.items()}
 
     def recent_artifact_names(self, *, limit: int = 3) -> tuple[str, ...]:
         with self._connect() as connection:

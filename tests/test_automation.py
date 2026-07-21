@@ -117,6 +117,27 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(role_usage[0].total_tokens, 160)
             self.assertEqual(role_usage[1].role, "Validation")
 
+    def test_task_execution_phases_preserves_run_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            for index, phase in enumerate(("preflight", "primary", "validator"), start=1):
+                store.record_model_run(
+                    task_id="task-1",
+                    phase=phase,
+                    model="gpt-5.6-sol",
+                    reasoning_effort="high",
+                    started_at=float(index),
+                    finished_at=float(index + 1),
+                    exit_code=0,
+                    cancelled=False,
+                    timed_out=False,
+                )
+
+            phases = store.task_execution_phases(("task-1", "missing", "task-1"))
+
+            self.assertEqual(phases["task-1"], ("preflight", "primary", "validator"))
+            self.assertEqual(phases["missing"], ())
+
     def test_summarizes_model_usage_by_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")

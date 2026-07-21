@@ -8,11 +8,17 @@ struct DashboardTask: Decodable, Identifiable {
     let model: String
     let reasoningEffort: String
     let elapsedSeconds: Int
+    let orchestrationTier: String?
+    let orchestrationRoute: [String]?
+    let completedStages: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, project, phase, model
         case reasoningEffort = "reasoning_effort"
         case elapsedSeconds = "elapsed_seconds"
+        case orchestrationTier = "orchestration_tier"
+        case orchestrationRoute = "orchestration_route"
+        case completedStages = "completed_stages"
     }
 }
 
@@ -47,6 +53,9 @@ struct DashboardDelivery: Decodable, Identifiable {
     let artifacts: [String]
     let artifactPaths: [String]
     let updatedAt: Int
+    let orchestrationTier: String?
+    let orchestrationRoute: [String]?
+    let completedStages: [String]?
 
     var id: String { taskID }
 
@@ -56,6 +65,9 @@ struct DashboardDelivery: Decodable, Identifiable {
         case deliveryState = "delivery_state"
         case artifactPaths = "artifact_paths"
         case updatedAt = "updated_at"
+        case orchestrationTier = "orchestration_tier"
+        case orchestrationRoute = "orchestration_route"
+        case completedStages = "completed_stages"
     }
 }
 
@@ -295,6 +307,8 @@ struct DashboardOrchestration: Decodable {
 
 struct DashboardActivityLog: Decodable, Identifiable {
     let id: String
+    let project: String?
+    let orchestrationTier: String?
     let phase: String
     let model: String
     let reasoningEffort: String
@@ -303,7 +317,8 @@ struct DashboardActivityLog: Decodable, Identifiable {
     let finishedAt: Int
 
     enum CodingKeys: String, CodingKey {
-        case id, phase, model, outcome
+        case id, project, phase, model, outcome
+        case orchestrationTier = "orchestration_tier"
         case reasoningEffort = "reasoning_effort"
         case elapsedSeconds = "elapsed_seconds"
         case finishedAt = "finished_at"
@@ -1160,7 +1175,68 @@ private func workspaceDisplayPath(_ path: String) -> String {
 }
 
 private func phaseTitle(_ phase: String) -> String {
-    phase.replacingOccurrences(of: "-", with: " ").localizedCapitalized
+    let labels = [
+        "triage": "Task triage",
+        "project-triage": "Project selection",
+        "preflight": "Plan",
+        "research": "Research",
+        "primary": "Primary",
+        "validator": "Independent review",
+        "feedback-verifier": "Feedback check",
+        "rework": "Rework",
+        "reconciliation": "Synthesis",
+        "finalization": "Finalize",
+        "validation-recovery": "Validation recovery",
+        "feedback-recovery": "Feedback recovery",
+        "feedback-exhausted": "Review limit reached",
+    ]
+    return labels[phase] ?? phase.replacingOccurrences(of: "-", with: " ").localizedCapitalized
+}
+
+private func orchestrationTierTitle(_ tier: String?) -> String {
+    switch tier?.replacingOccurrences(of: "-", with: "_") {
+    case "quick":
+        return "Quick"
+    case "routine":
+        return "Routine"
+    case "standard":
+        return "Standard"
+    case "deep":
+        return "Deep"
+    case "high_assurance":
+        return "High assurance"
+    default:
+        return "Classifying"
+    }
+}
+
+private func orchestrationRouteText(_ route: [String]?) -> String {
+    guard let route, !route.isEmpty else { return "Awaiting task triage" }
+    return route.joined(separator: " → ")
+}
+
+private func completedStagesText(_ stages: [String]?) -> String? {
+    guard let stages, !stages.isEmpty else { return nil }
+    var result: [String] = []
+    var prior: String?
+    var repeatCount = 0
+    for stage in stages {
+        let title = phaseTitle(stage)
+        if title == prior {
+            repeatCount += 1
+            continue
+        }
+        if let prior, repeatCount > 1 {
+            result[result.count - 1] = "\(prior) ×\(repeatCount)"
+        }
+        result.append(title)
+        prior = title
+        repeatCount = 1
+    }
+    if let prior, repeatCount > 1 {
+        result[result.count - 1] = "\(prior) ×\(repeatCount)"
+    }
+    return result.joined(separator: " → ")
 }
 
 private func activityIcon(_ outcome: String) -> String {
@@ -1229,9 +1305,9 @@ struct ExecutionLogView: View {
                                     .foregroundStyle(activityColor(entry.outcome))
                                     .padding(.top, 2)
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("\(phaseTitle(entry.phase)) · \(compactModelName(entry.model))")
+                                    Text("\(orchestrationTierTitle(entry.orchestrationTier)) · \(phaseTitle(entry.phase))")
                                         .font(.subheadline.weight(.medium))
-                                    Text("\(entry.outcome) · \(entry.reasoningEffort) · \(elapsedText(Int(entry.elapsedSeconds)))")
+                                    Text("\(entry.project ?? "General") · \(compactModelName(entry.model)) · \(entry.outcome) · \(entry.reasoningEffort) · \(elapsedText(Int(entry.elapsedSeconds)))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -1326,7 +1402,17 @@ struct TaskQueueView: View {
                                         .font(.caption.monospacedDigit())
                                         .foregroundStyle(.secondary)
                                 }
-                                Text("\(task.phase) · \(compactModelName(task.model)) · \(task.reasoningEffort)")
+                                Text("\(orchestrationTierTitle(task.orchestrationTier)) · \(orchestrationRouteText(task.orchestrationRoute))")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                if let completed = completedStagesText(task.completedStages) {
+                                    Text("Completed: \(completed)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                                Text("Now: \(task.phase) · \(compactModelName(task.model)) · \(task.reasoningEffort)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -1450,6 +1536,16 @@ struct DeliveryCenterView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
+                                Text("\(orchestrationTierTitle(delivery.orchestrationTier)) · \(orchestrationRouteText(delivery.orchestrationRoute))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                if let completed = completedStagesText(delivery.completedStages) {
+                                    Text("Completed: \(completed)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
                                 Text("\(delivery.phase) · \(timeAgoText(delivery.updatedAt))")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)

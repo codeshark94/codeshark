@@ -533,6 +533,23 @@ class AgentApp:
             recent_manifests = self.store.recent_task_manifests(limit=8)
             failed_deliveries = self.store.list_failed_deliveries(limit=8)
             enabled_groups = self.store.list_groups()
+            activity_log = self.store.recent_model_runs(limit=20)
+            manifests_by_task_id = {
+                manifest.task_id: manifest for manifest in recent_manifests
+            }
+            for active in active_tasks:
+                if active.task.id not in manifests_by_task_id:
+                    manifest = self.store.get_task_manifest(active.task.id)
+                    if manifest is not None:
+                        manifests_by_task_id[manifest.task_id] = manifest
+            for run in activity_log:
+                if run.task_id and run.task_id not in manifests_by_task_id:
+                    manifest = self.store.get_task_manifest(run.task_id)
+                    if manifest is not None:
+                        manifests_by_task_id[manifest.task_id] = manifest
+            phase_history = self.store.task_execution_phases(
+                tuple(manifests_by_task_id)
+            )
             projects: dict[str, dict[str, object]] = {}
 
             def project_summary(project: str) -> dict[str, object]:
@@ -594,6 +611,46 @@ class AgentApp:
             }
             profiles = orchestration_profiles(self.config)
 
+            def orchestration_route(tier: str) -> list[str]:
+                profile = profiles.get(tier.replace("-", "_"))
+                if profile is None:
+                    return ["Primary"]
+                stages: list[str] = []
+                if profile.uses_preflight:
+                    stages.append("Plan")
+                if profile.uses_research:
+                    stages.append("Research")
+                stages.append("Primary")
+                if profile.uses_validator:
+                    stages.append("Independent review")
+                if profile.feedback_iterations:
+                    stages.append(f"Rework ×{profile.feedback_iterations}")
+                    stages.append(f"Feedback check ×{profile.feedback_iterations}")
+                if profile.uses_finalizer:
+                    stages.append("Finalize")
+                elif profile.uses_validator:
+                    stages.append("Synthesis")
+                return stages
+
+            def task_orchestration(task_id: str) -> dict[str, object]:
+                manifest = manifests_by_task_id.get(task_id)
+                if manifest is None:
+                    return {
+                        "orchestration_tier": None,
+                        "orchestration_route": [],
+                        "completed_stages": [],
+                    }
+                return {
+                    "orchestration_tier": manifest.tier,
+                    "orchestration_route": orchestration_route(manifest.tier),
+                    "completed_stages": list(phase_history.get(task_id, ())),
+                }
+
+            for item in active_summary:
+                item.update(task_orchestration(str(item["id"])))
+            for item in delivery_summary:
+                item.update(task_orchestration(str(item["task_id"])))
+
             def assignment(
                 role: str,
                 model: str,
@@ -610,7 +667,6 @@ class AgentApp:
                     "recent_measured_turns": usage.measured_runs if usage else 0,
                     "recent_runs": usage.runs if usage else 0,
                 }
-            activity_log = self.store.recent_model_runs(limit=20)
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
                 json.dumps(
@@ -835,6 +891,16 @@ class AgentApp:
                         "activity_log": [
                             {
                                 "id": str(run.id),
+                                "project": (
+                                    manifests_by_task_id[run.task_id].project
+                                    if run.task_id in manifests_by_task_id
+                                    else None
+                                ),
+                                "orchestration_tier": (
+                                    manifests_by_task_id[run.task_id].tier
+                                    if run.task_id in manifests_by_task_id
+                                    else None
+                                ),
                                 "phase": run.phase,
                                 "model": run.model,
                                 "reasoning_effort": run.reasoning_effort,

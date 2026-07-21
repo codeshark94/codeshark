@@ -757,11 +757,18 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(payload["orchestration"]["high_assurance"]["uses_research"])
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
+        self.assertEqual(payload["active_tasks"][0]["orchestration_tier"], "standard")
+        self.assertEqual(
+            payload["active_tasks"][0]["orchestration_route"],
+            ["Primary", "Independent review", "Finalize"],
+        )
+        self.assertEqual(payload["active_tasks"][0]["completed_stages"], ["primary"])
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
         self.assertEqual(payload["queued_tasks"][0]["project"], "Queued Project")
         self.assertEqual(payload["recent_deliveries"][0]["project"], "Private Project")
         self.assertEqual(payload["recent_deliveries"][0]["artifacts"], ["final-report.pdf"])
         self.assertEqual(payload["recent_deliveries"][0]["artifact_paths"], ["/safe/root/final-report.pdf"])
+        self.assertEqual(payload["recent_deliveries"][0]["orchestration_tier"], "standard")
         self.assertEqual(payload["projects"][0]["project"], "Private Project")
         self.assertEqual(payload["projects"][0]["active_task_count"], 1)
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
@@ -774,6 +781,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["project_usage_5h"][0]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["project_usage_7d"][0]["project"], "Private Project")
         self.assertEqual(payload["activity_log"][0]["phase"], "primary")
+        self.assertEqual(payload["activity_log"][0]["orchestration_tier"], "standard")
         self.assertEqual(payload["activity_log"][0]["outcome"], "completed")
         self.assertNotIn("secret request text", json.dumps(payload))
         self.assertNotIn("queued secret request", json.dumps(payload))
