@@ -20,33 +20,38 @@ research_reasoning_effort = "medium"
 finalizer_model = "gpt-5.6-sol"
 finalizer_reasoning_effort = "medium"
 
-# Five general orchestration tiers. Planning/research/finalization and feedback
-# loops require independent validation in the same tier.
+# Five general orchestration tiers. Planning, research, rework loops, and
+# finalization require independent review; adversarial review requires a rework loop.
 quick_uses_preflight = false
 quick_uses_research = false
 quick_uses_validator = false
 quick_feedback_iterations = 0
 quick_uses_finalizer = false
+quick_uses_adversarial_review = false
 routine_uses_preflight = false
 routine_uses_research = false
 routine_uses_validator = false
 routine_feedback_iterations = 0
 routine_uses_finalizer = false
+routine_uses_adversarial_review = false
 standard_uses_preflight = false
 standard_uses_research = false
 standard_uses_validator = true
 standard_feedback_iterations = 0
 standard_uses_finalizer = true
+standard_uses_adversarial_review = false
 deep_uses_preflight = true
 deep_uses_research = false
 deep_uses_validator = true
 deep_feedback_iterations = 1
 deep_uses_finalizer = true
+deep_uses_adversarial_review = true
 high_assurance_uses_preflight = true
 high_assurance_uses_research = true
 high_assurance_uses_validator = true
 high_assurance_feedback_iterations = 2
 high_assurance_uses_finalizer = true
+high_assurance_uses_adversarial_review = true
 poll_timeout_seconds = 30
 # 0 disables the per-phase task timeout. `/cancel` remains available.
 task_timeout_seconds = 0

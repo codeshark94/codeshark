@@ -205,6 +205,7 @@ struct DashboardOrchestrationTier: Decodable {
     let usesValidator: Bool
     let feedbackIterations: Int
     let usesFinalizer: Bool
+    let usesAdversarialReview: Bool
 
     enum CodingKeys: String, CodingKey {
         case usesPreflight = "uses_preflight"
@@ -212,6 +213,7 @@ struct DashboardOrchestrationTier: Decodable {
         case usesValidator = "uses_validator"
         case feedbackIterations = "feedback_iterations"
         case usesFinalizer = "uses_finalizer"
+        case usesAdversarialReview = "uses_adversarial_review"
     }
 
     init(
@@ -219,13 +221,15 @@ struct DashboardOrchestrationTier: Decodable {
         usesResearch: Bool = false,
         usesValidator: Bool = false,
         feedbackIterations: Int = 0,
-        usesFinalizer: Bool = false
+        usesFinalizer: Bool = false,
+        usesAdversarialReview: Bool = false
     ) {
         self.usesPreflight = usesPreflight
         self.usesResearch = usesResearch
         self.usesValidator = usesValidator
         self.feedbackIterations = feedbackIterations
         self.usesFinalizer = usesFinalizer
+        self.usesAdversarialReview = usesAdversarialReview
     }
 
     init(from decoder: Decoder) throws {
@@ -235,6 +239,7 @@ struct DashboardOrchestrationTier: Decodable {
         usesValidator = try container.decodeIfPresent(Bool.self, forKey: .usesValidator) ?? false
         feedbackIterations = try container.decodeIfPresent(Int.self, forKey: .feedbackIterations) ?? 0
         usesFinalizer = try container.decodeIfPresent(Bool.self, forKey: .usesFinalizer) ?? false
+        usesAdversarialReview = try container.decodeIfPresent(Bool.self, forKey: .usesAdversarialReview) ?? false
     }
 }
 
@@ -262,14 +267,16 @@ struct DashboardOrchestration: Decodable {
             usesPreflight: true,
             usesValidator: true,
             feedbackIterations: 1,
-            usesFinalizer: true
+            usesFinalizer: true,
+            usesAdversarialReview: true
         ),
         highAssurance: DashboardOrchestrationTier = DashboardOrchestrationTier(
             usesPreflight: true,
             usesResearch: true,
             usesValidator: true,
             feedbackIterations: 2,
-            usesFinalizer: true
+            usesFinalizer: true,
+            usesAdversarialReview: true
         )
     ) {
         self.quick = quick
@@ -292,7 +299,8 @@ struct DashboardOrchestration: Decodable {
                 usesPreflight: true,
                 usesValidator: true,
                 feedbackIterations: 1,
-                usesFinalizer: true
+                usesFinalizer: true,
+                usesAdversarialReview: true
             )
         highAssurance = try container.decodeIfPresent(DashboardOrchestrationTier.self, forKey: .highAssurance)
             ?? DashboardOrchestrationTier(
@@ -300,7 +308,8 @@ struct DashboardOrchestration: Decodable {
                 usesResearch: true,
                 usesValidator: true,
                 feedbackIterations: 2,
-                usesFinalizer: true
+                usesFinalizer: true,
+                usesAdversarialReview: true
             )
     }
 }
@@ -1182,13 +1191,13 @@ private func phaseTitle(_ phase: String) -> String {
         "research": "Research",
         "primary": "Primary",
         "validator": "Independent review",
-        "feedback-verifier": "Feedback check",
+        "feedback-verifier": "Adversarial review",
         "rework": "Rework",
         "reconciliation": "Synthesis",
         "finalization": "Finalize",
         "validation-recovery": "Validation recovery",
-        "feedback-recovery": "Feedback recovery",
-        "feedback-exhausted": "Review limit reached",
+        "feedback-recovery": "Adversarial review recovery",
+        "feedback-exhausted": "Adversarial review limit reached",
     ]
     return labels[phase] ?? phase.replacingOccurrences(of: "-", with: " ").localizedCapitalized
 }
@@ -2252,6 +2261,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var orchestrationResearch: [String: NSButton] = [:]
     private var orchestrationValidation: [String: NSButton] = [:]
     private var orchestrationFeedback: [String: NSPopUpButton] = [:]
+    private var orchestrationAdversarial: [String: NSButton] = [:]
     private var orchestrationFinalization: [String: NSButton] = [:]
     private var modelOptions: [CodexModelOption] = []
 
@@ -2475,7 +2485,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             : workspaceDisplayPath(dashboard.snapshot.workspacePath)
         row("Workspace…", workspace, #selector(openSettingsWorkspace), y: 258)
         row("Model Routing…", "Assign models and reasoning effort to every orchestration role.", #selector(openSettingsModels), y: 204)
-        row("Orchestration…", "Choose the supporting stages and feedback loops for each task tier.", #selector(openSettingsOrchestration), y: 150)
+        row("Orchestration…", "Configure planner, research, review, rework, adversarial review, and finalization per tier.", #selector(openSettingsOrchestration), y: 150)
         row("Security…", "Set administrator, connector, network, and group-sandbox permissions.", #selector(openSettingsSecurity), y: 96)
 
         let separator = NSBox(frame: NSRect(x: 18, y: 44, width: 484, height: 1))
@@ -2799,7 +2809,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             ("Primary", "Primary", "gpt-5.6-sol", "high"),
             ("Rework", "Rework", "gpt-5.6-sol", "high"),
             ("Independent Review", "Validation", "gpt-5.6-terra", "high"),
-            ("Adversarial Review", "Feedback", "gpt-5.6-terra", "high"),
+            ("Adversarial Review", "Adversarial Review", "gpt-5.6-terra", "high"),
             ("Finalization", "Finalization", "gpt-5.6-sol", "medium"),
         ]
         modelOptions = availableModelOptions()
@@ -2937,9 +2947,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let validatorPicker = modelPickers["Validation"],
               let validator = selectedModel(validatorPicker),
               let validatorEffort = reasoningPickers["Validation"]?.titleOfSelectedItem,
-              let feedbackPicker = modelPickers["Feedback"],
+              let feedbackPicker = modelPickers["Adversarial Review"],
               let feedback = selectedModel(feedbackPicker),
-              let feedbackEffort = reasoningPickers["Feedback"]?.titleOfSelectedItem,
+              let feedbackEffort = reasoningPickers["Adversarial Review"]?.titleOfSelectedItem,
               let finalizerPicker = modelPickers["Finalization"],
               let finalizer = selectedModel(finalizerPicker),
               let finalizerEffort = reasoningPickers["Finalization"]?.titleOfSelectedItem
@@ -2977,7 +2987,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 330),
+            contentRect: NSRect(x: 0, y: 0, width: 880, height: 350),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2990,27 +3000,28 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Orchestration")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 294, width: 728, height: 20)
+        title.frame = NSRect(x: 16, y: 314, width: 848, height: 20)
         content.addSubview(title)
         let detail = NSTextField(
-            wrappingLabelWithString: "Quick: one pass. Routine: scoped checks. Review begins at Standard. Settings restart after active work finishes."
+            wrappingLabelWithString: "Adversarial review rechecks each rework loop. Planning, research, rework, and finalization require independent review. Settings restart after active work finishes."
         )
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 263, width: 728, height: 16)
+        detail.frame = NSRect(x: 16, y: 282, width: 848, height: 28)
         content.addSubview(detail)
 
         for (title, x, width) in [
-            ("PLANNER", 170, 90),
+            ("PLANNER", 175, 90),
             ("RESEARCH", 285, 90),
-            ("INDEPENDENT REVIEW", 375, 160),
-            ("REWORK LOOPS", 545, 110),
-            ("FINALIZER", 675, 90),
+            ("INDEPENDENT REVIEW", 375, 140),
+            ("REWORK LOOPS", 530, 110),
+            ("ADVERSARIAL REVIEW", 645, 130),
+            ("FINALIZER", 790, 74),
         ] {
             let header = NSTextField(labelWithString: title)
             header.font = .systemFont(ofSize: 10, weight: .semibold)
             header.textColor = .secondaryLabelColor
-            header.frame = NSRect(x: CGFloat(x), y: 235, width: CGFloat(width), height: 14)
+            header.frame = NSRect(x: CGFloat(x), y: 250, width: CGFloat(width), height: 14)
             content.addSubview(header)
         }
 
@@ -3025,35 +3036,39 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         orchestrationResearch = [:]
         orchestrationValidation = [:]
         orchestrationFeedback = [:]
+        orchestrationAdversarial = [:]
         orchestrationFinalization = [:]
         for (index, tier) in tiers.enumerated() {
-            let y = 195 - (index * 30)
+            let y = 210 - (index * 30)
             let values = orchestrationValues(for: tier.0)
             let label = NSTextField(labelWithString: tier.1)
             label.font = .systemFont(ofSize: 12, weight: .medium)
-            label.frame = NSRect(x: 16, y: y + 4, width: 135, height: 18)
+            label.frame = NSRect(x: 16, y: y + 4, width: 145, height: 18)
             content.addSubview(label)
-            let preflight = checkbox(checked: values.usesPreflight, frame: NSRect(x: 200, y: y + 2, width: 20, height: 20))
+            let preflight = checkbox(checked: values.usesPreflight, frame: NSRect(x: 205, y: y + 2, width: 20, height: 20))
             let research = checkbox(checked: values.usesResearch, frame: NSRect(x: 315, y: y + 2, width: 20, height: 20))
-            let validation = checkbox(checked: values.usesValidator, frame: NSRect(x: 445, y: y + 2, width: 20, height: 20))
-            let feedback = NSPopUpButton(frame: NSRect(x: 560, y: y, width: 70, height: 25), pullsDown: false)
+            let validation = checkbox(checked: values.usesValidator, frame: NSRect(x: 440, y: y + 2, width: 20, height: 20))
+            let feedback = NSPopUpButton(frame: NSRect(x: 545, y: y, width: 70, height: 25), pullsDown: false)
             feedback.font = .systemFont(ofSize: 12)
             feedback.addItems(withTitles: ["0", "1", "2", "3", "4", "5"])
             feedback.selectItem(withTitle: String(values.feedbackIterations))
-            let finalization = checkbox(checked: values.usesFinalizer, frame: NSRect(x: 705, y: y + 2, width: 20, height: 20))
+            let adversarial = checkbox(checked: values.usesAdversarialReview, frame: NSRect(x: 690, y: y + 2, width: 20, height: 20))
+            let finalization = checkbox(checked: values.usesFinalizer, frame: NSRect(x: 815, y: y + 2, width: 20, height: 20))
             content.addSubview(preflight)
             content.addSubview(research)
             content.addSubview(validation)
             content.addSubview(feedback)
+            content.addSubview(adversarial)
             content.addSubview(finalization)
             orchestrationPreflight[tier.0] = preflight
             orchestrationResearch[tier.0] = research
             orchestrationValidation[tier.0] = validation
             orchestrationFeedback[tier.0] = feedback
+            orchestrationAdversarial[tier.0] = adversarial
             orchestrationFinalization[tier.0] = finalization
         }
 
-        let separator = NSBox(frame: NSRect(x: 16, y: 42, width: 728, height: 1))
+        let separator = NSBox(frame: NSRect(x: 16, y: 42, width: 848, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
         let close = NSButton(title: "Close", target: self, action: #selector(closeOrchestration))
@@ -3063,7 +3078,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyOrchestration))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 660, y: 9, width: 84, height: 26)
+        apply.frame = NSRect(x: 780, y: 9, width: 84, height: 26)
         content.addSubview(apply)
         panel.contentView = content
         panel.center()
@@ -3086,7 +3101,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 usesPreflight: true,
                 usesValidator: true,
                 feedbackIterations: 1,
-                usesFinalizer: true
+                usesFinalizer: true,
+                usesAdversarialReview: true
             )
         default:
             return configured?.highAssurance ?? DashboardOrchestrationTier(
@@ -3094,7 +3110,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 usesResearch: true,
                 usesValidator: true,
                 feedbackIterations: 2,
-                usesFinalizer: true
+                usesFinalizer: true,
+                usesAdversarialReview: true
             )
         }
     }
@@ -3119,13 +3136,18 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                   let validation = orchestrationValidation[tier],
                   let feedback = orchestrationFeedback[tier]?.titleOfSelectedItem,
                   let loops = Int(feedback),
+                  let adversarial = orchestrationAdversarial[tier],
                   let finalization = orchestrationFinalization[tier]
             else {
                 showError("Could not read the orchestration settings.")
                 return
             }
             if loops > 0 && validation.state != .on {
-                showError("\(tier.capitalized) feedback loops require validation.")
+                showError("\(tier.capitalized) rework loops require independent review.")
+                return
+            }
+            if adversarial.state == .on && loops == 0 {
+                showError("\(tier.capitalized) adversarial review requires at least one rework loop.")
                 return
             }
             if (preflight.state == .on || research.state == .on) && validation.state != .on {
@@ -3142,6 +3164,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 "--\(option)-research", research.state == .on ? "true" : "false",
                 "--\(option)-validation", validation.state == .on ? "true" : "false",
                 "--\(option)-feedback-loops", String(loops),
+                "--\(option)-adversarial-review", adversarial.state == .on ? "true" : "false",
                 "--\(option)-finalization", finalization.state == .on ? "true" : "false",
             ]
         }
@@ -3365,6 +3388,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             orchestrationResearch = [:]
             orchestrationValidation = [:]
             orchestrationFeedback = [:]
+            orchestrationAdversarial = [:]
             orchestrationFinalization = [:]
         } else if window == securityPanel {
             securityPanel = nil

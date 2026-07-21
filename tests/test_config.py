@@ -269,18 +269,20 @@ class ConfigTests(unittest.TestCase):
                     "quick": OrchestrationProfile(False, False, False, 0, False),
                     "routine": OrchestrationProfile(False, False, False, 0, False),
                     "standard": OrchestrationProfile(True, False, True, 1, True),
-                    "deep": OrchestrationProfile(True, False, True, 3, True),
-                    "high_assurance": OrchestrationProfile(True, True, True, 2, True),
+                    "deep": OrchestrationProfile(True, False, True, 3, True, True),
+                    "high_assurance": OrchestrationProfile(True, True, True, 2, True, True),
                 },
                 config_path=config_path,
             )
 
             self.assertTrue(updated.standard_uses_preflight)
             self.assertEqual(updated.deep_feedback_iterations, 3)
+            self.assertTrue(updated.deep_uses_adversarial_review)
             self.assertTrue(updated.high_assurance_uses_research)
             text = config_path.read_text(encoding="utf-8")
             self.assertIn('primary_model = "gpt-5.6-sol"', text)
             self.assertIn("standard_feedback_iterations = 1", text)
+            self.assertIn("deep_uses_adversarial_review = true", text)
             self.assertIn("high_assurance_uses_research = true", text)
 
     def test_validates_bot_token_without_echoing_invalid_value(self) -> None:

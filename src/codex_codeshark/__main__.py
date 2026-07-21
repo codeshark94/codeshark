@@ -97,6 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
         orchestration.add_argument(f"--{option}-research", required=True, choices=("true", "false"))
         orchestration.add_argument(f"--{option}-validation", required=True, choices=("true", "false"))
         orchestration.add_argument(f"--{option}-feedback-loops", required=True, type=int)
+        orchestration.add_argument(
+            f"--{option}-adversarial-review", required=True, choices=("true", "false")
+        )
         orchestration.add_argument(f"--{option}-finalization", required=True, choices=("true", "false"))
     logs = commands.add_parser("logs", help="show sanitized background service logs")
     logs.add_argument("--lines", type=int, default=100)
@@ -292,6 +295,7 @@ def main() -> int:
                         getattr(args, f"{tier}_validation") == "true",
                         getattr(args, f"{tier}_feedback_loops"),
                         getattr(args, f"{tier}_finalization") == "true",
+                        getattr(args, f"{tier}_adversarial_review") == "true",
                     )
                     for tier in ORCHESTRATION_TIERS
                 }

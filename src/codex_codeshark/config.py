@@ -57,6 +57,7 @@ class OrchestrationProfile:
     uses_validator: bool
     feedback_iterations: int
     uses_finalizer: bool
+    uses_adversarial_review: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,26 +87,31 @@ class Config:
     quick_uses_validator: bool = False
     quick_feedback_iterations: int = 0
     quick_uses_finalizer: bool = False
+    quick_uses_adversarial_review: bool = False
     routine_uses_preflight: bool = False
     routine_uses_research: bool = False
     routine_uses_validator: bool = False
     routine_feedback_iterations: int = 0
     routine_uses_finalizer: bool = False
+    routine_uses_adversarial_review: bool = False
     standard_uses_preflight: bool = False
     standard_uses_research: bool = False
     standard_uses_validator: bool = True
     standard_feedback_iterations: int = 0
     standard_uses_finalizer: bool = True
+    standard_uses_adversarial_review: bool = False
     deep_uses_preflight: bool = True
     deep_uses_research: bool = False
     deep_uses_validator: bool = True
     deep_feedback_iterations: int = 1
     deep_uses_finalizer: bool = True
+    deep_uses_adversarial_review: bool = True
     high_assurance_uses_preflight: bool = True
     high_assurance_uses_research: bool = True
     high_assurance_uses_validator: bool = True
     high_assurance_feedback_iterations: int = 2
     high_assurance_uses_finalizer: bool = True
+    high_assurance_uses_adversarial_review: bool = True
     poll_timeout_seconds: int = 30
     task_timeout_seconds: int = 0
     queue_size: int = 20
@@ -164,8 +170,8 @@ _DEFAULT_ORCHESTRATION_PROFILES = {
     "quick": OrchestrationProfile(False, False, False, 0, False),
     "routine": OrchestrationProfile(False, False, False, 0, False),
     "standard": OrchestrationProfile(False, False, True, 0, True),
-    "deep": OrchestrationProfile(True, False, True, 1, True),
-    "high_assurance": OrchestrationProfile(True, True, True, 2, True),
+    "deep": OrchestrationProfile(True, False, True, 1, True, True),
+    "high_assurance": OrchestrationProfile(True, True, True, 2, True, True),
 }
 
 
@@ -192,17 +198,26 @@ def _load_orchestration_profile(
     validator = value("uses_validator", default.uses_validator)
     feedback = value("feedback_iterations", default.feedback_iterations)
     finalizer = value("uses_finalizer", default.uses_finalizer)
+    adversarial = value("uses_adversarial_review", default.uses_adversarial_review)
     for name, setting in (
         ("uses_preflight", preflight),
         ("uses_research", research),
         ("uses_validator", validator),
         ("uses_finalizer", finalizer),
+        ("uses_adversarial_review", adversarial),
     ):
         if not isinstance(setting, bool):
             raise ConfigError(f"{tier}_{name} must be true or false")
     if not isinstance(feedback, int) or isinstance(feedback, bool):
         raise ConfigError(f"{tier}_feedback_iterations must be an integer")
-    return OrchestrationProfile(preflight, research, validator, feedback, finalizer)
+    return OrchestrationProfile(
+        preflight,
+        research,
+        validator,
+        feedback,
+        finalizer,
+        adversarial,
+    )
 
 
 def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
@@ -213,6 +228,7 @@ def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
             config.quick_uses_validator,
             config.quick_feedback_iterations,
             config.quick_uses_finalizer,
+            config.quick_uses_adversarial_review,
         ),
         "routine": OrchestrationProfile(
             config.routine_uses_preflight,
@@ -220,6 +236,7 @@ def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
             config.routine_uses_validator,
             config.routine_feedback_iterations,
             config.routine_uses_finalizer,
+            config.routine_uses_adversarial_review,
         ),
         "standard": OrchestrationProfile(
             config.standard_uses_preflight,
@@ -227,6 +244,7 @@ def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
             config.standard_uses_validator,
             config.standard_feedback_iterations,
             config.standard_uses_finalizer,
+            config.standard_uses_adversarial_review,
         ),
         "deep": OrchestrationProfile(
             config.deep_uses_preflight,
@@ -234,6 +252,7 @@ def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
             config.deep_uses_validator,
             config.deep_feedback_iterations,
             config.deep_uses_finalizer,
+            config.deep_uses_adversarial_review,
         ),
         "high_assurance": OrchestrationProfile(
             config.high_assurance_uses_preflight,
@@ -241,6 +260,7 @@ def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
             config.high_assurance_uses_validator,
             config.high_assurance_feedback_iterations,
             config.high_assurance_uses_finalizer,
+            config.high_assurance_uses_adversarial_review,
         ),
     }
 
@@ -357,6 +377,10 @@ def load_config(path: Path | None = None) -> Config:
             raise ConfigError(f"{tier}_feedback_iterations must be between 0 and 5")
         if profile.feedback_iterations and not profile.uses_validator:
             raise ConfigError(f"{tier} feedback requires {tier}_uses_validator = true")
+        if profile.uses_adversarial_review and not profile.feedback_iterations:
+            raise ConfigError(
+                f"{tier}_uses_adversarial_review requires {tier}_feedback_iterations > 0"
+            )
         if (profile.uses_preflight or profile.uses_research) and not profile.uses_validator:
             raise ConfigError(f"{tier} planning and research require {tier}_uses_validator = true")
         if profile.uses_finalizer and not profile.uses_validator:
@@ -461,26 +485,33 @@ def load_config(path: Path | None = None) -> Config:
         quick_uses_validator=profiles["quick"].uses_validator,
         quick_feedback_iterations=profiles["quick"].feedback_iterations,
         quick_uses_finalizer=profiles["quick"].uses_finalizer,
+        quick_uses_adversarial_review=profiles["quick"].uses_adversarial_review,
         routine_uses_preflight=profiles["routine"].uses_preflight,
         routine_uses_research=profiles["routine"].uses_research,
         routine_uses_validator=profiles["routine"].uses_validator,
         routine_feedback_iterations=profiles["routine"].feedback_iterations,
         routine_uses_finalizer=profiles["routine"].uses_finalizer,
+        routine_uses_adversarial_review=profiles["routine"].uses_adversarial_review,
         standard_uses_preflight=profiles["standard"].uses_preflight,
         standard_uses_research=profiles["standard"].uses_research,
         standard_uses_validator=profiles["standard"].uses_validator,
         standard_feedback_iterations=profiles["standard"].feedback_iterations,
         standard_uses_finalizer=profiles["standard"].uses_finalizer,
+        standard_uses_adversarial_review=profiles["standard"].uses_adversarial_review,
         deep_uses_preflight=profiles["deep"].uses_preflight,
         deep_uses_research=profiles["deep"].uses_research,
         deep_uses_validator=profiles["deep"].uses_validator,
         deep_feedback_iterations=profiles["deep"].feedback_iterations,
         deep_uses_finalizer=profiles["deep"].uses_finalizer,
+        deep_uses_adversarial_review=profiles["deep"].uses_adversarial_review,
         high_assurance_uses_preflight=profiles["high_assurance"].uses_preflight,
         high_assurance_uses_research=profiles["high_assurance"].uses_research,
         high_assurance_uses_validator=profiles["high_assurance"].uses_validator,
         high_assurance_feedback_iterations=profiles["high_assurance"].feedback_iterations,
         high_assurance_uses_finalizer=profiles["high_assurance"].uses_finalizer,
+        high_assurance_uses_adversarial_review=(
+            profiles["high_assurance"].uses_adversarial_review
+        ),
         poll_timeout_seconds=poll_timeout,
         task_timeout_seconds=task_timeout,
         queue_size=queue_size,
@@ -729,10 +760,24 @@ def set_orchestration(
             for tier, profile in profiles.items()
         }
     )
+    assignments.update(
+        {
+            f"{tier}_uses_adversarial_review": profile.uses_adversarial_review
+            for tier, profile in profiles.items()
+        }
+    )
     stage_values = [
         value
         for name, value in assignments.items()
-        if name.endswith(("uses_preflight", "uses_research", "uses_validator", "uses_finalizer"))
+        if name.endswith(
+            (
+                "uses_preflight",
+                "uses_research",
+                "uses_validator",
+                "uses_finalizer",
+                "uses_adversarial_review",
+            )
+        )
     ]
     if any(not isinstance(value, bool) for value in stage_values):
         raise ConfigError("orchestration stage settings must be true or false")
@@ -748,6 +793,8 @@ def set_orchestration(
             and not profile.uses_validator
         ):
             raise ConfigError(f"{tier} feedback requires validation")
+        if profile.uses_adversarial_review and not profile.feedback_iterations:
+            raise ConfigError(f"{tier} adversarial review requires at least one rework loop")
         if (profile.uses_preflight or profile.uses_research) and not profile.uses_validator:
             raise ConfigError(f"{tier} planning and research require validation")
         if profile.uses_finalizer and not profile.uses_validator:
@@ -1104,26 +1151,31 @@ def write_local_config(
             "quick_uses_validator = false",
             "quick_feedback_iterations = 0",
             "quick_uses_finalizer = false",
+            "quick_uses_adversarial_review = false",
             "routine_uses_preflight = false",
             "routine_uses_research = false",
             "routine_uses_validator = false",
             "routine_feedback_iterations = 0",
             "routine_uses_finalizer = false",
+            "routine_uses_adversarial_review = false",
             "standard_uses_preflight = false",
             "standard_uses_research = false",
             "standard_uses_validator = true",
             "standard_feedback_iterations = 0",
             "standard_uses_finalizer = true",
+            "standard_uses_adversarial_review = false",
             "deep_uses_preflight = true",
             "deep_uses_research = false",
             "deep_uses_validator = true",
             "deep_feedback_iterations = 1",
             "deep_uses_finalizer = true",
+            "deep_uses_adversarial_review = true",
             "high_assurance_uses_preflight = true",
             "high_assurance_uses_research = true",
             "high_assurance_uses_validator = true",
             "high_assurance_feedback_iterations = 2",
             "high_assurance_uses_finalizer = true",
+            "high_assurance_uses_adversarial_review = true",
             "poll_timeout_seconds = 30",
             "task_timeout_seconds = 0",
             "queue_size = 20",

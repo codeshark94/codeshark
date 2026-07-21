@@ -245,6 +245,7 @@ class WorkflowPlan:
     uses_research: bool = False
     feedback_iterations: int = 0
     uses_finalizer: bool = False
+    uses_adversarial_review: bool = False
 
 
 def split_message(text: str, limit: int = 3900) -> list[str]:
@@ -625,7 +626,8 @@ class AgentApp:
                     stages.append("Independent review")
                 if profile.feedback_iterations:
                     stages.append(f"Rework ×{profile.feedback_iterations}")
-                    stages.append(f"Feedback check ×{profile.feedback_iterations}")
+                    if profile.uses_adversarial_review:
+                        stages.append(f"Adversarial review ×{profile.feedback_iterations}")
                 if profile.uses_finalizer:
                     stages.append("Finalize")
                 elif profile.uses_validator:
@@ -727,9 +729,10 @@ class AgentApp:
                                 self.config.validator_reasoning_effort,
                             ),
                             assignment(
-                                "Feedback",
+                                "Adversarial Review",
                                 self.config.feedback_model,
                                 self.config.feedback_reasoning_effort,
+                                usage_role="Feedback",
                             ),
                             assignment(
                                 "Finalization",
@@ -744,6 +747,7 @@ class AgentApp:
                                 "uses_validator": profile.uses_validator,
                                 "feedback_iterations": profile.feedback_iterations,
                                 "uses_finalizer": profile.uses_finalizer,
+                                "uses_adversarial_review": profile.uses_adversarial_review,
                             }
                             for tier, profile in profiles.items()
                         },
@@ -2481,6 +2485,7 @@ class AgentApp:
             uses_research=profile.uses_research,
             feedback_iterations=profile.feedback_iterations,
             uses_finalizer=profile.uses_finalizer,
+            uses_adversarial_review=profile.uses_adversarial_review,
         )
 
     def _workflow_plan(
@@ -2844,12 +2849,27 @@ class AgentApp:
             )
 
         if plan.feedback_iterations:
-            return self._run_feedback_loop(
+            if plan.uses_adversarial_review:
+                return self._run_feedback_loop(
+                    runner,
+                    rework_runner,
+                    feedback_runner,
+                    finalizer_runner,
+                    request=request,
+                    primary_thread_id=primary_result.thread_id,
+                    initial_findings=validator_result.message,
+                    iterations=plan.feedback_iterations,
+                    approved=approved,
+                    full_access=full_access,
+                    file_delivery_enabled=file_delivery_enabled,
+                    automatic_file_delivery=automatic_file_delivery,
+                    task_id=task_id,
+                    use_finalizer=plan.uses_finalizer,
+                )
+            return self._run_rework_cycles(
                 runner,
                 rework_runner,
-                feedback_runner,
                 finalizer_runner,
-                request=request,
                 primary_thread_id=primary_result.thread_id,
                 initial_findings=validator_result.message,
                 iterations=plan.feedback_iterations,
@@ -2960,6 +2980,54 @@ class AgentApp:
                 return None, failed_sessions, candidate
             failed_sessions += 1
         return None, failed_sessions, None
+
+    def _run_rework_cycles(
+        self,
+        primary_runner: CodexRunner,
+        rework_runner: CodexRunner,
+        finalizer_runner: CodexRunner,
+        *,
+        primary_thread_id: str,
+        initial_findings: str,
+        iterations: int,
+        approved: bool,
+        full_access: bool,
+        file_delivery_enabled: bool,
+        automatic_file_delivery: bool,
+        task_id: str,
+        use_finalizer: bool,
+    ) -> RunResult:
+        """Apply configured rework rounds when adversarial rechecks are disabled."""
+        findings = initial_findings
+        for _ in range(iterations):
+            rework_result = self._run_model_phase(
+                task_id=task_id,
+                phase="rework",
+                runner=rework_runner,
+                prompt=self._cross_reconciliation_prompt(findings, final=False),
+                thread_id=primary_thread_id,
+                ephemeral=False,
+                restricted=False,
+                approved=approved,
+                full_access=full_access,
+            )
+            if not self._run_succeeded(rework_result):
+                return rework_result
+            findings = rework_result.message
+        final_prompt = self._cross_reconciliation_prompt(findings)
+        if file_delivery_enabled:
+            final_prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
+        return self._run_model_phase(
+            task_id=task_id,
+            phase="finalization" if use_finalizer else "reconciliation",
+            runner=finalizer_runner if use_finalizer else primary_runner,
+            prompt=final_prompt,
+            thread_id=primary_thread_id,
+            ephemeral=False,
+            restricted=False,
+            approved=approved,
+            full_access=full_access,
+        )
 
     def _run_feedback_loop(
         self,

@@ -748,13 +748,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["model_assignments"][3]["recent_total_tokens"], 0)
         self.assertEqual(payload["model_assignments"][4]["role"], "Rework")
         self.assertEqual(payload["model_assignments"][5]["role"], "Validation")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Feedback")
+        self.assertEqual(payload["model_assignments"][6]["role"], "Adversarial Review")
         self.assertEqual(payload["model_assignments"][7]["role"], "Finalization")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
         )
         self.assertTrue(payload["orchestration"]["high_assurance"]["uses_research"])
+        self.assertTrue(payload["orchestration"]["high_assurance"]["uses_adversarial_review"])
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
         self.assertEqual(payload["active_tasks"][0]["orchestration_tier"], "standard")
@@ -1824,12 +1825,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(deep.tier, "deep")
         self.assertTrue(deep.uses_preflight)
         self.assertEqual(deep.feedback_iterations, 1)
+        self.assertTrue(deep.uses_adversarial_review)
         manuscript = plan_for(
             "논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.", "high_assurance"
         )
         self.assertEqual(manuscript.tier, "high-assurance")
         self.assertTrue(manuscript.uses_preflight)
         self.assertEqual(manuscript.feedback_iterations, 2)
+        self.assertTrue(manuscript.uses_adversarial_review)
 
     def test_invalid_triage_response_falls_back_to_standard(self) -> None:
         task = self.app.store.enqueue_task(123, "ambiguous request", source="test", ephemeral=False)
@@ -1852,6 +1855,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 deep_uses_validator=True,
                 deep_feedback_iterations=1,
                 deep_uses_finalizer=True,
+                deep_uses_adversarial_review=False,
                 high_assurance_uses_preflight=False,
                 high_assurance_uses_research=False,
                 high_assurance_uses_validator=True,
@@ -1879,6 +1883,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertFalse(deep.uses_preflight)
         self.assertTrue(deep.uses_research)
         self.assertEqual(deep.feedback_iterations, 1)
+        self.assertFalse(deep.uses_adversarial_review)
         manuscript = plan_for(
             "논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.", "high_assurance"
         )
@@ -1956,6 +1961,37 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(finalizer.prompts), 1)
         self.assertIn("finalization phase", finalizer.prompts[0][0])
         self.assertEqual(self.api.messages, [(123, "Verified migration is complete.")])
+
+    def test_rework_cycles_can_skip_adversarial_review(self) -> None:
+        primary = FakeCodexRunner()
+        rework = FakeCodexRunner(
+            RunResult(0, "First corrected handoff.", "primary-thread", "")
+        )
+        rework.results.append(RunResult(0, "Second corrected handoff.", "primary-thread", ""))
+        finalizer = FakeCodexRunner(
+            RunResult(0, "Final corrected result.", "primary-thread", "")
+        )
+
+        result = self.app._run_rework_cycles(
+            primary,
+            rework,
+            finalizer,
+            primary_thread_id="primary-thread",
+            initial_findings="VERDICT: REWORK\nCorrect the result.",
+            iterations=2,
+            approved=False,
+            full_access=False,
+            file_delivery_enabled=False,
+            automatic_file_delivery=False,
+            task_id="task-without-adversarial-review",
+            use_finalizer=True,
+        )
+
+        self.assertEqual(result.message, "Final corrected result.")
+        self.assertEqual(len(rework.prompts), 2)
+        self.assertEqual(len(finalizer.prompts), 1)
+        phases = self.app.store.task_execution_phases(("task-without-adversarial-review",))
+        self.assertEqual(phases["task-without-adversarial-review"], ("rework", "rework", "finalization"))
 
     def test_cross_validation_applies_to_substantive_read_only_analysis(self) -> None:
         runner = FakeCodexRunner(
