@@ -160,6 +160,28 @@ class ServiceTests(unittest.TestCase):
 
         self.assertFalse(install_mock.call_args.kwargs["install_menu"])
 
+    @patch("codex_codeshark.service.time.sleep")
+    @patch("codex_codeshark.service.install_service")
+    @patch("codex_codeshark.service.service_status")
+    def test_restart_deploys_from_the_live_checkout_not_the_running_copy(
+        self,
+        status_mock: Mock,
+        install_mock: Mock,
+        _sleep_mock: Mock,
+    ) -> None:
+        status_mock.return_value = ServiceStatus(True, "running", 456)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "src" / "codex_codeshark"
+            package.mkdir(parents=True)
+            plist = root / "LaunchAgents" / "agent.plist"
+            plist.parent.mkdir()
+            plist.write_text("placeholder", encoding="utf-8")
+
+            restart_service(project_root=root, plist_path=plist)
+
+        self.assertEqual(install_mock.call_args.kwargs["source_root"], root / "src")
+
     def test_deferred_restart_waits_for_the_active_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

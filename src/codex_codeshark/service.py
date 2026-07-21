@@ -190,6 +190,15 @@ def _source_digest(source_root: Path, config_data: bytes) -> str:
     return digest.hexdigest()
 
 
+def _checkout_source_root(project_root: Path, fallback: Path) -> Path:
+    """Deploy the checkout after a deferred restart, not an older installed copy."""
+    candidate = project_root / "src"
+    package = candidate / "codex_codeshark"
+    if package.is_dir() and not package.is_symlink():
+        return candidate
+    return fallback
+
+
 def _deploy_source(
     *,
     source_root: Path,
@@ -399,7 +408,7 @@ def refresh_menu_bar(
     _harden_runtime(runtime)
     ensure_private_directory(plist_path.parent)
     installed_source, _ = _deploy_source(
-        source_root=source_root,
+        source_root=_checkout_source_root(project_root, source_root),
         config_path=config_path,
         install_root=install_root,
     )
@@ -462,6 +471,7 @@ def start_service(
         plist_path=plist_path,
         python=python,
         install_root=install_root,
+        source_root=_checkout_source_root(project_root, SOURCE_ROOT),
     )
     return _wait_for_status(running=True)
 
@@ -494,6 +504,7 @@ def restart_service(
         plist_path=plist_path,
         python=python,
         install_root=install_root,
+        source_root=_checkout_source_root(project_root, SOURCE_ROOT),
         install_menu=refresh_menu or not _menu_plist_path(plist_path).is_file(),
     )
     return _wait_for_status(running=True)

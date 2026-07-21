@@ -2700,8 +2700,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             showError("Could not read the security settings.")
             return
         }
-        backFromSecurity()
-        runServiceCommand([
+        let arguments = [
             "set-security",
             "--network", network.state == .on ? "true" : "false",
             "--admin-full-access", fullAccess.state == .on ? "true" : "false",
@@ -2711,7 +2710,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--group-member-requests-enabled", groupRequests.state == .on ? "true" : "false",
             "--group-network-access", groupNetwork.state == .on ? "true" : "false",
             "--group-workspace-write", groupWrite.state == .on ? "true" : "false",
-        ])
+        ]
+        if runServiceCommand(arguments) {
+            backFromSecurity()
+        }
     }
 
     private func showLocalConsole() {
@@ -2793,7 +2795,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
 
-        runServiceCommand(["set-workspace", directory.path])
+        _ = runServiceCommand(["set-workspace", directory.path])
         showSettings()
     }
 
@@ -2995,8 +2997,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             showError("Could not read the selected model routing.")
             return
         }
-        backFromModelRouting()
-        runServiceCommand([
+        let arguments = [
             "set-models",
             "--routine", routine,
             "--routine-effort", routineEffort,
@@ -3014,7 +3015,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--feedback-effort", feedbackEffort,
             "--finalizer", finalizer,
             "--finalizer-effort", finalizerEffort,
-        ])
+        ]
+        if runServiceCommand(arguments) {
+            backFromModelRouting()
+        }
     }
 
     private func configureOrchestration() {
@@ -3207,8 +3211,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 "--\(option)-finalization", finalization.state == .on ? "true" : "false",
             ]
         }
-        backFromOrchestration()
-        runServiceCommand(arguments)
+        if runServiceCommand(arguments) {
+            backFromOrchestration()
+        }
     }
 
     private func showUsage() {
@@ -3515,11 +3520,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         return (status: command.terminationStatus, output: detail)
     }
 
-    private func runServiceCommand(_ arguments: [String]) {
+    @discardableResult
+    private func runServiceCommand(_ arguments: [String]) -> Bool {
         let result = executeServiceCommand(arguments)
         if result.status != 0 {
             showError(result.output.isEmpty ? "Could not apply the setting." : result.output)
+            return false
         }
+        return true
     }
 
     private func deployedSourceRoot() -> String {
