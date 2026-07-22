@@ -2550,7 +2550,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             groups: []
         )
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 860, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 620),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2563,25 +2563,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Security Settings")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 678, width: 820, height: 21)
+        title.frame = NSRect(x: 20, y: 578, width: 820, height: 21)
         content.addSubview(title)
         let detail = NSTextField(wrappingLabelWithString: "Changes save now and apply after active work finishes. Administrator and group-member permissions are intentionally separate.")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 644, width: 820, height: 28)
+        detail.frame = NSRect(x: 20, y: 544, width: 820, height: 28)
         content.addSubview(detail)
 
-        let execution = NSTextField(labelWithString: "ADMINISTRATOR · PRIVATE CHAT AND ENABLED GROUPS")
+        let execution = NSTextField(labelWithString: "ADMINISTRATOR ACCESS")
         execution.font = .systemFont(ofSize: 10, weight: .semibold)
         execution.textColor = .secondaryLabelColor
-        execution.frame = NSRect(x: 20, y: 612, width: 390, height: 14)
+        execution.frame = NSRect(x: 20, y: 510, width: 390, height: 14)
         content.addSubview(execution)
-        let sandbox = NSTextField(labelWithString: "Default sandbox · \(security.sandbox)")
-        sandbox.font = .systemFont(ofSize: 11)
-        sandbox.textColor = .secondaryLabelColor
-        sandbox.alignment = .right
-        sandbox.frame = NSRect(x: 560, y: 611, width: 280, height: 16)
-        content.addSubview(sandbox)
+        let executionScope = NSTextField(labelWithString: "Private chat and enabled groups")
+        executionScope.font = .systemFont(ofSize: 10)
+        executionScope.textColor = .secondaryLabelColor
+        executionScope.frame = NSRect(x: 20, y: 490, width: 390, height: 14)
+        content.addSubview(executionScope)
 
         func toggle(_ title: String, checked: Bool, x: CGFloat, y: CGFloat) -> NSButton {
             let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
@@ -2591,32 +2590,37 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             content.addSubview(button)
             return button
         }
-        let network = toggle("Allow network access", checked: security.networkAccess, x: 20, y: 582)
-        let fullAccess = toggle("Allow unrestricted filesystem access", checked: security.adminFullAccess, x: 20, y: 558)
-        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, x: 20, y: 534)
-        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, x: 20, y: 510)
-        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, x: 20, y: 486)
+        let network = toggle("Allow network access", checked: security.networkAccess, x: 20, y: 456)
+        let fullAccess = toggle("Allow unrestricted filesystem access", checked: security.adminFullAccess, x: 20, y: 432)
+        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, x: 20, y: 408)
+        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, x: 20, y: 384)
+        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, x: 20, y: 360)
         securityNetworkAccess = network
         securityAdminFullAccess = fullAccess
         securityAdminAutoApprove = autoApprove
         securityAdminMcp = mcp
         securityAdminDelegatedWrite = delegatedWrite
 
-        let groups = NSTextField(labelWithString: "NON-ADMIN GROUP MEMBERS · ENABLED GROUPS ONLY")
+        let groups = NSTextField(labelWithString: "NON-ADMIN GROUP ACCESS")
         groups.font = .systemFont(ofSize: 10, weight: .semibold)
         groups.textColor = .secondaryLabelColor
-        groups.frame = NSRect(x: 440, y: 612, width: 400, height: 14)
+        groups.frame = NSRect(x: 440, y: 510, width: 400, height: 14)
         content.addSubview(groups)
-        let groupAutoEnable = toggle("Auto-enable when the paired administrator addresses Codeshark", checked: security.groupAutoEnableOnAdminAddress, x: 440, y: 582)
-        let groupRequests = toggle("Accept non-admin member requests", checked: security.groupMemberRequestsEnabled, x: 440, y: 558)
-        let groupAutoRegister = toggle("Auto-register members after their first accepted request", checked: security.groupAutoRegisterMembers, x: 440, y: 534)
-        let groupRegisteredOnly = toggle("Require registered members", checked: security.groupRequireRegisteredMembers, x: 440, y: 510)
+        let groupScope = NSTextField(labelWithString: "Enabled groups only · isolated \(security.sandbox) sandbox")
+        groupScope.font = .systemFont(ofSize: 10)
+        groupScope.textColor = .secondaryLabelColor
+        groupScope.frame = NSRect(x: 440, y: 490, width: 400, height: 14)
+        content.addSubview(groupScope)
+        let groupAutoEnable = toggle("Auto-enable when the paired administrator addresses Codeshark", checked: security.groupAutoEnableOnAdminAddress, x: 440, y: 456)
+        let groupRequests = toggle("Accept non-admin member requests", checked: security.groupMemberRequestsEnabled, x: 440, y: 432)
+        let groupAutoRegister = toggle("Auto-register members after their first accepted request", checked: security.groupAutoRegisterMembers, x: 440, y: 408)
+        let groupRegisteredOnly = toggle("Require registered members", checked: security.groupRequireRegisteredMembers, x: 440, y: 384)
         groupRegisteredOnly.toolTip = "When automatic registration is off, use /register_member USER_ID or reply to a member with that command."
-        let groupMentions = toggle("Reply to direct mentions", checked: security.groupRespondToMentions, x: 440, y: 486)
-        let groupBotReplies = toggle("Reply to direct replies to Codeshark", checked: security.groupRespondToBotReplies, x: 440, y: 462)
-        let groupAddressedThreads = toggle("Reply within addressed Codeshark threads", checked: security.groupRespondToAddressedThreads, x: 440, y: 438)
-        let groupNetwork = toggle("Allow ordinary network research", checked: security.groupNetworkAccess, x: 440, y: 414)
-        let groupWrite = toggle("Allow writes in the isolated group sandbox", checked: security.groupWorkspaceWrite, x: 440, y: 390)
+        let groupMentions = toggle("Reply to direct mentions", checked: security.groupRespondToMentions, x: 440, y: 360)
+        let groupBotReplies = toggle("Reply to direct replies to Codeshark", checked: security.groupRespondToBotReplies, x: 440, y: 336)
+        let groupAddressedThreads = toggle("Reply within addressed Codeshark threads", checked: security.groupRespondToAddressedThreads, x: 440, y: 312)
+        let groupNetwork = toggle("Allow ordinary network research", checked: security.groupNetworkAccess, x: 440, y: 288)
+        let groupWrite = toggle("Allow writes in the isolated group sandbox", checked: security.groupWorkspaceWrite, x: 440, y: 264)
         securityGroupAutoEnable = groupAutoEnable
         securityGroupMemberRequests = groupRequests
         securityGroupAutoRegister = groupAutoRegister
@@ -2630,14 +2634,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let enabledGroupTitle = NSTextField(labelWithString: "ENABLED GROUPS (\(security.groups.count))")
         enabledGroupTitle.font = .systemFont(ofSize: 10, weight: .semibold)
         enabledGroupTitle.textColor = .secondaryLabelColor
-        enabledGroupTitle.frame = NSRect(x: 20, y: 422, width: 200, height: 14)
+        enabledGroupTitle.frame = NSRect(x: 20, y: 318, width: 200, height: 14)
         content.addSubview(enabledGroupTitle)
-        let groupList = NSScrollView(frame: NSRect(x: 20, y: 266, width: 820, height: 144))
+        let groupList = NSScrollView(frame: NSRect(x: 20, y: 230, width: 400, height: 76))
         groupList.borderType = .bezelBorder
         groupList.hasVerticalScroller = true
         groupList.autohidesScrollers = true
         groupList.drawsBackground = false
-        let groupText = NSTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 144))
+        let groupText = NSTextView(frame: NSRect(x: 0, y: 0, width: 380, height: 76))
         groupText.isEditable = false
         groupText.isSelectable = true
         groupText.drawsBackground = false
@@ -2648,25 +2652,25 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "\($0.title)\n  Chat ID \($0.chatID) · \($0.memberCount ?? 0) registered · enabled \(timeAgoText($0.enabledAt))"
         }
         groupText.string = groupRows.isEmpty ? "No groups are enabled. An administrator can enable a group with /enable_group." : groupRows.joined(separator: "\n\n")
-        groupText.frame.size.height = max(144, CGFloat(groupRows.count) * 44 + 14)
+        groupText.frame.size.height = max(76, CGFloat(groupRows.count) * 44 + 14)
         groupList.documentView = groupText
         content.addSubview(groupList)
 
         let fixed = NSTextField(labelWithString: "FIXED NON-ADMIN BOUNDARIES")
         fixed.font = .systemFont(ofSize: 10, weight: .semibold)
         fixed.textColor = .secondaryLabelColor
-        fixed.frame = NSRect(x: 20, y: 236, width: 240, height: 14)
+        fixed.frame = NSRect(x: 20, y: 190, width: 240, height: 14)
         content.addSubview(fixed)
         let groupPolicy = NSTextField(wrappingLabelWithString: "Only enabled direct-address rules can start a request. Members never access administrator memory, credentials, configured project roots, full filesystem access, or MCP connectors.")
         groupPolicy.font = .systemFont(ofSize: 11)
         groupPolicy.textColor = .secondaryLabelColor
-        groupPolicy.frame = NSRect(x: 20, y: 194, width: 820, height: 30)
+        groupPolicy.frame = NSRect(x: 20, y: 148, width: 820, height: 30)
         content.addSubview(groupPolicy)
 
         let local = NSTextField(wrappingLabelWithString: "Blocked for members: dependency or plugin installation, deployment or production control, destructive actions, and external state-changing actions.")
         local.font = .systemFont(ofSize: 11)
         local.textColor = .secondaryLabelColor
-        local.frame = NSRect(x: 20, y: 158, width: 820, height: 24)
+        local.frame = NSRect(x: 20, y: 106, width: 820, height: 24)
         content.addSubview(local)
 
         let separator = NSBox(frame: NSRect(x: 20, y: 52, width: 820, height: 1))
@@ -2826,7 +2830,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 620),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2839,24 +2843,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Role Models")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 484, width: 588, height: 20)
+        title.frame = NSRect(x: 16, y: 584, width: 588, height: 20)
         content.addSubview(title)
 
         let detail = NSTextField(wrappingLabelWithString: "Roles are reusable worker assignments. Quick and Routine are task tiers; both use Direct execution.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 452, width: 588, height: 18)
+        detail.frame = NSRect(x: 16, y: 552, width: 588, height: 18)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 170, y: 426, width: 245, height: 14)
+        modelHeader.frame = NSRect(x: 170, y: 526, width: 245, height: 14)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 425, y: 426, width: 179, height: 14)
+        effortHeader.frame = NSRect(x: 425, y: 526, width: 179, height: 14)
         content.addSubview(effortHeader)
 
         let roles = [
@@ -2881,7 +2885,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "Adversarial review": "Adversarial Review",
         ]
         for (index, role) in roles.enumerated() {
-            let y = 370 - (index * 39)
+            let y = 470 - (index * 46)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 12, weight: .medium)
             label.frame = NSRect(x: 16, y: y + 18, width: 145, height: 16)
@@ -2917,19 +2921,19 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             reasoningPickers[role.1] = effortPicker
         }
 
-        let separator = NSBox(frame: NSRect(x: 16, y: 44, width: 588, height: 1))
+        let separator = NSBox(frame: NSRect(x: 16, y: 52, width: 588, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
 
         let back = NSButton(title: "Back", target: self, action: #selector(backFromModelRouting))
         back.bezelStyle = .rounded
-        back.frame = NSRect(x: 16, y: 10, width: 84, height: 26)
+        back.frame = NSRect(x: 16, y: 16, width: 84, height: 26)
         content.addSubview(back)
 
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyModelRouting))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 520, y: 10, width: 84, height: 26)
+        apply.frame = NSRect(x: 520, y: 16, width: 84, height: 26)
         content.addSubview(apply)
 
         panel.contentView = content
