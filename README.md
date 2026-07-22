@@ -39,7 +39,7 @@ Codeshark is a macOS-resident remote orchestration companion for the OpenAI Code
 | Task closure | Persist each non-restricted task's execution contract, final checks, selected artifacts, and delivery state; surface it with `/task ID`. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
-| Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. Use `/file_delivery on` to attach new final files automatically for a chat. |
+| Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. Use `/file_delivery on` to attach new manuscript, report, document, and figure results automatically; code edits stay in the summary unless explicitly requested. |
 | Corrective learning | Turn explicit `/bad` feedback into a visible regression-rule candidate with `/guardrails`. |
 | Academic figure layout | Arrange supplied figures on a consistent grid without distortion, then render and visually inspect the final placement before delivery. |
 | Journal manuscript QA | For manuscript authoring or revision, run a low-cost plan, author-side PDF/figure/typography audit, independent editorial review, and up to two correction-and-recheck cycles before delivery. |

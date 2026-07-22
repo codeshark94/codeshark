@@ -95,7 +95,7 @@ Plain text: submit a task or steer active private work
 /guardrails: show regression-rule candidates created from /bad feedback
 /deliveries, /retry_delivery ID: inspect or retry failed replies
 /send PATH: send one requested file from a configured project root
-/file_delivery on|off: automatically attach final files created for this chat
+/file_delivery on|off: automatically attach manuscript, report, and figure result files
 /groups, /disable_group CHAT_ID: manage administrator-enabled groups
 /remind MINUTES REQUEST: create a one-time job
 /cron EXPRESSION | REQUEST: create a recurring cron job
@@ -188,6 +188,16 @@ _MANUSCRIPT_AUTHORING_ACTION_CUE = re.compile(
     r"작성|초안|수정|편집|교정|서식|조판|렌더|제출|캡션|그림|피규어|"
     r"(?:논문|원고).{0,40}(?:써|쓰|만들|다듬|고쳐|완성)|"
     r"(?:써|쓰|만들|다듬|고쳐|완성).{0,40}(?:논문|원고)",
+    flags=re.IGNORECASE,
+)
+_DOCUMENT_ARTIFACT_TERM = re.compile(
+    r"\b(?:manuscript|paper|article|report|proposal|thesis|dissertation|pdf|docx)\b|"
+    r"논문|원고|보고서|리포트|제안서|학위논문|문서",
+    flags=re.IGNORECASE,
+)
+_DOCUMENT_ARTIFACT_ACTION_CUE = re.compile(
+    r"\b(?:draft|write|revise|edit|review|format|typeset|render|compile|create|produce)\b|"
+    r"작성|초안|수정|편집|검토|교정|서식|조판|렌더|컴파일|만들|완성",
     flags=re.IGNORECASE,
 )
 _FIGURE_REFERENCE_CUE = re.compile(
@@ -1883,13 +1893,17 @@ class AgentApp:
             not task.restricted or group_file_delivery_enabled
         )
         figure_revision = not task.restricted and self._is_figure_revision(request)
-        automatic_file_delivery = (
+        automatic_file_delivery_configured = (
             local_console
             or group_file_delivery_enabled
             or (
                 not task.restricted
                 and self.state.automatic_file_delivery_enabled(task.chat_id)
             )
+        )
+        automatic_file_delivery = (
+            automatic_file_delivery_configured
+            and self._is_automatic_file_delivery_eligible(request, figure_revision)
         )
         file_delivery_required = file_delivery_requested or figure_revision
         file_delivery_enabled = file_delivery_required or automatic_file_delivery
@@ -2732,6 +2746,18 @@ class AgentApp:
         return bool(
             _FIGURE_REFERENCE_CUE.search(request)
             and _FIGURE_EDIT_ACTION_CUE.search(request)
+        )
+
+    @staticmethod
+    def _is_automatic_file_delivery_eligible(
+        request: str,
+        figure_revision: bool,
+    ) -> bool:
+        if figure_revision:
+            return True
+        return bool(
+            _DOCUMENT_ARTIFACT_TERM.search(request)
+            and _DOCUMENT_ARTIFACT_ACTION_CUE.search(request)
         )
 
     def _workflow_profile(self, tier: str) -> WorkflowPlan:
@@ -3935,7 +3961,8 @@ class AgentApp:
         if enabled == "on":
             self._send_message(
                 chat_id,
-                "Automatic final-file delivery is on for this chat. New result files will be attached with the final response.",
+                "Automatic result-file delivery is on for this chat. New manuscript, report, "
+                "document, and figure results will be attached; code and source edits stay in the summary unless you request a file.",
             )
             return
         self._send_message(chat_id, "Automatic final-file delivery is off for this chat.")

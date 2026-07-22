@@ -2651,13 +2651,15 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             )
         )
 
-        self.app._handle_update(self.update(123, "What is the current status?"))
+        self.app._handle_update(self.update(123, "Review the manuscript PDF."))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertIn(
-            "Automatic final-file delivery is enabled for this chat.",
-            self.app.runner.prompts[0][0],
+        self.assertTrue(
+            any(
+                "Automatic final-file delivery is enabled for this chat." in prompt
+                for prompt, *_ in self.app.runner.prompts
+            )
         )
         self.assertEqual(self.api.documents[0][1], report.resolve())
         self.assertEqual(self.api.messages, [(123, "Completed.")])
@@ -2682,7 +2684,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             )
         )
 
-        self.app._handle_update(self.update(123, "Analyze the data."))
+        self.app._handle_update(self.update(123, "Review the manuscript PDF."))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
@@ -2703,6 +2705,29 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(self.api.documents, [])
         self.assertEqual(self.api.messages, [(123, "done")])
+
+    def test_automatic_file_delivery_never_attaches_code_source_changes(self) -> None:
+        source = self.app.config.workdir / "parser.py"
+        source.write_text("print('updated')\n", encoding="utf-8")
+        self.app.state.set_automatic_file_delivery(123, True)
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"Updated parser. [[CODESHARK_SEND_FILE: {source}]]",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "Fix the parser bug and run the tests."))
+        queued = self.app.store.list_tasks()[0]
+        self.assertTrue(self.app.store.approve(queued.id))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertNotIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
+        self.assertEqual(self.api.documents, [])
+        self.assertEqual(self.api.messages[-1], (123, "Updated parser."))
 
     def test_file_delivery_command_persists_the_chat_setting(self) -> None:
         self.app._handle_update(self.update(123, "/file_delivery on"))
