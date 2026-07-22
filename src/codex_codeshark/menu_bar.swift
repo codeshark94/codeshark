@@ -1757,7 +1757,11 @@ struct AttentionView: View {
                                     .foregroundStyle(.secondary)
                                 }
                                 HStack(spacing: 8) {
-                                    Button(pendingContinuationTaskID == failure.taskID ? "Queuing…" : "Continue") {
+                                    Button(
+                                        continuationQueued && pendingContinuationTaskID == failure.taskID
+                                            ? "Queued"
+                                            : pendingContinuationTaskID == failure.taskID ? "Queuing…" : "Continue"
+                                    ) {
                                         pendingContinuationTaskID = failure.taskID
                                         continuationQueued = false
                                         continuationStatus = "Queuing continuation…"
