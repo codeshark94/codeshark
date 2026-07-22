@@ -213,6 +213,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.primary_model, "gpt-5.6-sol")
             self.assertEqual(updated.validator_model, "gpt-5.6-luna")
             self.assertEqual(updated.feedback_model, "gpt-5.6-terra")
+            self.assertEqual(updated.triage_model, "gpt-5.6-luna")
             self.assertEqual(updated.preflight_model, "gpt-5.6-terra")
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("worker_count = 8", text)
@@ -251,6 +252,8 @@ class ConfigTests(unittest.TestCase):
                 validator_reasoning_effort="max",
                 feedback_model="gpt-5.4-mini",
                 feedback_reasoning_effort="high",
+                triage_model="gpt-5.4-nano",
+                triage_reasoning_effort="low",
                 preflight_model="gpt-5.5",
                 preflight_reasoning_effort="medium",
                 config_path=config_path,
@@ -261,6 +264,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.rework_reasoning_effort, "xhigh")
             self.assertEqual(updated.feedback_model, "gpt-5.4-mini")
             self.assertEqual(updated.feedback_reasoning_effort, "high")
+            self.assertEqual(updated.triage_model, "gpt-5.4-nano")
+            self.assertEqual(updated.triage_reasoning_effort, "low")
 
     def test_sets_orchestration_without_rewriting_model_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -380,6 +385,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.validator_reasoning_effort, "high")
             self.assertEqual(loaded.feedback_model, "gpt-5.6-terra")
             self.assertEqual(loaded.feedback_reasoning_effort, "high")
+            self.assertEqual(loaded.triage_model, "gpt-5.6-luna")
+            self.assertEqual(loaded.triage_reasoning_effort, "medium")
             self.assertEqual(loaded.preflight_model, "gpt-5.6-luna")
             self.assertEqual(loaded.preflight_reasoning_effort, "low")
             self.assertFalse(loaded.codex_network_access)

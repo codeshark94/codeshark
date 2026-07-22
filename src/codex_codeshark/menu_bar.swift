@@ -2861,7 +2861,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let roles = [
             ("Quick / Routine", "Routine", "gpt-5.6-luna", "medium"),
-            ("Planner / Triage", "Preflight", "gpt-5.6-luna", "low"),
+            ("Triage", "Triage", "gpt-5.6-luna", "medium"),
+            ("Planner", "Preflight", "gpt-5.6-luna", "low"),
             ("Research", "Research", "gpt-5.6-luna", "medium"),
             ("Primary", "Primary", "gpt-5.6-sol", "high"),
             ("Rework", "Rework", "gpt-5.6-sol", "high"),
@@ -2990,6 +2991,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         guard let routinePicker = modelPickers["Routine"],
               let routine = selectedModel(routinePicker),
               let routineEffort = reasoningPickers["Routine"]?.titleOfSelectedItem,
+              let triagePicker = modelPickers["Triage"],
+              let triage = selectedModel(triagePicker),
+              let triageEffort = reasoningPickers["Triage"]?.titleOfSelectedItem,
               let preflightPicker = modelPickers["Preflight"],
               let preflight = selectedModel(preflightPicker),
               let preflightEffort = reasoningPickers["Preflight"]?.titleOfSelectedItem,
@@ -3019,6 +3023,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "set-models",
             "--routine", routine,
             "--routine-effort", routineEffort,
+            "--triage", triage,
+            "--triage-effort", triageEffort,
             "--preflight", preflight,
             "--preflight-effort", preflightEffort,
             "--research", research,

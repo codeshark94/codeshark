@@ -391,6 +391,15 @@ class AgentApp:
             )
             for worker_index in range(config.worker_count)
         )
+        self._triage_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.triage_model,
+                reasoning_effort=self.config.triage_reasoning_effort,
+                role="Triage",
+            )
+            for worker_index in range(config.worker_count)
+        )
         self._preflight_runners = tuple(
             self._build_runner(
                 worker_index,
@@ -715,7 +724,12 @@ class AgentApp:
                                 self.config.routine_reasoning_effort,
                             ),
                             assignment(
-                                "Planner / Triage",
+                                "Triage",
+                                self.config.triage_model,
+                                self.config.triage_reasoning_effort,
+                            ),
+                            assignment(
+                                "Planner",
                                 self.config.preflight_model,
                                 self.config.preflight_reasoning_effort,
                                 usage_role="Preflight",
@@ -1088,6 +1102,7 @@ class AgentApp:
             rework_runner,
             subagent_runner,
             feedback_runner,
+            triage_runner,
             preflight_runner,
             research_runner,
             finalizer_runner,
@@ -1098,6 +1113,7 @@ class AgentApp:
                 self._rework_runners,
                 self._subagent_runners,
                 self._feedback_runners,
+                self._triage_runners,
                 self._preflight_runners,
                 self._research_runners,
                 self._finalizer_runners,
@@ -1113,6 +1129,7 @@ class AgentApp:
                     rework_runner,
                     subagent_runner,
                     feedback_runner,
+                    triage_runner,
                     preflight_runner,
                     research_runner,
                     finalizer_runner,
@@ -1661,6 +1678,7 @@ class AgentApp:
         rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
         feedback_runner: CodexRunner,
+        triage_runner: CodexRunner,
         preflight_runner: CodexRunner,
         research_runner: CodexRunner,
         finalizer_runner: CodexRunner,
@@ -1694,6 +1712,7 @@ class AgentApp:
                     runner,
                     subagent_runner,
                     preflight_runner,
+                    triage_runner=triage_runner,
                     primary_runner=primary_runner,
                     rework_runner=rework_runner,
                     feedback_runner=feedback_runner,
@@ -1740,6 +1759,7 @@ class AgentApp:
         runner: CodexRunner | None = None,
         subagent_runner: CodexRunner | None = None,
         preflight_runner: CodexRunner | None = None,
+        triage_runner: CodexRunner | None = None,
         *,
         primary_runner: CodexRunner | None = None,
         rework_runner: CodexRunner | None = None,
@@ -1750,6 +1770,7 @@ class AgentApp:
         runner = runner or self.runner
         subagent_runner = subagent_runner or runner
         preflight_runner = preflight_runner or subagent_runner
+        triage_runner = triage_runner or preflight_runner
         primary_runner = primary_runner or runner
         rework_runner = rework_runner or primary_runner
         feedback_runner = feedback_runner or subagent_runner
@@ -1763,7 +1784,7 @@ class AgentApp:
             selected_project = self._automatic_project_for_task(
                 task,
                 request,
-                preflight_runner,
+                triage_runner,
                 project,
             )
             if selected_project != project:
@@ -1786,7 +1807,7 @@ class AgentApp:
         workflow_plan = (
             WorkflowPlan("quick", uses_preflight=False, uses_validator=False)
             if task.restricted
-            else self._workflow_plan(task, request, preflight_runner)
+            else self._workflow_plan(task, request, triage_runner, project)
         )
         execution_runner = (
             primary_runner
@@ -2604,6 +2625,7 @@ class AgentApp:
         task: TaskRecord,
         request: str,
         triage_runner: CodexRunner,
+        project: str = DEFAULT_PROJECT,
     ) -> WorkflowPlan:
         """Let a bounded first agent choose the general orchestration tier."""
         if task.ephemeral or task.restricted:
@@ -2612,7 +2634,10 @@ class AgentApp:
             task_id=task.id,
             phase="triage",
             runner=triage_runner,
-            prompt=self._workflow_triage_prompt(request),
+            prompt=self._workflow_triage_prompt(
+                request,
+                self._triage_context(task, project, request),
+            ),
             thread_id=None,
             ephemeral=True,
             restricted=False,
@@ -2734,8 +2759,25 @@ class AgentApp:
                 return tier
         return None
 
+    def _triage_context(self, task: TaskRecord, project: str, request: str) -> str:
+        """Provide bounded, project-scoped facts without replaying a Codex thread."""
+        session = self.state.session_snapshot(task.chat_id, project)
+        lines = [
+            f"Active project: {project}",
+            "Persistent project session: " + ("available" if session.codex_thread_id else "not yet created"),
+        ]
+        for memory in self.memory.list_for_project(project)[:3]:
+            text = " ".join(memory.text.split())
+            if text:
+                lines.append(f"Project memory: {text[:360]}")
+        for asset in self.vault.select(request, scope=project, max_chars=1_000)[:3]:
+            content = " ".join(asset.content.split())
+            if content:
+                lines.append(f"Relevant {asset.kind} asset ({asset.title}): {content[:360]}")
+        return "\n".join(lines)
+
     @staticmethod
-    def _workflow_triage_prompt(request: str) -> str:
+    def _workflow_triage_prompt(request: str, context: str) -> str:
         return "\n".join(
             (
                 "[Codeshark task triage]",
@@ -2747,6 +2789,10 @@ class AgentApp:
                 "deliverables, and the need for independent verification. Permissions and approval are enforced elsewhere.",
                 "Return only one JSON object with this exact shape: {\"tier\": \"quick|routine|standard|deep|high_assurance\", "
                 "\"confidence\": \"low|medium|high\", \"reason\": \"brief\"}.",
+                "",
+                "[Task context]",
+                context,
+                "[/Task context]",
                 "",
                 "[Original request]",
                 request,

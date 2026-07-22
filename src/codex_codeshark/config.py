@@ -76,6 +76,8 @@ class Config:
     validator_reasoning_effort: str = "high"
     feedback_model: str = "gpt-5.6-terra"
     feedback_reasoning_effort: str = "high"
+    triage_model: str = "gpt-5.6-luna"
+    triage_reasoning_effort: str = "medium"
     preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
     research_model: str = "gpt-5.6-luna"
@@ -315,6 +317,10 @@ def load_config(path: Path | None = None) -> Config:
     feedback_reasoning_effort = _require_reasoning_effort(
         data, "feedback_reasoning_effort", validator_reasoning_effort
     )
+    triage_model = _require_model_setting(data, "triage_model", "gpt-5.6-luna")
+    triage_reasoning_effort = _require_reasoning_effort(
+        data, "triage_reasoning_effort", "medium"
+    )
     preflight_model = _require_model_setting(data, "preflight_model", "gpt-5.6-luna")
     preflight_reasoning_effort = _require_reasoning_effort(
         data, "preflight_reasoning_effort", "low"
@@ -494,6 +500,8 @@ def load_config(path: Path | None = None) -> Config:
         validator_reasoning_effort=validator_reasoning_effort,
         feedback_model=feedback_model,
         feedback_reasoning_effort=feedback_reasoning_effort,
+        triage_model=triage_model,
+        triage_reasoning_effort=triage_reasoning_effort,
         preflight_model=preflight_model,
         preflight_reasoning_effort=preflight_reasoning_effort,
         research_model=research_model,
@@ -602,6 +610,8 @@ def set_model_assignments(
     validator_reasoning_effort: str | None = None,
     feedback_model: str | None = None,
     feedback_reasoning_effort: str | None = None,
+    triage_model: str | None = None,
+    triage_reasoning_effort: str | None = None,
     preflight_reasoning_effort: str | None = None,
     research_model: str | None = None,
     research_reasoning_effort: str | None = None,
@@ -622,6 +632,8 @@ def set_model_assignments(
         "validator_reasoning_effort": validator_reasoning_effort or current.validator_reasoning_effort,
         "feedback_model": feedback_model or current.feedback_model,
         "feedback_reasoning_effort": feedback_reasoning_effort or current.feedback_reasoning_effort,
+        "triage_model": triage_model or current.triage_model,
+        "triage_reasoning_effort": triage_reasoning_effort or current.triage_reasoning_effort,
         "preflight_model": preflight_model,
         "preflight_reasoning_effort": preflight_reasoning_effort or current.preflight_reasoning_effort,
         "research_model": research_model or current.research_model,
@@ -1188,6 +1200,8 @@ def write_local_config(
             'validator_reasoning_effort = "high"',
             'feedback_model = "gpt-5.6-terra"',
             'feedback_reasoning_effort = "high"',
+            'triage_model = "gpt-5.6-luna"',
+            'triage_reasoning_effort = "medium"',
             'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
             'research_model = "gpt-5.6-luna"',

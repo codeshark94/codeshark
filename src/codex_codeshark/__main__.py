@@ -89,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--validator-effort", required=True)
     models.add_argument("--feedback", required=True)
     models.add_argument("--feedback-effort", required=True)
+    models.add_argument("--triage")
+    models.add_argument("--triage-effort")
     models.add_argument("--preflight", required=True)
     models.add_argument("--preflight-effort", required=True)
     models.add_argument("--research")
@@ -285,6 +287,8 @@ def main() -> int:
                 validator_reasoning_effort=args.validator_effort,
                 feedback_model=args.feedback,
                 feedback_reasoning_effort=args.feedback_effort,
+                triage_model=args.triage,
+                triage_reasoning_effort=args.triage_effort,
                 preflight_model=args.preflight,
                 preflight_reasoning_effort=args.preflight_effort,
                 research_model=args.research,
@@ -298,6 +302,7 @@ def main() -> int:
                 f"routine={config.routine_model}, primary={config.primary_model}, "
                 f"rework={config.rework_model}, validator={config.validator_model}, "
                 f"feedback={config.feedback_model}, "
+                f"triage={config.triage_model}, "
                 f"preflight={config.preflight_model}, research={config.research_model}, "
                 f"finalizer={config.finalizer_model}"
             )

@@ -83,7 +83,8 @@ def run_doctor() -> int:
             f"rework {config.rework_model} ({config.rework_reasoning_effort}); "
             f"validation {config.validator_model} ({config.validator_reasoning_effort}); "
             f"feedback {config.feedback_model} ({config.feedback_reasoning_effort}); "
-            f"planner/triage {config.preflight_model} ({config.preflight_reasoning_effort}); "
+            f"triage {config.triage_model} ({config.triage_reasoning_effort}); "
+            f"planner {config.preflight_model} ({config.preflight_reasoning_effort}); "
             f"research {config.research_model} ({config.research_reasoning_effort}); "
             f"finalization {config.finalizer_model} ({config.finalizer_reasoning_effort}); Fast off"
         )

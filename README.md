@@ -193,7 +193,7 @@ worker_count = 8
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
-Codeshark uses five general task tiers: Quick, Routine, Standard, Deep, and High assurance. A bounded Planner/Triage agent selects the tier before administrator work begins in a read-only, network-disabled, ephemeral session; its prompt prohibits tool use and it has no MCP or persistent session. Standard adds independent validation; Deep adds planning and a bounded correction loop; High assurance also adds an independent research pass. If Triage fails to return a valid structured decision, Codeshark safely falls back to Standard. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
+Codeshark uses five general task tiers: Quick, Routine, Standard, Deep, and High assurance. A bounded Triage agent selects the tier before administrator work begins in a read-only, network-disabled, ephemeral session; it receives the request, active project, and relevant project memory/assets, but has no MCP or persistent session. A separate Planner role is used only for tiers that enable planning. Standard adds independent validation; Deep adds planning and a bounded correction loop; High assurance also adds an independent research pass. If Triage fails to return a valid structured decision, Codeshark safely falls back to Standard. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
 
 ```toml
 routine_model = "gpt-5.6-luna"
@@ -206,6 +206,8 @@ validator_model = "gpt-5.6-terra"
 validator_reasoning_effort = "high"
 feedback_model = "gpt-5.6-terra"
 feedback_reasoning_effort = "high"
+triage_model = "gpt-5.6-luna"
+triage_reasoning_effort = "medium"
 preflight_model = "gpt-5.6-luna"
 preflight_reasoning_effort = "low"
 research_model = "gpt-5.6-luna"

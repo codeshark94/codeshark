@@ -890,15 +890,16 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             self.config.group_respond_to_mentions,
         )
         self.assertEqual(payload["security"]["groups"], [])
-        self.assertEqual(payload["model_assignments"][3]["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_assignments"][1]["role"], "Planner / Triage")
-        self.assertEqual(payload["model_assignments"][3]["role"], "Primary")
-        self.assertEqual(payload["model_assignments"][3]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][3]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][4]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][5]["role"], "Validation")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Adversarial Review")
-        self.assertEqual(payload["model_assignments"][7]["role"], "Finalization")
+        self.assertEqual(payload["model_assignments"][4]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][1]["role"], "Triage")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Planner")
+        self.assertEqual(payload["model_assignments"][4]["role"], "Primary")
+        self.assertEqual(payload["model_assignments"][4]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][4]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][5]["role"], "Rework")
+        self.assertEqual(payload["model_assignments"][6]["role"], "Validation")
+        self.assertEqual(payload["model_assignments"][7]["role"], "Adversarial Review")
+        self.assertEqual(payload["model_assignments"][8]["role"], "Finalization")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
@@ -1535,6 +1536,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(self.app._rework_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
         self.assertEqual(len(self.app._feedback_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._triage_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         self.assertEqual(len(self.app._research_runners), self.config.worker_count)
         self.assertEqual(len(self.app._finalizer_runners), self.config.worker_count)
@@ -1575,6 +1577,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.feedback_model
                 and runner.model_reasoning_effort == self.config.feedback_reasoning_effort
                 for runner in self.app._feedback_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.triage_model
+                and runner.model_reasoning_effort == self.config.triage_reasoning_effort
+                for runner in self.app._triage_runners
             )
         )
         self.assertTrue(
@@ -1989,6 +1998,27 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(plan.tier, "standard")
         self.assertTrue(plan.uses_validator)
+
+    def test_triage_receives_active_project_memory_without_replaying_the_session(self) -> None:
+        project = "gnw_transport_paper"
+        task = self.app.store.enqueue_task(
+            123,
+            "Revise the current figure caption.",
+            source="test",
+            ephemeral=False,
+        )
+        self.app.memory.add("Use concise public academic terminology.", scope=project)
+        self.app.state.set_session_thread_id(123, "thread-project", project)
+        runner = FakeCodexRunner(
+            triage_message='{"tier": "routine", "confidence": "high", "reason": "test"}'
+        )
+
+        self.app._workflow_plan(task, "Revise the current figure caption.", runner, project)
+
+        prompt = runner.triage_prompts[0][0]
+        self.assertIn("Active project: gnw_transport_paper", prompt)
+        self.assertIn("Persistent project session: available", prompt)
+        self.assertIn("Use concise public academic terminology.", prompt)
 
     def test_triage_agent_uses_saved_orchestration_settings(self) -> None:
         app = AgentApp(
