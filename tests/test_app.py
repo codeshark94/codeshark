@@ -6,7 +6,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from codex_codeshark.app import HELP_TEXT, ActiveTask, AgentApp
+from codex_codeshark.app import HELP_TEXT, ActiveTask, AgentApp, WorkflowPlan
 from codex_codeshark.codex_runner import RunResult
 from codex_codeshark.config import Config
 from codex_codeshark.identity import (
@@ -1291,6 +1291,78 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._rotate_session_if_needed(123, "General", runner, "task-1")
 
         self.assertEqual(runner.deleted_sessions, [])
+
+    def test_cross_validation_recovers_primary_model_capacity_with_routine_model(self) -> None:
+        primary = FakeCodexRunner(
+            RunResult(
+                exit_code=1,
+                message="",
+                thread_id="capacity-thread",
+                stderr="Selected model is at capacity. Please try a different model.",
+                turn_started=True,
+            )
+        )
+        primary.model = "gpt-5.6-terra"
+        recovery = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Recovered working handoff.",
+                thread_id="recovery-thread",
+                stderr="",
+            )
+        )
+        recovery.model = "gpt-5.6-luna"
+        validator = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="VERDICT: PASS",
+                thread_id="validator-thread",
+                stderr="",
+            )
+        )
+        finalizer = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Completed after recovery.",
+                thread_id="recovery-thread",
+                stderr="",
+            )
+        )
+
+        result = self.app._run_cross_validation_workflow(
+            primary,
+            primary,
+            validator,
+            validator,
+            validator,
+            validator,
+            finalizer,
+            "Complete the manuscript revision.",
+            None,
+            request="Complete the manuscript revision.",
+            plan=WorkflowPlan("standard", uses_preflight=False, uses_validator=True, uses_finalizer=True),
+            approved=True,
+            full_access=False,
+            file_delivery_enabled=False,
+            automatic_file_delivery=False,
+            task_id="capacity-recovery-task",
+            capacity_recovery_runner=recovery,
+        )
+
+        self.assertEqual(result.message, "Completed after recovery.")
+        self.assertIn("Model-capacity recovery", recovery.prompts[0][0])
+        self.assertIsNone(recovery.prompts[0][1])
+        self.assertEqual(
+            [run.phase for run in self.app.store.recent_model_runs(limit=8)],
+            ["finalization", "validator", "capacity-recovery", "primary"],
+        )
+        failure = RunResult(
+            exit_code=1,
+            message="",
+            thread_id="capacity-thread",
+            stderr="Selected model is at capacity.",
+        )
+        self.assertEqual(self.app._failure_kind(failure), "model-capacity")
 
     def test_local_result_is_recorded_without_telegram_delivery(self) -> None:
         artifact = self.config.workdir / "local-result.md"

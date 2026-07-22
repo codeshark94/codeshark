@@ -223,6 +223,10 @@ _EXTERNAL_ACTION_CUE = re.compile(
     r"배포|게시|발행|릴리스|푸시|전송|메일|결제|구매|삭제|제거|설치",
     flags=re.IGNORECASE,
 )
+_MODEL_CAPACITY_ERROR = re.compile(
+    r"(?:selected model is at capacity|model (?:is )?at capacity)",
+    flags=re.IGNORECASE,
+)
 _MAX_DELIVERY_FILES = 5
 _MAX_CROSS_VALIDATION_HANDOFF_CHARS = 12_000
 _MAX_FRESH_VALIDATOR_SESSIONS = 3
@@ -2032,6 +2036,7 @@ class AgentApp:
                 file_delivery_enabled=file_delivery_enabled,
                 automatic_file_delivery=automatic_file_delivery,
                 task_id=task.id,
+                capacity_recovery_runner=runner,
             )
         else:
             if not task.restricted:
@@ -2437,6 +2442,8 @@ class AgentApp:
     @staticmethod
     def _failure_kind(result: RunResult) -> str:
         diagnostic = result.stderr.casefold()
+        if _MODEL_CAPACITY_ERROR.search(result.stderr):
+            return "model-capacity"
         if "no_biscuit_no_service" in diagnostic or "http 451" in diagnostic:
             return "codex-service-unavailable"
         if "rate limit" in diagnostic or "too many requests" in diagnostic or "http 429" in diagnostic:
@@ -2463,6 +2470,7 @@ class AgentApp:
             )
         kind = self._failure_kind(result)
         cause = {
+            "model-capacity": "선택된 Codex 모델의 현재 사용 가능 용량이 소진됐습니다.",
             "codex-service-unavailable": "Codex 서비스가 연결을 거부했습니다 (HTTP 451).",
             "rate-limited": "Codex 사용량 제한 또는 일시적인 요청 제한에 걸렸습니다.",
             "authentication": "Codex 로그인 또는 인증 상태를 확인해야 합니다.",
@@ -3154,6 +3162,7 @@ class AgentApp:
         file_delivery_enabled: bool,
         automatic_file_delivery: bool,
         task_id: str,
+        capacity_recovery_runner: CodexRunner,
     ) -> RunResult:
         preflight = ""
         if plan.uses_preflight:
@@ -3226,6 +3235,26 @@ class AgentApp:
             approved=approved,
             full_access=full_access,
         )
+        if (
+            self._failure_kind(primary_result) == "model-capacity"
+            and self._has_distinct_model(capacity_recovery_runner, runner)
+        ):
+            LOGGER.warning(
+                "primary model capacity reached for task_id=%s; continuing with model=%s",
+                task_id,
+                capacity_recovery_runner.model,
+            )
+            primary_result = self._run_model_phase(
+                task_id=task_id,
+                phase="capacity-recovery",
+                runner=capacity_recovery_runner,
+                prompt=primary_prompt + self._model_capacity_recovery_prompt(),
+                thread_id=None,
+                ephemeral=False,
+                restricted=False,
+                approved=approved,
+                full_access=full_access,
+            )
         if not self._run_succeeded(primary_result):
             return primary_result
         if primary_result.thread_id is None:
@@ -3305,6 +3334,27 @@ class AgentApp:
             restricted=False,
             approved=approved,
             full_access=full_access,
+        )
+
+    @staticmethod
+    def _has_distinct_model(candidate: CodexRunner, original: CodexRunner) -> bool:
+        return (
+            getattr(candidate, "model", None),
+            getattr(candidate, "model_reasoning_effort", None),
+        ) != (
+            getattr(original, "model", None),
+            getattr(original, "model_reasoning_effort", None),
+        )
+
+    @staticmethod
+    def _model_capacity_recovery_prompt() -> str:
+        return (
+            "\n\n[Model-capacity recovery]\n"
+            "The previous primary session stopped after its configured model reached capacity. "
+            "Start a fresh continuation session. Inspect the actual workspace state, recent artifacts, "
+            "and existing edits before acting; preserve completed work and do not blindly repeat any "
+            "external side effect. Continue the original task and produce the required internal handoff.\n"
+            "[/Model-capacity recovery]"
         )
 
     def _workflow_preflight_prompt(self, request: str) -> str:
