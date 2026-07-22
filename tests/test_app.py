@@ -15,6 +15,7 @@ from codex_codeshark.identity import (
     PUBLIC_OWNER_CARD_TITLE,
     owner_onboarding_message,
 )
+from codex_codeshark.local_console import LOCAL_CONSOLE_SOURCE
 from codex_codeshark.telegram_api import TelegramError
 
 
@@ -78,14 +79,14 @@ class FakeCodexRunner:
         approved=False,
         full_access=False,
     ) -> RunResult:
-        if prompt.startswith("[Codeshark project selection]"):
+        if prompt.startswith("[Codeshark project routing]"):
             self.project_triage_prompts.append(
                 (prompt, thread_id, ephemeral, restricted, approved, full_access)
             )
             return RunResult(
                 exit_code=0,
                 message=self.project_triage_message
-                or '{"project": "__GENERAL__", "confidence": "low"}',
+                or '{"decision": "projectless", "confidence": "low"}',
                 thread_id=None,
                 stderr="",
             )
@@ -1182,7 +1183,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.state.set_session_thread_id(123, "general-thread", "General")
         self.app.memory.add("General-only context", scope="General")
         self.app.memory.add("Research-only context", scope="Research")
-        runner = FakeCodexRunner()
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "active", "confidence": "high"}'
+        )
         self.app.runner = runner
 
         self.app._handle_update(self.update(123, "/project Research"))
@@ -1236,10 +1239,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIsNotNone(manifest)
         self.assertEqual(manifest.project, "gnw_transport_paper")
 
-    def test_unclassified_task_uses_bounded_project_triage(self) -> None:
+    def test_project_router_connects_an_unclassified_task_to_an_existing_project(self) -> None:
         (self.config.workdir / "FETM").mkdir()
         runner = FakeCodexRunner(
-            project_triage_message='{"project": "FETM", "confidence": "high"}'
+            project_triage_message='{"decision": "existing", "project": "FETM", "confidence": "high"}'
         )
         self.app.runner = runner
 
@@ -1254,6 +1257,59 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         manifest = self.app.store.get_task_manifest(task.id)
         self.assertIsNotNone(manifest)
         self.assertEqual(manifest.project, "FETM")
+
+    def test_project_router_can_create_a_new_workspace_project(self) -> None:
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "new", "project": "Catalyst study", "confidence": "high"}'
+        )
+        self.app.runner = runner
+
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: General]]\nStart a new catalyst durability study.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+        self.app._execute_task(task)
+
+        self.assertTrue((self.config.workdir / "Catalyst study").is_dir())
+        self.assertEqual(self.app.state.active_project(123), "Catalyst study")
+        self.assertIn("Project: Catalyst study", runner.prompts[0][0])
+
+    def test_project_router_can_leave_a_stale_active_project_for_projectless_work(self) -> None:
+        (self.config.workdir / "FETM").mkdir()
+        self.app.state.set_active_project(123, "FETM")
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "projectless", "confidence": "high"}'
+        )
+        self.app.runner = runner
+
+        self.app._handle_update(self.update(123, "What is the capital of France?"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.app.state.active_project(123), "General")
+        self.assertIn("Project: General", runner.prompts[0][0])
+
+    def test_project_router_applies_to_local_console_work(self) -> None:
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "new", "project": "Local study", "confidence": "high"}'
+        )
+        self.app.runner = runner
+        task = self.app.store.enqueue_task(
+            0,
+            "[[CODESHARK_PROJECT: General]]\nStart a new local dataset study.",
+            source=LOCAL_CONSOLE_SOURCE,
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(task)
+
+        self.assertTrue((self.config.workdir / "Local study").is_dir())
+        self.assertEqual(self.app.state.active_project(0), "Local study")
+        self.assertIn("Project: Local study", runner.prompts[0][0])
 
     def test_unsuccessful_tasks_are_not_available_for_feedback(self) -> None:
         results = [
@@ -2505,6 +2561,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.runner = runner
         self.app._execute_task(task)
         self.assertTrue(runner.prompts[0][2])
+        self.assertEqual(runner.project_triage_prompts, [])
         self.assertIsNone(self.app.state.session_snapshot(123).codex_thread_id)
 
     def test_rotates_full_session_after_quarantining_summary(self) -> None:

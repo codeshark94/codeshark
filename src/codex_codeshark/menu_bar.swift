@@ -1223,7 +1223,7 @@ private func workspaceDisplayPath(_ path: String) -> String {
 private func phaseTitle(_ phase: String) -> String {
     let labels = [
         "triage": "Task triage",
-        "project-triage": "Project selection",
+        "project-router": "Project routing",
         "preflight": "Plan",
         "research": "Research",
         "primary": "Primary",

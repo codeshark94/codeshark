@@ -165,3 +165,26 @@ def normalize_scope(value: str) -> str:
     if " ".join(value.split()).casefold() == GLOBAL_SCOPE:
         return GLOBAL_SCOPE
     return normalize_project_name(value)
+
+
+def create_workspace_project(workdir: Path, name: str) -> WorkspaceProject:
+    """Create one safe direct-child workspace project selected by Project Router."""
+    normalized = normalize_project_name(name)
+    if (
+        normalized.casefold() == DEFAULT_PROJECT.casefold()
+        or normalized.startswith(".")
+        or normalized in _PROJECT_SYSTEM_DIRECTORIES
+        or "/" in normalized
+        or "\\" in normalized
+    ):
+        raise ValueError("project name must be a non-system direct workspace folder name")
+    root = workdir.expanduser().resolve()
+    candidate = root / normalized
+    if candidate.parent != root:
+        raise ValueError("project must be created directly inside the configured workspace")
+    if candidate.exists():
+        if not candidate.is_dir():
+            raise ValueError("project path already exists and is not a directory")
+    else:
+        candidate.mkdir(mode=0o700)
+    return WorkspaceProject(normalized, candidate.resolve())
