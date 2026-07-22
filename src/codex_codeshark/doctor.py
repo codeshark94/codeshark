@@ -86,7 +86,6 @@ def run_doctor() -> int:
             f"feedback {config.feedback_model} ({config.feedback_reasoning_effort}); "
             f"router {config.router_model} ({config.router_reasoning_effort}); "
             f"triage {config.triage_model} ({config.triage_reasoning_effort}); "
-            f"delivery {config.delivery_model} ({config.delivery_reasoning_effort}); "
             f"planner {config.preflight_model} ({config.preflight_reasoning_effort}); "
             f"research {config.research_model} ({config.research_reasoning_effort}); "
             f"finalization {config.finalizer_model} ({config.finalizer_reasoning_effort}); Fast off"

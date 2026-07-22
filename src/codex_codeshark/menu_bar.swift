@@ -2904,7 +2904,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         title.frame = NSRect(x: 16, y: 720, width: 588, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope; Delivery Assessment decides whether Telegram should attach a result; Triage chooses the execution tier.")
+        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope; Triage chooses the execution tier; the final user-facing role receives the Telegram response skill.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
         detail.frame = NSRect(x: 16, y: 678, width: 588, height: 28)
@@ -2924,7 +2924,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let roles = [
             ("Project Router", "Project Router", "gpt-5.4-mini", "low"),
             ("Triage", "Triage", "gpt-5.4-mini", "low"),
-            ("Delivery Assessment", "Delivery assessment", "gpt-5.4-mini", "low"),
             ("Quick execution", "Quick execution", "gpt-5.4-mini", "low"),
             ("Routine execution", "Routine execution", "gpt-5.6-luna", "low"),
             ("Planning", "Planning", "gpt-5.6-luna", "low"),
@@ -3076,9 +3075,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let triagePicker = modelPickers["Triage"],
               let triage = selectedModel(triagePicker),
               let triageEffort = reasoningPickers["Triage"]?.titleOfSelectedItem,
-              let deliveryPicker = modelPickers["Delivery assessment"],
-              let delivery = selectedModel(deliveryPicker),
-              let deliveryEffort = reasoningPickers["Delivery assessment"]?.titleOfSelectedItem,
               let preflightPicker = modelPickers["Planning"],
               let preflight = selectedModel(preflightPicker),
               let preflightEffort = reasoningPickers["Planning"]?.titleOfSelectedItem,
@@ -3114,8 +3110,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--router-effort", routerEffort,
             "--triage", triage,
             "--triage-effort", triageEffort,
-            "--delivery", delivery,
-            "--delivery-effort", deliveryEffort,
             "--preflight", preflight,
             "--preflight-effort", preflightEffort,
             "--research", research,
