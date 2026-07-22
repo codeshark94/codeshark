@@ -160,7 +160,7 @@ Use `/save KIND | TITLE | CONTENT` for durable structured facts that are broader
 Connecting an agent to local projects deserves a small, inspectable trust boundary:
 
 - Exactly one paired administrator receives the same memory, tools, and control commands in private chat or an enabled group. Each administrator chat retains its own persistent Codex session.
-- Non-administrator group requests are ephemeral, MCP-disabled, and confined to a separate sandbox; they may perform ordinary network research, create or modify only sandbox files, and attach only the current request's safe result files to that same group when group file delivery is enabled.
+- Non-administrator group requests are ephemeral, MCP-disabled, and confined to a separate sandbox; they may perform ordinary network research, create or modify only sandbox files, and attach only the current request's safe result files to that same group when group file delivery is enabled. The newest 12 successful Codeshark exchanges addressed in one group form that group's shared, 30-day context; they never enter private chats or other groups.
 - Administrator mutations and external work wait for explicit approval; non-administrator writes are limited to the isolated group sandbox.
 - Project roots are fixed in local configuration and can never be supplied by a remote request.
 - The child process receives a strict environment allowlist; parent credentials and SSH-agent sockets are not forwarded.

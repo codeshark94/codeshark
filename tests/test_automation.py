@@ -293,7 +293,7 @@ class AgentStoreTests(unittest.TestCase):
                 same_chat.id,
             )
 
-    def test_claims_restricted_group_requests_for_different_members_in_parallel(self) -> None:
+    def test_serializes_group_requests_to_preserve_shared_context_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")
             first = store.enqueue_task(
@@ -322,14 +322,13 @@ class AgentStoreTests(unittest.TestCase):
             )
 
             claimed_first = store.claim_next_task(now=third.created_at + 1)
-            claimed_second = store.claim_next_task(now=third.created_at + 1)
-            self.assertEqual({claimed_first.id, claimed_second.id}, {first.id, second.id})
+            self.assertEqual(claimed_first.id, first.id)
             self.assertIsNone(store.claim_next_task(now=third.created_at + 1))
 
             store.finish_task(claimed_first.id, "completed")
             self.assertEqual(
                 store.claim_next_task(now=third.created_at + 2).id,
-                third.id,
+                second.id,
             )
 
     def test_due_reminder_enqueues_one_ephemeral_task(self) -> None:
@@ -463,24 +462,24 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(cancelled.prompt, "")
             self.assertEqual(restored.restricted_pending_count(), 0)
 
-    def test_group_context_is_requester_scoped_bounded_and_deleted_with_group(self) -> None:
+    def test_group_context_is_group_scoped_bounded_and_deleted_with_group(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")
             store.enable_group(-100123, "Engineering", 123)
-            for number in range(7):
+            for number in range(13):
                 store.append_group_context(
                     -100123,
-                    456,
+                    456 if number % 2 else 789,
                     f"request {number}",
                     f"response {number}",
                     now=1000 + number,
                 )
-            context = store.group_context(-100123, 456, now=1007)
-            self.assertEqual(len(context), 6)
+            context = store.group_context(-100123, now=1013)
+            self.assertEqual(len(context), 12)
             self.assertEqual(context[0][0], "request 1")
-            self.assertEqual(store.group_context(-100123, 789, now=1007), [])
+            self.assertIn(("request 12", "response 12"), context)
             self.assertTrue(store.disable_group(-100123))
-            self.assertEqual(store.group_context(-100123, 456, now=1007), [])
+            self.assertEqual(store.group_context(-100123, now=1013), [])
 
     def test_group_addressed_messages_are_bounded_and_deleted_with_group(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

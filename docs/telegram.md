@@ -130,7 +130,7 @@ Add the bot to a group, then send:
 Reply in a Codeshark conversation: Explain what a Python context manager does
 ```
 
-Each non-administrator member's six newest successful exchanges are retained only for that member in that group and expire after 30 days. Disabling a group deletes its participant context. Administrator commands from an enabled group have the same effect as their private-chat equivalents.
+The 12 newest successful Codeshark exchanges addressed in a group are shared as context only within that group and expire after 30 days. Requests in one group are handled in order so that context does not race. This does not include ordinary messages Telegram does not deliver to the bot. Disabling a group deletes its group context. Administrator commands from an enabled group have the same effect as their private-chat equivalents.
 
 | Command | Who can use it | Purpose |
 |---|---|---|

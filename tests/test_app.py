@@ -525,6 +525,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(second.prompt, "Can you give a short example too?")
         self.assertEqual(second.requester_id, 789)
         self.assertEqual(second.reply_to_message_id, 88)
+        self.assertTrue(self.app.store.finish_task(second.id, "completed"))
 
         self.app._handle_update(
             self.update(
@@ -602,6 +603,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
     def test_administrator_group_request_keeps_its_own_session_and_approval_flow(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.store.append_group_context(
+            group_id,
+            456,
+            "The current file is report.pdf",
+            "Noted.",
+        )
         self.app.state.set_session_thread_id(123, "private-thread")
         self.app.state.set_session_thread_id(group_id, "group-thread")
         runner = FakeCodexRunner()
@@ -634,7 +641,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(approved.approved)
         self.app._execute_task(approved)
 
-        _, thread_id, ephemeral, restricted, approved_flag, full_access = runner.prompts[0]
+        prompt, thread_id, ephemeral, restricted, approved_flag, full_access = runner.prompts[0]
+        self.assertIn("The current file is report.pdf", prompt)
+        self.assertIn("Recent Codeshark conversation in this group", prompt)
         self.assertEqual(thread_id, "group-thread")
         self.assertFalse(ephemeral)
         self.assertFalse(restricted)
@@ -704,7 +713,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             "group-thread-new",
         )
 
-    def test_group_context_continues_per_requester_without_cross_user_leakage(self) -> None:
+    def test_group_context_is_shared_inside_one_group_only(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
         runner = FakeCodexRunner()
@@ -726,11 +735,38 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         run_group(456, "My topic is Python")
         other_prompt = run_group(789, "What topic did I choose?")
-        same_prompt = run_group(456, "What topic did I choose?")
 
-        self.assertNotIn("My topic is Python", other_prompt)
-        self.assertIn("My topic is Python", same_prompt)
-        self.assertIn("Recent conversation with this requester", same_prompt)
+        self.assertIn("My topic is Python", other_prompt)
+        self.assertIn("Recent Codeshark conversation in this group", other_prompt)
+
+    def test_natural_file_request_attaches_latest_completed_result_without_runner(self) -> None:
+        report = self.config.workdir / "completed-result.pdf"
+        report.write_bytes(b"%PDF-safe-result")
+        queued = self.app.store.enqueue_task(
+            123,
+            "completed earlier",
+            source="telegram",
+            ephemeral=False,
+        )
+        completed = self.app.store.claim_next_task()
+        self.assertEqual(completed.id, queued.id)
+        self.assertTrue(self.app.store.finish_task(completed.id, "completed"))
+        self.app.store.upsert_task_manifest(
+            completed.id,
+            project="General",
+            tier="quick",
+            phase="completed",
+            artifacts=(str(report),),
+        )
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(self.update(123, "PDF 보내줘"))
+
+        self.assertEqual(self.api.documents[0][0], 123)
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(runner.prompts, [])
+        self.assertEqual(self.app.store.pending_count(), 0)
 
     def test_group_task_has_no_admin_context_session_or_learning_access(self) -> None:
         group_id = -100123

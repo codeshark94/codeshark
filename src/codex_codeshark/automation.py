@@ -517,6 +517,8 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS group_context_requester
                     ON group_context(chat_id, user_id, created_at);
+                CREATE INDEX IF NOT EXISTS group_context_chat_created
+                    ON group_context(chat_id, created_at);
                 CREATE TABLE IF NOT EXISTS group_addressed_messages (
                     chat_id INTEGER NOT NULL,
                     message_id INTEGER NOT NULL,
@@ -859,6 +861,49 @@ class AgentStore:
                 (max(1, limit),),
             ).fetchall()
         return [manifest for row in rows if (manifest := self._manifest(row)) is not None]
+
+    def latest_task_artifacts(
+        self,
+        chat_id: int,
+        *,
+        project: str | None = None,
+        limit: int = 8,
+    ) -> tuple[str, ...]:
+        """Return recent completed artifacts for one chat, newest first."""
+        clauses = [
+            "tasks.chat_id = ?",
+            "tasks.status = 'completed'",
+            "manifests.artifacts_json != '[]'",
+        ]
+        parameters: list[object] = [chat_id]
+        if project is not None:
+            clauses.append("manifests.project = ?")
+            parameters.append(project)
+        parameters.append(max(1, limit * 2))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT manifests.artifacts_json FROM task_manifests AS manifests
+                JOIN tasks ON tasks.id = manifests.task_id
+                WHERE """
+                + " AND ".join(clauses)
+                + " ORDER BY manifests.updated_at DESC LIMIT ?",
+                tuple(parameters),
+            ).fetchall()
+        artifacts: list[str] = []
+        for row in rows:
+            try:
+                values = json.loads(row["artifacts_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if isinstance(value, str) and value and value not in artifacts:
+                    artifacts.append(value)
+                if len(artifacts) >= limit:
+                    return tuple(artifacts)
+        return tuple(artifacts)
 
     def record_model_run(
         self,
@@ -1305,15 +1350,6 @@ class AgentStore:
                     SELECT 1 FROM tasks AS active
                     WHERE active.status = 'running'
                       AND active.chat_id = candidate.chat_id
-                      AND (
-                        active.ephemeral = 0
-                        OR candidate.ephemeral = 0
-                        OR (
-                            active.restricted = 1
-                            AND candidate.restricted = 1
-                            AND active.requester_id = candidate.requester_id
-                        )
-                      )
                   )
                 ORDER BY candidate.due_at, candidate.created_at LIMIT 1
                 """,
@@ -1587,18 +1623,17 @@ class AgentStore:
     def group_context(
         self,
         chat_id: int,
-        user_id: int,
         *,
-        limit: int = 6,
+        limit: int = 12,
         now: float | None = None,
     ) -> list[tuple[str, str]]:
         cutoff = (time.time() if now is None else now) - 30 * 86400
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT request, response FROM group_context "
-                "WHERE chat_id = ? AND user_id = ? AND created_at >= ? "
+                "WHERE chat_id = ? AND created_at >= ? "
                 "ORDER BY created_at DESC, id DESC LIMIT ?",
-                (chat_id, user_id, cutoff, limit),
+                (chat_id, cutoff, limit),
             ).fetchall()
         return [(row["request"], row["response"]) for row in reversed(rows)]
 
@@ -1623,10 +1658,10 @@ class AgentStore:
                 (chat_id, user_id, normalized_request, normalized_response, created_at),
             )
             connection.execute(
-                "DELETE FROM group_context WHERE chat_id = ? AND user_id = ? AND id NOT IN "
-                "(SELECT id FROM group_context WHERE chat_id = ? AND user_id = ? "
-                "ORDER BY created_at DESC, id DESC LIMIT 6)",
-                (chat_id, user_id, chat_id, user_id),
+                "DELETE FROM group_context WHERE chat_id = ? AND id NOT IN "
+                "(SELECT id FROM group_context WHERE chat_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 12)",
+                (chat_id, chat_id),
             )
             connection.execute(
                 "DELETE FROM group_context WHERE created_at < ?",

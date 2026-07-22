@@ -24,14 +24,14 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("changes external state", prompt)
         self.assertNotIn("learning_candidate", prompt)
 
-    def test_restricted_group_prompt_includes_only_supplied_requester_context(self) -> None:
+    def test_restricted_group_prompt_includes_supplied_group_context(self) -> None:
         prompt = compose_restricted_group_prompt(
             "What did I choose?",
             task_id="t1",
             context=[("My topic is Python", "Noted")],
         )
         self.assertIn("My topic is Python", prompt)
-        self.assertIn("belongs only to the current Telegram requester", prompt)
+        self.assertIn("shared only inside this Telegram group", prompt)
 
     def test_restricted_group_prompt_includes_only_the_public_owner_card(self) -> None:
         prompt = compose_restricted_group_prompt(

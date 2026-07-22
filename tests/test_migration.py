@@ -117,7 +117,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
             self.assertEqual(store.list_failed_deliveries(), [])
             self.assertEqual(store.list_groups(), [])
             self.assertEqual(store.group_member_count(-100123), 0)
-            self.assertEqual(store.group_context(-100123, 456), [])
+            self.assertEqual(store.group_context(-100123), [])
             self.assertFalse(store.is_group_addressed_message(-100123, 77))
             self.assertFalse(any(item.restricted for item in store.list_tasks()))
             recalled = RecallStore(target / "agent.db").search("English")[0]
