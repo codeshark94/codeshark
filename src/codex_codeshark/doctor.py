@@ -78,6 +78,7 @@ def run_doctor() -> int:
     def model_check() -> str:
         config = config_holder.get("value") or load_config()
         return (
+            f"quick {config.quick_model} ({config.quick_reasoning_effort}); "
             f"routine {config.routine_model} ({config.routine_reasoning_effort}); "
             f"primary {config.primary_model} ({config.primary_reasoning_effort}); "
             f"rework {config.rework_model} ({config.rework_reasoning_effort}); "

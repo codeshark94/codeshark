@@ -80,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     workspace = commands.add_parser("set-workspace", help="set the Codeshark workspace directory")
     workspace.add_argument("directory", type=Path)
     models = commands.add_parser("set-models", help="set the role-specific Codeshark models")
+    models.add_argument("--quick")
+    models.add_argument("--quick-effort")
     models.add_argument("--routine", required=True)
     models.add_argument("--routine-effort", required=True)
     models.add_argument("--primary", required=True)
@@ -282,6 +284,8 @@ def main() -> int:
             return 0
         if args.command == "set-models":
             config = set_model_assignments(
+                quick_model=args.quick,
+                quick_reasoning_effort=args.quick_effort,
                 routine_model=args.routine,
                 routine_reasoning_effort=args.routine_effort,
                 primary_model=args.primary,
@@ -306,7 +310,7 @@ def main() -> int:
             status = restart_when_idle()
             print(
                 "Models: "
-                f"routine={config.routine_model}, primary={config.primary_model}, "
+                f"quick={config.quick_model}, routine={config.routine_model}, primary={config.primary_model}, "
                 f"rework={config.rework_model}, validator={config.validator_model}, "
                 f"feedback={config.feedback_model}, "
                 f"router={config.router_model}, "

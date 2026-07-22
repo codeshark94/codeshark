@@ -1025,18 +1025,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             self.config.group_respond_to_mentions,
         )
         self.assertEqual(payload["security"]["groups"], [])
-        self.assertEqual(payload["model_assignments"][0]["role"], "Direct execution")
-        self.assertEqual(payload["model_assignments"][1]["role"], "Project Router")
-        self.assertEqual(payload["model_assignments"][2]["role"], "Triage")
-        self.assertEqual(payload["model_assignments"][3]["role"], "Planning")
-        self.assertEqual(payload["model_assignments"][5]["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_assignments"][5]["role"], "Primary execution")
-        self.assertEqual(payload["model_assignments"][5]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][5]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][6]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][7]["role"], "Independent review")
-        self.assertEqual(payload["model_assignments"][8]["role"], "Adversarial review")
-        self.assertEqual(payload["model_assignments"][9]["role"], "Finalization")
+        self.assertEqual(payload["model_assignments"][0]["role"], "Quick execution")
+        self.assertEqual(payload["model_assignments"][1]["role"], "Routine execution")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Project Router")
+        self.assertEqual(payload["model_assignments"][3]["role"], "Triage")
+        self.assertEqual(payload["model_assignments"][4]["role"], "Planning")
+        self.assertEqual(payload["model_assignments"][6]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][6]["role"], "Primary execution")
+        self.assertEqual(payload["model_assignments"][6]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][6]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][7]["role"], "Rework")
+        self.assertEqual(payload["model_assignments"][8]["role"], "Independent review")
+        self.assertEqual(payload["model_assignments"][9]["role"], "Adversarial review")
+        self.assertEqual(payload["model_assignments"][10]["role"], "Finalization")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
@@ -1942,6 +1943,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_creates_configured_isolated_group_worker_runners(self) -> None:
         self.assertEqual(len(self.app._worker_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._quick_runners), self.config.worker_count)
         self.assertEqual(len(self.app._primary_runners), self.config.worker_count)
         self.assertEqual(len(self.app._rework_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
@@ -1960,6 +1962,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.routine_model
                 and runner.model_reasoning_effort == self.config.routine_reasoning_effort
                 for runner in self.app._worker_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.quick_model
+                and runner.model_reasoning_effort == self.config.quick_reasoning_effort
+                for runner in self.app._quick_runners
             )
         )
         self.assertTrue(
@@ -2492,6 +2501,34 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(plan.tier, "quick")
         self.assertFalse(plan.uses_validator)
+
+    def test_quick_workflow_uses_the_dedicated_quick_runner(self) -> None:
+        routine = FakeCodexRunner()
+        quick = FakeCodexRunner(
+            RunResult(exit_code=0, message="Done.", thread_id="quick-thread", stderr="")
+        )
+        router = FakeCodexRunner(
+            project_triage_message='{"decision": "projectless", "confidence": "high"}'
+        )
+        triage = FakeCodexRunner(
+            triage_message='{"tier": "quick", "confidence": "high", "reason": "simple"}'
+        )
+        task = self.app.store.enqueue_task(
+            123, "What is the current status?", source="test", ephemeral=False
+        )
+
+        self.app._execute_task(
+            task,
+            runner=routine,
+            quick_runner=quick,
+            triage_runner=triage,
+            project_router_runner=router,
+        )
+
+        self.assertEqual(len(quick.prompts), 1)
+        self.assertEqual(len(routine.prompts), 0)
+        self.assertEqual(len(router.project_triage_prompts), 1)
+        self.assertEqual(len(triage.triage_prompts), 1)
 
     def test_triage_receives_active_project_memory_without_replaying_the_session(self) -> None:
         project = "gnw_transport_paper"

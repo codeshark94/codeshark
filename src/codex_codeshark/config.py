@@ -66,8 +66,10 @@ class Config:
     workdir: Path
     codex_binary: Path
     codex_profile: str = DEFAULT_CODEX_PROFILE
+    quick_model: str = "gpt-5.4-mini"
+    quick_reasoning_effort: str = "low"
     routine_model: str = "gpt-5.6-luna"
-    routine_reasoning_effort: str = "medium"
+    routine_reasoning_effort: str = "low"
     primary_model: str = "gpt-5.6-sol"
     primary_reasoning_effort: str = "high"
     rework_model: str = "gpt-5.6-sol"
@@ -76,10 +78,10 @@ class Config:
     validator_reasoning_effort: str = "high"
     feedback_model: str = "gpt-5.6-terra"
     feedback_reasoning_effort: str = "high"
-    router_model: str = "gpt-5.6-luna"
-    router_reasoning_effort: str = "medium"
-    triage_model: str = "gpt-5.6-luna"
-    triage_reasoning_effort: str = "medium"
+    router_model: str = "gpt-5.4-mini"
+    router_reasoning_effort: str = "low"
+    triage_model: str = "gpt-5.4-mini"
+    triage_reasoning_effort: str = "low"
     preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
     research_model: str = "gpt-5.6-luna"
@@ -297,11 +299,15 @@ def load_config(path: Path | None = None) -> Config:
     workdir = Path(str(data.get("workdir", ""))).expanduser()
     codex_binary = Path(str(data.get("codex_binary", ""))).expanduser()
     codex_profile = data.get("codex_profile", DEFAULT_CODEX_PROFILE)
+    quick_model = _require_model_setting(data, "quick_model", "gpt-5.4-mini")
+    quick_reasoning_effort = _require_reasoning_effort(
+        data, "quick_reasoning_effort", "low"
+    )
     routine_model = _require_model_setting(
         data, "routine_model", data.get("codex_model", "gpt-5.6-luna")
     )
     routine_reasoning_effort = _require_reasoning_effort(
-        data, "routine_reasoning_effort", "medium"
+        data, "routine_reasoning_effort", "low"
     )
     primary_model = _require_model_setting(data, "primary_model", "gpt-5.6-sol")
     primary_reasoning_effort = _require_reasoning_effort(
@@ -321,13 +327,13 @@ def load_config(path: Path | None = None) -> Config:
     feedback_reasoning_effort = _require_reasoning_effort(
         data, "feedback_reasoning_effort", validator_reasoning_effort
     )
-    triage_model = _require_model_setting(data, "triage_model", "gpt-5.6-luna")
+    triage_model = _require_model_setting(data, "triage_model", "gpt-5.4-mini")
     triage_reasoning_effort = _require_reasoning_effort(
-        data, "triage_reasoning_effort", "medium"
+        data, "triage_reasoning_effort", "low"
     )
-    router_model = _require_model_setting(data, "router_model", triage_model)
+    router_model = _require_model_setting(data, "router_model", "gpt-5.4-mini")
     router_reasoning_effort = _require_reasoning_effort(
-        data, "router_reasoning_effort", triage_reasoning_effort
+        data, "router_reasoning_effort", "low"
     )
     preflight_model = _require_model_setting(data, "preflight_model", "gpt-5.6-luna")
     preflight_reasoning_effort = _require_reasoning_effort(
@@ -504,6 +510,8 @@ def load_config(path: Path | None = None) -> Config:
         workdir=workdir.resolve(),
         codex_binary=codex_binary.resolve(),
         codex_profile=codex_profile.strip(),
+        quick_model=quick_model,
+        quick_reasoning_effort=quick_reasoning_effort,
         routine_model=routine_model,
         routine_reasoning_effort=routine_reasoning_effort,
         primary_model=primary_model,
@@ -637,11 +645,15 @@ def set_model_assignments(
     research_reasoning_effort: str | None = None,
     finalizer_model: str | None = None,
     finalizer_reasoning_effort: str | None = None,
+    quick_model: str | None = None,
+    quick_reasoning_effort: str | None = None,
 ) -> Config:
     """Persist the role-specific model routing without rewriting unrelated settings."""
     path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
     current = load_config(path)
     assignments = {
+        "quick_model": quick_model or current.quick_model,
+        "quick_reasoning_effort": quick_reasoning_effort or current.quick_reasoning_effort,
         "routine_model": routine_model,
         "routine_reasoning_effort": routine_reasoning_effort or current.routine_reasoning_effort,
         "primary_model": primary_model,
@@ -1215,8 +1227,10 @@ def write_local_config(
             f"workdir = {json.dumps(str(workdir), ensure_ascii=False)}",
             f"codex_binary = {json.dumps(str(codex_binary), ensure_ascii=False)}",
             f'codex_profile = "{DEFAULT_CODEX_PROFILE}"',
+            'quick_model = "gpt-5.4-mini"',
+            'quick_reasoning_effort = "low"',
             'routine_model = "gpt-5.6-luna"',
-            'routine_reasoning_effort = "medium"',
+            'routine_reasoning_effort = "low"',
             'primary_model = "gpt-5.6-sol"',
             'primary_reasoning_effort = "high"',
             'rework_model = "gpt-5.6-sol"',
@@ -1225,10 +1239,10 @@ def write_local_config(
             'validator_reasoning_effort = "high"',
             'feedback_model = "gpt-5.6-terra"',
             'feedback_reasoning_effort = "high"',
-            'router_model = "gpt-5.6-luna"',
-            'router_reasoning_effort = "medium"',
-            'triage_model = "gpt-5.6-luna"',
-            'triage_reasoning_effort = "medium"',
+            'router_model = "gpt-5.4-mini"',
+            'router_reasoning_effort = "low"',
+            'triage_model = "gpt-5.4-mini"',
+            'triage_reasoning_effort = "low"',
             'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
             'research_model = "gpt-5.6-luna"',

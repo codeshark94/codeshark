@@ -2888,7 +2888,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 668),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 714),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2901,42 +2901,45 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Role Models")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 632, width: 588, height: 20)
+        title.frame = NSRect(x: 16, y: 678, width: 588, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope before Triage. Quick and Routine are task tiers; both use Direct execution.")
+        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope before Triage. Quick uses the low-cost Quick executor; Routine uses the general executor.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 600, width: 588, height: 18)
+        detail.frame = NSRect(x: 16, y: 646, width: 588, height: 18)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 170, y: 574, width: 245, height: 14)
+        modelHeader.frame = NSRect(x: 170, y: 620, width: 245, height: 14)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 425, y: 574, width: 179, height: 14)
+        effortHeader.frame = NSRect(x: 425, y: 620, width: 179, height: 14)
         content.addSubview(effortHeader)
 
         let roles = [
-            ("Project Router", "Project Router", "gpt-5.6-luna", "medium"),
-            ("Triage", "Triage", "gpt-5.6-luna", "medium"),
-            ("Direct execution", "Direct execution", "gpt-5.6-luna", "medium"),
+            ("Project Router", "Project Router", "gpt-5.4-mini", "low"),
+            ("Triage", "Triage", "gpt-5.4-mini", "low"),
+            ("Quick execution", "Quick execution", "gpt-5.4-mini", "low"),
+            ("Routine execution", "Routine execution", "gpt-5.6-luna", "low"),
             ("Planning", "Planning", "gpt-5.6-luna", "low"),
             ("Research", "Research", "gpt-5.6-luna", "medium"),
-            ("Primary execution", "Primary execution", "gpt-5.6-sol", "high"),
-            ("Rework", "Rework", "gpt-5.6-sol", "high"),
-            ("Independent review", "Independent review", "gpt-5.6-terra", "high"),
-            ("Adversarial review", "Adversarial review", "gpt-5.6-terra", "high"),
-            ("Finalization", "Finalization", "gpt-5.6-sol", "medium"),
+            ("Primary execution", "Primary execution", "gpt-5.6-terra", "xhigh"),
+            ("Rework", "Rework", "gpt-5.6-terra", "high"),
+            ("Independent review", "Independent review", "gpt-5.6-terra", "medium"),
+            ("Adversarial review", "Adversarial review", "gpt-5.6-sol", "xhigh"),
+            ("Finalization", "Finalization", "gpt-5.6-terra", "medium"),
         ]
         modelOptions = availableModelOptions()
         modelPickers = [:]
         reasoningPickers = [:]
         let legacyRoleNames = [
+            "Quick execution": "Quick",
+            "Routine execution": "Routine",
             "Direct execution": "Routine",
             "Planning": "Planner",
             "Primary execution": "Primary",
@@ -2944,7 +2947,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "Adversarial review": "Adversarial Review",
         ]
         for (index, role) in roles.enumerated() {
-            let y = 516 - (index * 46)
+            let y = 562 - (index * 46)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 12, weight: .medium)
             label.frame = NSRect(x: 16, y: y + 18, width: 145, height: 16)
@@ -3060,9 +3063,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func applyModelRouting() {
-        guard let routinePicker = modelPickers["Direct execution"],
+        guard let quickPicker = modelPickers["Quick execution"],
+              let quick = selectedModel(quickPicker),
+              let quickEffort = reasoningPickers["Quick execution"]?.titleOfSelectedItem,
+              let routinePicker = modelPickers["Routine execution"],
               let routine = selectedModel(routinePicker),
-              let routineEffort = reasoningPickers["Direct execution"]?.titleOfSelectedItem,
+              let routineEffort = reasoningPickers["Routine execution"]?.titleOfSelectedItem,
               let routerPicker = modelPickers["Project Router"],
               let router = selectedModel(routerPicker),
               let routerEffort = reasoningPickers["Project Router"]?.titleOfSelectedItem,
@@ -3096,6 +3102,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         let arguments = [
             "set-models",
+            "--quick", quick,
+            "--quick-effort", quickEffort,
             "--routine", routine,
             "--routine-effort", routineEffort,
             "--router", router,
