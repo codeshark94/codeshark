@@ -668,10 +668,18 @@ class AgentApp:
                 )
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
             weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
-            project_usage = self.store.project_model_usage(since=now - 5 * 60 * 60)
-            weekly_project_usage = self.store.project_model_usage(
-                since=now - 7 * 24 * 60 * 60
-            )
+            project_usage = [
+                summary
+                for summary in self.store.project_model_usage(since=now - 5 * 60 * 60)
+                if summary.project in registered_project_names
+            ]
+            weekly_project_usage = [
+                summary
+                for summary in self.store.project_model_usage(
+                    since=now - 7 * 24 * 60 * 60
+                )
+                if summary.project in registered_project_names
+            ]
             weekly_role_usage = {
                 item.role: item
                 for item in self.store.model_role_usage(since=now - 7 * 24 * 60 * 60)

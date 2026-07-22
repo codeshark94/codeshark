@@ -972,6 +972,23 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             cancelled=False,
             timed_out=False,
         )
+        self.app.store.upsert_task_manifest(
+            "stale-project-run",
+            project="Stale Project",
+            tier="quick",
+            phase="completed",
+        )
+        self.app.store.record_model_run(
+            task_id="stale-project-run",
+            phase="primary",
+            model="gpt-5.6-sol",
+            reasoning_effort="high",
+            started_at=time.time() - 12,
+            finished_at=time.time(),
+            exit_code=0,
+            cancelled=False,
+            timed_out=False,
+        )
         failed = self.app.store.enqueue_task(456, "check", source="telegram", ephemeral=False)
         failed = self.app.store.claim_next_task()
         self.app.store.finish_task(failed.id, "failed", "brief diagnostic")
@@ -1036,10 +1053,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["active_tasks"][0]["completed_stages"], ["primary"])
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
         self.assertEqual(payload["queued_tasks"][0]["project"], "Queued Project")
-        self.assertEqual(payload["recent_deliveries"][0]["project"], "Private Project")
-        self.assertEqual(payload["recent_deliveries"][0]["artifacts"], ["final-report.pdf"])
-        self.assertEqual(payload["recent_deliveries"][0]["artifact_paths"], ["/safe/root/final-report.pdf"])
-        self.assertEqual(payload["recent_deliveries"][0]["orchestration_tier"], "standard")
+        private_delivery = next(
+            item
+            for item in payload["recent_deliveries"]
+            if item["project"] == "Private Project"
+        )
+        self.assertEqual(private_delivery["artifacts"], ["final-report.pdf"])
+        self.assertEqual(private_delivery["artifact_paths"], ["/safe/root/final-report.pdf"])
+        self.assertEqual(private_delivery["orchestration_tier"], "standard")
         self.assertEqual(payload["projects"][0]["project"], "Private Project")
         self.assertEqual(payload["projects"][0]["active_task_count"], 1)
         self.assertIn(
@@ -1059,9 +1080,22 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["project_usage_5h"][0]["project"], "Private Project")
         self.assertEqual(payload["project_usage_5h"][0]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["project_usage_7d"][0]["project"], "Private Project")
-        self.assertEqual(payload["activity_log"][0]["phase"], "primary")
-        self.assertEqual(payload["activity_log"][0]["orchestration_tier"], "standard")
-        self.assertEqual(payload["activity_log"][0]["outcome"], "completed")
+        self.assertNotIn(
+            "Stale Project",
+            {item["project"] for item in payload["project_usage_5h"]},
+        )
+        self.assertNotIn(
+            "Stale Project",
+            {item["project"] for item in payload["project_usage_7d"]},
+        )
+        private_activity = next(
+            item
+            for item in payload["activity_log"]
+            if item["project"] == "Private Project"
+        )
+        self.assertEqual(private_activity["phase"], "primary")
+        self.assertEqual(private_activity["orchestration_tier"], "standard")
+        self.assertEqual(private_activity["outcome"], "completed")
         self.assertNotIn("secret request text", json.dumps(payload))
         self.assertNotIn("queued secret request", json.dumps(payload))
 
