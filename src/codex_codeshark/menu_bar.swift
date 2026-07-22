@@ -1706,9 +1706,13 @@ struct ProjectOverviewView: View {
 struct AttentionView: View {
     @ObservedObject var model: DashboardModel
     let showLogs: () -> Void
-    let retryTask: (String) -> Void
+    let retryTask: (String, @escaping (Bool, String?) -> Void) -> Void
     let restartWhenIdle: () -> Void
     let close: () -> Void
+
+    @State private var pendingContinuationTaskID: String?
+    @State private var continuationStatus: String?
+    @State private var continuationQueued = false
 
     private var snapshot: DashboardSnapshot { model.snapshot }
 
@@ -1753,16 +1757,35 @@ struct AttentionView: View {
                                     .foregroundStyle(.secondary)
                                 }
                                 HStack(spacing: 8) {
-                                    Button("Continue") {
-                                        retryTask(failure.taskID)
+                                    Button(pendingContinuationTaskID == failure.taskID ? "Queuing…" : "Continue") {
+                                        pendingContinuationTaskID = failure.taskID
+                                        continuationQueued = false
+                                        continuationStatus = "Queuing continuation…"
+                                        retryTask(failure.taskID) { succeeded, detail in
+                                            if succeeded {
+                                                continuationQueued = true
+                                                continuationStatus = "Continuation queued. It will resume from the saved stage."
+                                            } else {
+                                                pendingContinuationTaskID = nil
+                                                continuationStatus = detail ?? "Could not queue the continuation."
+                                            }
+                                        }
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.small)
-                                    .disabled(failure.retryAvailable != true)
+                                    .disabled(failure.retryAvailable != true || pendingContinuationTaskID != nil)
                                     Button("Restart when idle") {
                                         restartWhenIdle()
                                     }
                                     .controlSize(.small)
+                                }
+                                if let continuationStatus {
+                                    Label(
+                                        continuationStatus,
+                                        systemImage: continuationQueued ? "checkmark.circle.fill" : "arrow.trianglehead.clockwise"
+                                    )
+                                    .font(.caption2)
+                                    .foregroundStyle(continuationQueued ? .green : .secondary)
                                 }
                                 Text(
                                     failure.retryAvailable == true
@@ -3432,7 +3455,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             rootView: AttentionView(
                 model: dashboard,
                 showLogs: { [weak self] in self?.showLogs() },
-                retryTask: { [weak self] taskID in self?.retryTask(taskID) },
+                retryTask: { [weak self] taskID, completion in self?.retryTask(taskID, completion: completion) },
                 restartWhenIdle: { [weak self] in self?.restartWhenIdle() },
                 close: { [weak self] in self?.attentionPanel?.close() }
             )
@@ -3443,13 +3466,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         attentionPanel = panel
     }
 
-    private func retryTask(_ taskID: String) {
-        let result = executeServiceCommand(["retry-task", taskID])
-        if result.status != 0 {
-            showError(result.output.isEmpty ? "This task can no longer be retried safely." : result.output)
-            return
+    private func retryTask(_ taskID: String, completion: @escaping (Bool, String?) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async {
+                    completion(false, "Codeshark is unavailable.")
+                }
+                return
+            }
+            let result = self.executeServiceCommand(["retry-task", taskID])
+            DispatchQueue.main.async {
+                guard result.status == 0 else {
+                    completion(false, result.output.isEmpty ? "This task can no longer be retried safely." : result.output)
+                    return
+                }
+                self.dashboard.refresh()
+                completion(true, nil)
+            }
         }
-        dashboard.refresh()
     }
 
     private func restartWhenIdle() {
