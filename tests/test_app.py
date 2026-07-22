@@ -2620,6 +2620,47 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(router.project_triage_prompts), 1)
         self.assertEqual(len(triage.triage_prompts), 1)
 
+    def test_executor_receives_fresh_same_project_work_context(self) -> None:
+        project = "gnw_transport_paper"
+        (self.config.workdir / project).mkdir()
+        prior = self.app.store.enqueue_task(
+            123,
+            f"[[CODESHARK_PROJECT: {project}]]\nRun the previous simulation.",
+            source="telegram",
+            ephemeral=False,
+        )
+        self.assertEqual(self.app.store.claim_next_task().id, prior.id)
+        self.assertTrue(self.app.store.finish_task(prior.id, "completed", ""))
+        self.app.store.upsert_task_manifest(
+            prior.id,
+            project=project,
+            tier="routine",
+            phase="completed",
+            artifacts=(str(self.config.workdir / "repeat_ratio_mean_sd.png"),),
+            delivery_state="delivered",
+        )
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "active", "confidence": "high"}',
+            triage_message='{"tier": "quick", "confidence": "high", "reason": "status"}',
+        )
+        task = self.app.store.enqueue_task(
+            123,
+            f"[[CODESHARK_PROJECT: {project}]]\n끝남?",
+            source="telegram",
+            ephemeral=False,
+        )
+
+        self.app._execute_task(task, runner=runner)
+
+        prompt = runner.prompts[0][0]
+        self.assertIn("[Live project work context]", prompt)
+        self.assertIn("No other Codeshark task is active for this chat and project.", prompt)
+        self.assertIn(
+            "Recent recorded task: status=completed; tier=routine; phase=completed; "
+            "delivery=delivered; artifacts=repeat_ratio_mean_sd.png.",
+            prompt,
+        )
+
     def test_triage_receives_active_project_memory_without_replaying_the_session(self) -> None:
         project = "gnw_transport_paper"
         task = self.app.store.enqueue_task(

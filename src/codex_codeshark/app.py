@@ -2086,6 +2086,7 @@ class AgentApp:
                 + (("requested artifact",) if file_delivery_required else ()),
                 delivery_state="required" if file_delivery_required else "not-requested",
             )
+            prompt += self._execution_work_context(task, project)
             if file_delivery_enabled and not workflow_plan.uses_validator:
                 prompt += self._file_delivery_prompt(
                     automatic=automatic_file_delivery,
@@ -3168,6 +3169,56 @@ class AgentApp:
             if content:
                 lines.append(f"Relevant {asset.kind} asset ({asset.title}): {content[:360]}")
         return "\n".join(lines)
+
+    def _execution_work_context(self, task: TaskRecord, project: str) -> str:
+        """Give an executor fresh same-chat project facts alongside its persistent thread."""
+        lines = [
+            "[Live project work context]",
+            "This incoming message is the current Codeshark task. Its task record may say "
+            "running while this response is being prepared.",
+        ]
+        with self._status_lock:
+            active = tuple(
+                item
+                for item in self._active_tasks.values()
+                if (
+                    item.task.id != task.id
+                    and item.task.chat_id == task.chat_id
+                    and not item.task.restricted
+                    and unpack_project_task(item.task.prompt)[0] == project
+                )
+            )
+        if active:
+            for item in active[:3]:
+                lines.append(
+                    "Other active Codeshark task: "
+                    f"phase={item.phase}; model={getattr(item.runner, 'model', 'Codex default')}."
+                )
+        else:
+            lines.append("No other Codeshark task is active for this chat and project.")
+
+        recent = 0
+        for manifest in self.store.recent_task_manifests(limit=24):
+            if manifest.task_id == task.id or manifest.project != project:
+                continue
+            prior = self.store.get_task(manifest.task_id)
+            if prior is None or prior.chat_id != task.chat_id:
+                continue
+            artifacts = ", ".join(Path(path).name for path in manifest.artifacts[:3])
+            summary = (
+                f"Recent recorded task: status={prior.status}; tier={manifest.tier}; "
+                f"phase={manifest.phase}; delivery={manifest.delivery_state}"
+            )
+            if artifacts:
+                summary += f"; artifacts={artifacts}"
+            lines.append(summary + ".")
+            recent += 1
+            if recent == 3:
+                break
+        if not recent:
+            lines.append("No earlier recorded Codeshark task is available for this chat and project.")
+        lines.append("[/Live project work context]")
+        return "\n\n" + "\n".join(lines)
 
     @staticmethod
     def _workflow_triage_prompt(request: str, context: str) -> str:
