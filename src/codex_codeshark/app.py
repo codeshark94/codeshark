@@ -2138,10 +2138,22 @@ class AgentApp:
                 project,
             )
             return None
-        if not snapshot.codex_thread_id or snapshot.session_turn_count < self.config.max_session_turns:
+        if not snapshot.codex_thread_id:
             return None
+        expired = self.state.session_idle_expired(
+            chat_id,
+            project,
+            retention_seconds=self.config.temporary_context_retention_days * 24 * 60 * 60,
+        )
+        if not expired and snapshot.session_turn_count < self.config.max_session_turns:
+            return None
+        reason = (
+            f"its temporary context was idle for {self.config.temporary_context_retention_days} days"
+            if expired
+            else "it reached the temporary session turn limit"
+        )
         summary_prompt = (
-            "Before ending this session, summarize only durable facts, user preferences, "
+            f"Before ending this session because {reason}, summarize only durable facts, user preferences, "
             "or reusable procedures needed in future sessions as one learning proposal. "
             "Respond only with the learning_candidate protocol and omit one-off details."
         )
@@ -2185,9 +2197,10 @@ class AgentApp:
             return None
         self.state.set_session_thread_id(chat_id, None, project)
         LOGGER.info(
-            "rotated session for chat_id=%s project=%s and queued durable summary %s",
+            "rotated session for chat_id=%s project=%s (%s) and queued durable summary %s",
             chat_id,
             project,
+            reason,
             candidate.id,
         )
 
@@ -4170,6 +4183,8 @@ class AgentApp:
                 f"Codex model: {self.runner.model or 'Codex default'}",
                 f"Temporary project session: {session}",
                 f"Temporary session turns: {snapshot.session_turn_count}/{self.config.max_session_turns}",
+                "Temporary context retention: "
+                f"{self.config.temporary_context_retention_days} idle days",
                 f"Project long-term memories: {len(self.memory.list_for_project(project))}",
                 f"Project assistant assets: {len(self.vault.select('', scope=project, max_chars=20_000))}",
                 f"Approved skills: {len(self.skills.list())}",

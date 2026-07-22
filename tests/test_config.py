@@ -366,6 +366,7 @@ class ConfigTests(unittest.TestCase):
                         f'workdir = "{workspace}"',
                         f'codex_binary = "{binary}"',
                         "max_session_turns = 25",
+                        "temporary_context_retention_days = 21",
                         "admin_full_access = true",
                         f'read_only_roots = ["{read_only}"]',
                         f'delegated_roots = ["{delegated}"]',
@@ -381,6 +382,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.allowed_user_ids, frozenset({123}))
             self.assertEqual(loaded.workdir, workspace.resolve())
             self.assertEqual(loaded.max_session_turns, 25)
+            self.assertEqual(loaded.temporary_context_retention_days, 21)
             self.assertEqual(loaded.worker_count, 8)
             self.assertEqual(loaded.routine_model, "gpt-5.6-luna")
             self.assertEqual(loaded.routine_reasoning_effort, "medium")

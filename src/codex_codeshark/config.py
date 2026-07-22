@@ -121,6 +121,7 @@ class Config:
     queue_size: int = 20
     worker_count: int = 8
     max_session_turns: int = 120
+    temporary_context_retention_days: int = 14
     memory_max_chars: int = 12000
     codex_network_access: bool = False
     admin_full_access: bool = False
@@ -366,6 +367,9 @@ def load_config(path: Path | None = None) -> Config:
     queue_size = _require_int(data, "queue_size", 20)
     worker_count = _require_int(data, "worker_count", 8)
     max_session_turns = _require_int(data, "max_session_turns", 120)
+    temporary_context_retention_days = _require_int(
+        data, "temporary_context_retention_days", 14
+    )
     memory_max_chars = _require_int(data, "memory_max_chars", 12000)
     codex_network_access = _require_bool(data, "codex_network_access", False)
     admin_full_access = _require_bool(data, "admin_full_access", False)
@@ -400,6 +404,8 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError("worker_count must be positive")
     if not 5 <= max_session_turns <= 500:
         raise ConfigError("max_session_turns must be between 5 and 500")
+    if not 1 <= temporary_context_retention_days <= 90:
+        raise ConfigError("temporary_context_retention_days must be between 1 and 90")
     if not 1000 <= memory_max_chars <= 20000:
         raise ConfigError("memory_max_chars must be between 1000 and 20000")
     if not 1_000_000 <= attachment_max_bytes <= 50_000_000:
@@ -553,6 +559,7 @@ def load_config(path: Path | None = None) -> Config:
         queue_size=queue_size,
         worker_count=worker_count,
         max_session_turns=max_session_turns,
+        temporary_context_retention_days=temporary_context_retention_days,
         memory_max_chars=memory_max_chars,
         codex_network_access=codex_network_access,
         admin_full_access=admin_full_access,
@@ -1257,6 +1264,7 @@ def write_local_config(
             "queue_size = 20",
             "worker_count = 8",
             "max_session_turns = 120",
+            "temporary_context_retention_days = 14",
             "memory_max_chars = 12000",
             "codex_network_access = false",
             "admin_full_access = false",

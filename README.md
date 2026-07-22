@@ -259,10 +259,10 @@ The agent stores only what it needs to resume useful work:
 
 | Store | Bound |
 |---|---|
-| Temporary project session | One persisted Codex session per chat and named project; rotated at `max_session_turns` after a durable summary proposal is persisted. |
+| Temporary project session | One persisted Codex session per source chat (Telegram private, group, or local) and named project. It is rotated at `max_session_turns` or after 14 idle days, after a durable summary proposal is persisted. |
 | Scheduled and guest runs | Ephemeral; their Codex sessions are not retained. |
 | Task history | Raw prompts are cleared at terminal status; 200 terminal records remain. |
-| Long-term memory | 12,000 characters by default across project-scoped records, with 1,000 characters per item. |
+| Long-term memory | 12,000 characters by default across project-scoped records, with 1,000 characters per item. Project facts and delivered artifacts are shared across that project's Telegram and local sessions; their temporary conversational contexts are not. |
 | Skills | At most 100 approved skills, up to 8,000 characters each. |
 | Scheduled jobs | At most 100 active jobs and 200 terminal records. |
 | Attachments | The 50 newest gateway-managed files. |

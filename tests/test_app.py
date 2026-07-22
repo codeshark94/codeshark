@@ -2732,6 +2732,34 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.learning.list_recent()[0].status, "pending")
         self.assertEqual(self.api.messages[-1], (123, "done"))
 
+    def test_rotates_idle_temporary_context_after_durable_summary(self) -> None:
+        expired_at = time.time() - (
+            self.app.config.temporary_context_retention_days * 24 * 60 * 60 + 1
+        )
+        self.app.state.set_session_thread_id(
+            123,
+            "thread-old",
+            "Research",
+            now=expired_at,
+        )
+        summary = RunResult(
+            exit_code=0,
+            message=(
+                "<learning_candidate>"
+                '{"kind":"memory","title":"Summary","content":"Durable fact"}'
+                "</learning_candidate>"
+            ),
+            thread_id="thread-old",
+            stderr="",
+        )
+        runner = FakeCodexRunner(summary)
+
+        self.app._rotate_session_if_needed(123, "Research", runner, "task-1")
+
+        self.assertEqual(runner.deleted_sessions, ["thread-old"])
+        self.assertIsNone(self.app.state.session_snapshot(123, "Research").codex_thread_id)
+        self.assertEqual(self.app.learning.list_recent()[0].title, "Summary")
+
 
 if __name__ == "__main__":
     unittest.main()

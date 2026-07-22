@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from .secure_io import (
 class SessionState:
     codex_thread_id: str | None = None
     session_turn_count: int = 0
+    last_active_at: float = 0.0
 
 
 @dataclass
@@ -144,9 +147,18 @@ class StateStore:
     def _session_state(data: dict) -> SessionState:
         thread_id = data.get("codex_thread_id")
         turns = data.get("session_turn_count", 0)
+        last_active_at = data.get("last_active_at", 0.0)
         return SessionState(
             codex_thread_id=thread_id if isinstance(thread_id, str) else None,
             session_turn_count=turns if isinstance(turns, int) and not isinstance(turns, bool) else 0,
+            last_active_at=(
+                float(last_active_at)
+                if isinstance(last_active_at, (int, float))
+                and not isinstance(last_active_at, bool)
+                and math.isfinite(last_active_at)
+                and last_active_at > 0
+                else 0.0
+            ),
         )
 
     def snapshot(self) -> AgentState:
@@ -272,9 +284,12 @@ class StateStore:
         chat_id: int,
         thread_id: str | None,
         project: str | None = None,
+        *,
+        now: float | None = None,
     ) -> None:
         with self._lock:
             key = str(chat_id)
+            timestamp = time.time() if now is None else now
             if project is not None:
                 normalized = normalize_project_name(project)
                 sessions = self._state.project_sessions.setdefault(key, {})
@@ -290,6 +305,7 @@ class StateStore:
                     sessions[normalized] = SessionState(
                         codex_thread_id=thread_id,
                         session_turn_count=previous.session_turn_count,
+                        last_active_at=timestamp,
                     )
                 if not sessions:
                     self._state.project_sessions.pop(key, None)
@@ -307,6 +323,7 @@ class StateStore:
                 self._state.chat_sessions[key] = SessionState(
                     codex_thread_id=thread_id,
                     session_turn_count=previous.session_turn_count,
+                    last_active_at=timestamp,
                 )
             self._write()
 
@@ -315,9 +332,12 @@ class StateStore:
         chat_id: int,
         thread_id: str,
         project: str | None = None,
+        *,
+        now: float | None = None,
     ) -> None:
         with self._lock:
             key = str(chat_id)
+            timestamp = time.time() if now is None else now
             if project is not None:
                 normalized = normalize_project_name(project)
                 sessions = self._state.project_sessions.setdefault(key, {})
@@ -331,6 +351,7 @@ class StateStore:
                 session = SessionState(
                     codex_thread_id=thread_id,
                     session_turn_count=turn_count + 1,
+                    last_active_at=timestamp,
                 )
                 sessions[normalized] = session
                 if normalized == DEFAULT_PROJECT:
@@ -343,9 +364,26 @@ class StateStore:
             self._state.chat_sessions[key] = SessionState(
                 codex_thread_id=thread_id,
                 session_turn_count=turn_count + 1,
+                last_active_at=timestamp,
             )
             self._clear_interrupted_project_locked(key, DEFAULT_PROJECT)
             self._write()
+
+    def session_idle_expired(
+        self,
+        chat_id: int,
+        project: str,
+        *,
+        retention_seconds: float,
+        now: float | None = None,
+    ) -> bool:
+        if retention_seconds <= 0:
+            raise ValueError("retention_seconds must be positive")
+        snapshot = self.session_snapshot(chat_id, project)
+        if not snapshot.codex_thread_id or snapshot.last_active_at <= 0:
+            return False
+        timestamp = time.time() if now is None else now
+        return timestamp - snapshot.last_active_at >= retention_seconds
 
     def _clear_interrupted_project_locked(self, chat_id: str, project: str) -> None:
         projects = self._state.interrupted_projects.get(chat_id)

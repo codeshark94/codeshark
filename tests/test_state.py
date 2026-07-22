@@ -88,6 +88,25 @@ class StateStoreTests(unittest.TestCase):
                 1,
             )
 
+    def test_expires_only_the_idle_source_and_project_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = StateStore(Path(directory) / "state.json")
+            retention = 14 * 24 * 60 * 60
+            now = 2_000_000.0
+            store.set_session_thread_id(0, "local-research", "Research", now=now - retention)
+            store.set_session_thread_id(123, "telegram-research", "Research", now=now - 1)
+            store.set_session_thread_id(0, "local-general", "General", now=now - 1)
+
+            self.assertTrue(
+                store.session_idle_expired(0, "Research", retention_seconds=retention, now=now)
+            )
+            self.assertFalse(
+                store.session_idle_expired(123, "Research", retention_seconds=retention, now=now)
+            )
+            self.assertFalse(
+                store.session_idle_expired(0, "General", retention_seconds=retention, now=now)
+            )
+
     def test_persists_automatic_file_delivery_per_chat(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
