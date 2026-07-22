@@ -2415,6 +2415,40 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.messages, [(123, "The requested graph is ready.")])
         self.assertIn("[Telegram final-response skill]", self.app.runner.prompts[0][0])
 
+    def test_final_agent_can_attach_a_selected_artifact_set(self) -> None:
+        figure = self.app.config.workdir / "figure-3.png"
+        report = self.app.config.workdir / "figure-3-report.pdf"
+        figure.write_bytes(b"PNG")
+        report.write_bytes(b"%PDF-1.4")
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=(
+                    "The figure and its reviewable report are ready.\n"
+                    f"[[CODESHARK_SEND_FILE: {figure}]]\n"
+                    f"[[CODESHARK_SEND_FILE: {report}]]"
+                ),
+                thread_id="thread-new",
+                stderr="",
+            ),
+        )
+
+        self.app._handle_update(self.update(123, "그래프랑 검토용 보고서도 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(
+            self.api.documents,
+            [
+                (123, figure.resolve(), self.app.config.attachment_max_bytes),
+                (123, report.resolve(), self.app.config.attachment_max_bytes),
+            ],
+        )
+        self.assertEqual(
+            self.api.messages,
+            [(123, "The figure and its reviewable report are ready.")],
+        )
+
     def test_telegram_response_redacts_any_host_path_without_delivery(self) -> None:
         report = self.app.config.workdir / "final-report.pdf"
         report.write_bytes(b"%PDF-1.4")
