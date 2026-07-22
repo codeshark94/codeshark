@@ -16,6 +16,7 @@ from codex_codeshark.identity import (
     owner_onboarding_message,
 )
 from codex_codeshark.local_console import LOCAL_CONSOLE_SOURCE
+from codex_codeshark.projects import discover_workspace_projects
 from codex_codeshark.telegram_api import TelegramError
 
 
@@ -1181,6 +1182,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(runner.prompts[0][0].endswith("do work"))
 
     def test_project_switch_isolates_temporary_session_and_long_term_context(self) -> None:
+        (self.config.workdir / "Research").mkdir()
         self.app.state.set_session_thread_id(123, "general-thread", "General")
         self.app.memory.add("General-only context", scope="General")
         self.app.memory.add("Research-only context", scope="Research")
@@ -1327,6 +1329,37 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertFalse((self.config.workdir / "Catalyst study").exists())
         self.assertEqual(self.app.state.active_project(123), "FETM")
         self.assertIn("Project: FETM", runner.prompts[0][0])
+
+    def test_project_router_resets_an_unavailable_active_project_to_general(self) -> None:
+        self.app.state.set_active_project(123, "Stale project")
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "active", "confidence": "high"}'
+        )
+        self.app.runner = runner
+        task = self.app.store.enqueue_task(
+            123,
+            "Check the current status.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(task)
+
+        self.assertEqual(self.app.state.active_project(123), "General")
+        self.assertIn("Project: General", runner.prompts[0][0])
+
+    def test_workspace_directories_are_projects_except_inbox_and_deliverables(self) -> None:
+        for name in ("analysis", "outputs", "inbox", "deliverables", ".codeshark"):
+            (self.config.workdir / name).mkdir()
+
+        projects = discover_workspace_projects(
+            self.config.workdir,
+            self.config.delegated_roots,
+            agent_repository_root=self.config.agent_repository_root,
+        )
+
+        self.assertEqual(tuple(project.name for project in projects), ("analysis", "outputs"))
 
     def test_project_router_receives_existing_project_memory_cues(self) -> None:
         (self.config.workdir / "gnw_transport_paper").mkdir()

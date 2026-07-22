@@ -2704,6 +2704,15 @@ class AgentApp:
             self.config.delegated_roots,
             agent_repository_root=self.config.agent_repository_root,
         )
+        candidate_names = {item.name for item in candidates}
+        if initial_project != DEFAULT_PROJECT and initial_project not in candidate_names:
+            LOGGER.info(
+                "project router reset unavailable active project task_id=%s project=%r",
+                task.id,
+                initial_project,
+            )
+            initial_project = DEFAULT_PROJECT
+            self.state.set_active_project(task.chat_id, initial_project)
         explicit_project = project_named_in_request(request, candidates)
         if explicit_project is not None:
             self.state.set_active_project(task.chat_id, explicit_project)

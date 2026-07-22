@@ -8,23 +8,7 @@ from pathlib import Path
 DEFAULT_PROJECT = "General"
 GLOBAL_SCOPE = "global"
 
-_PROJECT_SYSTEM_DIRECTORIES = frozenset({
-    "build",
-    "deliverables",
-    "inbox",
-    "node_modules",
-    "outputs",
-    "tmp",
-})
-_PROJECT_MARKERS = (
-    ".git",
-    "AGENTS.md",
-    "README.md",
-    "pyproject.toml",
-    "package.json",
-    "Cargo.toml",
-    "main.tex",
-)
+_WORKSPACE_NON_PROJECT_DIRECTORIES = frozenset({"deliverables", "inbox"})
 
 
 @dataclass(frozen=True)
@@ -42,19 +26,19 @@ def discover_workspace_projects(
     agent_repository_root: Path | None = None,
     limit: int = 48,
 ) -> tuple[WorkspaceProject, ...]:
-    """Discover project roots without recursively scanning administrator data.
+    """Discover only physical direct-child projects in the configured workspace.
 
-    Direct children of the writable workspace are user projects unless they are
-    Codeshark-managed/system directories. Delegated roots are inspected only
-    two levels deep and only directories with a conventional project marker are
-    considered. This keeps project routing bounded and server-controlled.
+    A workspace directory is the project source of truth. Hidden internal
+    directories plus the transport-only ``inbox`` and ``deliverables`` folders
+    are excluded; every other direct child is a project. Delegated roots remain
+    writable administrator roots, but never become implicit project candidates.
     """
 
     root = workdir.expanduser().resolve()
-    agent_root = agent_repository_root.expanduser().resolve() if agent_repository_root else None
+    del delegated_roots, agent_repository_root
     discovered: dict[Path, WorkspaceProject] = {}
 
-    def add(path: Path, name: str, *, workspace_project: bool = False) -> None:
+    def add(path: Path, name: str) -> None:
         if len(discovered) >= limit:
             return
         try:
@@ -63,13 +47,6 @@ def discover_workspace_projects(
             return
         if resolved == root or not resolved.is_dir():
             return
-        if agent_root is not None and not workspace_project:
-            try:
-                resolved.relative_to(agent_root)
-            except ValueError:
-                pass
-            else:
-                return
         try:
             normalized = normalize_project_name(name)
         except ValueError:
@@ -83,38 +60,11 @@ def discover_workspace_projects(
     for child in workspace_children:
         if (
             child.name.startswith(".")
-            or child.name in _PROJECT_SYSTEM_DIRECTORIES
+            or child.name in _WORKSPACE_NON_PROJECT_DIRECTORIES
             or not child.is_dir()
         ):
             continue
-        add(child, child.name, workspace_project=True)
-
-    for delegated_root in delegated_roots:
-        try:
-            delegated = delegated_root.expanduser().resolve()
-            children = sorted(delegated.iterdir(), key=lambda path: path.name.casefold())
-        except OSError:
-            continue
-        for parent in children:
-            if parent.name.startswith(".") or not parent.is_dir():
-                continue
-            candidates = (parent,)
-            try:
-                candidates += tuple(
-                    child
-                    for child in sorted(parent.iterdir(), key=lambda path: path.name.casefold())
-                    if not child.name.startswith(".") and child.is_dir()
-                )
-            except OSError:
-                pass
-            for candidate in candidates:
-                if not any((candidate / marker).exists() for marker in _PROJECT_MARKERS):
-                    continue
-                try:
-                    relative = candidate.relative_to(delegated)
-                except ValueError:
-                    continue
-                add(candidate, relative.as_posix())
+        add(child, child.name)
 
     return tuple(sorted(discovered.values(), key=lambda item: item.name.casefold()))
 
@@ -173,7 +123,7 @@ def create_workspace_project(workdir: Path, name: str) -> WorkspaceProject:
     if (
         normalized.casefold() == DEFAULT_PROJECT.casefold()
         or normalized.startswith(".")
-        or normalized in _PROJECT_SYSTEM_DIRECTORIES
+        or normalized in _WORKSPACE_NON_PROJECT_DIRECTORIES
         or "/" in normalized
         or "\\" in normalized
     ):
