@@ -411,7 +411,8 @@ class AgentStore:
                     approved INTEGER NOT NULL DEFAULT 0,
                     restricted INTEGER NOT NULL DEFAULT 0,
                     requester_id INTEGER,
-                    reply_to_message_id INTEGER
+                    reply_to_message_id INTEGER,
+                    retry_of_task_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS tasks_ready
                     ON tasks(status, due_at, created_at);
@@ -568,6 +569,8 @@ class AgentStore:
                 connection.execute("ALTER TABLE tasks ADD COLUMN requester_id INTEGER")
             if "reply_to_message_id" not in task_columns:
                 connection.execute("ALTER TABLE tasks ADD COLUMN reply_to_message_id INTEGER")
+            if "retry_of_task_id" not in task_columns:
+                connection.execute("ALTER TABLE tasks ADD COLUMN retry_of_task_id TEXT")
             schedule_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(schedules)").fetchall()
             }
@@ -1295,6 +1298,35 @@ class AgentStore:
         with self._connect() as connection:
             return self._resume_context(connection, task_id)
 
+    def _legacy_capacity_parent_context(
+        self,
+        connection: sqlite3.Connection,
+        task: sqlite3.Row,
+        prompt: str,
+        current: TaskResumeContext | None,
+    ) -> TaskResumeContext | None:
+        if (
+            current is None
+            or current.tier != "quick"
+            or "[Capacity continuation]" not in prompt
+            or "[[CODESHARK_RESUME:" in prompt
+        ):
+            return current
+        row = connection.execute(
+            """
+            SELECT prior.id
+            FROM tasks AS prior
+            JOIN task_manifests AS manifests ON manifests.task_id = prior.id
+            WHERE prior.chat_id = ? AND prior.status = 'failed'
+              AND prior.finished_at IS NOT NULL AND prior.finished_at < ?
+              AND manifests.project = ? AND manifests.tier != 'quick'
+            ORDER BY prior.finished_at DESC
+            LIMIT 1
+            """,
+            (task["chat_id"], task["created_at"], current.project),
+        ).fetchone()
+        return self._resume_context(connection, str(row["id"])) if row is not None else current
+
     def record_artifact_receipt(
         self,
         *,
@@ -1514,7 +1546,16 @@ class AgentStore:
                 (task_id, time.time()),
             ).fetchone()
             context = self._resume_context(connection, task_id)
+            parent_id = str(task["retry_of_task_id"] or "")
+            if context is None and parent_id:
+                context = self._resume_context(connection, parent_id)
             prompt = str(payload["prompt"]) if payload is not None else ""
+            context = self._legacy_capacity_parent_context(
+                connection,
+                task,
+                prompt,
+                context,
+            )
             if not prompt and _MODEL_CAPACITY_ERROR.search(str(task["error"] or "")):
                 if context is not None:
                     prompt = (
@@ -1552,8 +1593,8 @@ class AgentStore:
                 """
                 INSERT INTO tasks
                     (id, chat_id, prompt, source, ephemeral, status, created_at, due_at,
-                     approved, restricted, requester_id, reply_to_message_id)
-                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?)
+                     approved, restricted, requester_id, reply_to_message_id, retry_of_task_id)
+                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     retry_id,
@@ -1566,6 +1607,7 @@ class AgentStore:
                     task["approved"],
                     task["requester_id"],
                     task["reply_to_message_id"],
+                    task_id,
                 ),
             )
             connection.execute("DELETE FROM task_retry_payloads WHERE task_id = ?", (task_id,))

@@ -111,6 +111,52 @@ class AgentStoreTests(unittest.TestCase):
             self.assertIn("[Capacity continuation]", retry.prompt)
             self.assertEqual(retry.status, "queued")
 
+    def test_legacy_capacity_continue_recovers_the_parent_workflow_route(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            root = store.enqueue_task(123, "original request", source="telegram", ephemeral=False)
+            root = store.claim_next_task(now=root.created_at + 1)
+            store.upsert_task_manifest(
+                root.id,
+                project="paper-revision",
+                tier="deep",
+                phase="primary",
+            )
+            store.record_model_run(
+                task_id=root.id,
+                phase="primary",
+                role="Primary",
+                model="gpt-5.6-terra",
+                reasoning_effort="xhigh",
+                started_at=100.0,
+                finished_at=200.0,
+                exit_code=1,
+                cancelled=False,
+                timed_out=False,
+            )
+            store.finish_task(root.id, "failed", "Selected model is at capacity.")
+
+            child = store.enqueue_task(
+                123,
+                "[[CODESHARK_PROJECT: paper-revision]]\n[Capacity continuation]\nresume\n[/Capacity continuation]",
+                source="telegram",
+                ephemeral=False,
+            )
+            child = store.claim_next_task(now=child.created_at + 1)
+            store.upsert_task_manifest(
+                child.id,
+                project="paper-revision",
+                tier="quick",
+                phase="quick",
+            )
+            self.assertTrue(store.save_safe_retry_payload(child))
+            store.finish_task(child.id, "failed", "Selected model is at capacity.")
+
+            retry = store.retry_failed_task(child.id)
+
+            self.assertIsNotNone(retry)
+            self.assertIn("[[CODESHARK_RESUME: deep|primary]]", retry.prompt)
+
     def test_summarizes_model_runs_in_a_requested_time_window(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")
