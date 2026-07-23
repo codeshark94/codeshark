@@ -218,6 +218,48 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertTrue(result.startup_retried)
         self.assertEqual(result.message, "done")
 
+    def test_rolls_over_oversized_persistent_session_before_turn_start(self) -> None:
+        rejected = RunResult(
+            exit_code=1,
+            message="",
+            thread_id="thread-old",
+            stderr="Codex app-server returned an oversized protocol message",
+        )
+        completed = RunResult(
+            exit_code=0,
+            message="done",
+            thread_id="thread-new",
+            stderr="",
+            turn_started=True,
+        )
+        with patch.object(
+            self.runner,
+            "_run_app_server",
+            side_effect=[rejected, completed],
+        ) as run:
+            result = self.runner.run("continue the figure revision", "thread-old")
+
+        self.assertEqual(run.call_count, 2)
+        retry_prompt, retry_thread_id = run.call_args.args[:2]
+        self.assertIsNone(retry_thread_id)
+        self.assertIn("project-session rollover", retry_prompt)
+        self.assertTrue(result.startup_retried)
+        self.assertEqual(result.thread_id, "thread-new")
+
+    def test_does_not_roll_over_oversized_session_after_turn_start(self) -> None:
+        failed = RunResult(
+            exit_code=1,
+            message="",
+            thread_id="thread-old",
+            stderr="Codex app-server returned an oversized protocol message",
+            turn_started=True,
+        )
+        with patch.object(self.runner, "_run_app_server", return_value=failed) as run:
+            result = self.runner.run("continue the figure revision", "thread-old")
+
+        self.assertIs(result, failed)
+        self.assertEqual(run.call_count, 1)
+
     def test_does_not_retry_transient_failure_after_turn_start(self) -> None:
         failed = RunResult(
             exit_code=1,

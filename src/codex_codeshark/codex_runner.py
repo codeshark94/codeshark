@@ -162,6 +162,9 @@ class CodexRunner:
         r"app-server closed its protocol stream|broken pipe)",
         re.IGNORECASE,
     )
+    _OVERSIZED_RESUME_ERROR = re.compile(
+        r"Codex app-server returned an oversized protocol message", re.IGNORECASE
+    )
     _CHILD_ENV_ALLOWLIST = {
         "CODEX_HOME",
         "HOME",
@@ -593,6 +596,14 @@ class CodexRunner:
                     approved=approved,
                     full_access=full_access,
                 )
+            if self._requires_oversized_resume_rollover(result, thread_id):
+                recovered = self._run_app_server(
+                    self._oversized_resume_rollover_prompt(prompt),
+                    None,
+                    approved=approved,
+                    full_access=full_access,
+                )
+                return replace(recovered, startup_retried=True)
             if self._requires_startup_retry(result):
                 recovered = self._run_app_server(
                     prompt,
@@ -644,6 +655,22 @@ class CodexRunner:
             and bool(cls._STARTUP_RETRYABLE_ERROR.search(result.stderr))
         )
 
+    @classmethod
+    def _requires_oversized_resume_rollover(
+        cls,
+        result: RunResult,
+        requested_thread_id: str | None,
+    ) -> bool:
+        """Recover a project session whose app-server resume response has grown too large."""
+        return (
+            requested_thread_id is not None
+            and result.exit_code != 0
+            and not result.cancelled
+            and not result.timed_out
+            and not result.turn_started
+            and bool(cls._OVERSIZED_RESUME_ERROR.search(result.stderr))
+        )
+
     @staticmethod
     def _timeout_retry_prompt(prompt: str, *, resumed: bool) -> str:
         recovery = (
@@ -655,6 +682,20 @@ class CodexRunner:
             "[/Codeshark recovery]"
         )
         return recovery if resumed else f"{prompt}\n\n{recovery}"
+
+    @staticmethod
+    def _oversized_resume_rollover_prompt(prompt: str) -> str:
+        return "\n\n".join(
+            (
+                prompt,
+                "[Codeshark project-session rollover]",
+                "The prior persisted project thread could not be resumed because its transport response exceeded "
+                "the app-server message limit. This is a new successor thread for the same project. Continue "
+                "from the project context and workspace state already included above; do not repeat completed "
+                "work or external side effects. Keep the prior thread as historical context.",
+                "[/Codeshark project-session rollover]",
+            )
+        )
 
     def _run_exec(
         self,
