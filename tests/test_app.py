@@ -13,6 +13,7 @@ from codex_codeshark.identity import (
     AGENT_NAME_TITLE,
     OWNER_PROFILE_TITLE,
     PUBLIC_OWNER_CARD_TITLE,
+    RESPONSE_LANGUAGE_CONTRACT,
     owner_onboarding_message,
 )
 from codex_codeshark.local_console import LOCAL_CONSOLE_SOURCE
@@ -824,6 +825,17 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.documents[0][1], report.resolve())
         self.assertEqual(len(runner.prompts), 1)
         self.assertIn("[Telegram final-response skill]", runner.prompts[0][0])
+        self.assertIn(RESPONSE_LANGUAGE_CONTRACT, runner.prompts[0][0])
+
+    def test_cross_validation_finalization_keeps_the_response_language_contract(self) -> None:
+        prompt = self.app._user_facing_final_prompt(
+            "Return the final result.",
+            file_delivery_enabled=False,
+            automatic_file_delivery=False,
+            telegram_response_contract="",
+        )
+
+        self.assertIn(RESPONSE_LANGUAGE_CONTRACT, prompt)
 
     def test_group_task_has_no_admin_context_session_or_learning_access(self) -> None:
         group_id = -100123

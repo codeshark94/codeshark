@@ -25,6 +25,7 @@ from .identity import (
     DEFAULT_AGENT_NAME,
     OWNER_PROFILE_TITLE,
     PUBLIC_OWNER_CARD_TITLE,
+    RESPONSE_LANGUAGE_CONTRACT,
     owner_onboarding_message,
 )
 from .learning import (
@@ -255,7 +256,7 @@ _CROSS_VALIDATION_SKILL_CONTENT = """Use a bounded triage agent before work begi
 _TASK_CLOSURE_SKILL_NAME = "Task closure and delivery"
 _TASK_CLOSURE_SKILL_CONTENT = """Start substantive work by identifying the requested outcome, acceptance evidence, expected artifacts, and direct validation. Inspect repository instructions, project manifests, tests, and CI before changing project work. Keep a concise internal handoff for every nontrivial phase. Before reporting completion, verify the final artifact exists and is readable, run relevant checks, and ensure a requested result file is tagged for delivery. Treat a failed verification or absent requested artifact as unfinished work. Convert explicit negative user feedback into a concrete regression-rule candidate with a reproducer and passing condition."""
 _TELEGRAM_DELIVERY_SKILL_NAME = "Telegram final response and attachment"
-_TELEGRAM_DELIVERY_SKILL_CONTENT = """You are writing the final response that the user will see in Telegram, not a terminal. The user cannot open local paths or Markdown links to them. Decide yourself whether the request needs files to be useful and, when it does, choose the directly relevant final artifact or artifact set through the internal delivery marker. Attach as many files as the request and completed result genuinely require, but do not dump every co-located output, source file, CSV, README, draft, or older artifact. A request for one graph normally needs that graph alone; add companion files only when they are needed to use it or explicitly requested. Never expose host paths, delivery markers, logs, or internal handoffs. Do not claim a document was sent or attached: the gateway performs and verifies delivery separately. Give a concise human-facing completion summary using bare filenames only when needed."""
+_TELEGRAM_DELIVERY_SKILL_CONTENT = """You are writing the final response that the user will see in Telegram, not a terminal. The user cannot open local paths or Markdown links to them. Decide yourself whether the request needs files to be useful and, when it does, choose the directly relevant final artifact or artifact set through the internal delivery marker. Attach as many files as the request and completed result genuinely require, but do not dump every co-located output, source file, CSV, README, draft, or older artifact. A request for one graph normally needs that graph alone; add companion files only when they are needed to use it or explicitly requested. Never expose host paths, delivery markers, logs, or internal handoffs. Do not claim a document was sent or attached: the gateway performs and verifies delivery separately. Give a concise human-facing completion summary using bare filenames only when needed. Use the response language required by the task's response-language contract."""
 _ACADEMIC_FIGURE_LAYOUT_SKILL_NAME = "Academic figure layout 학술 그림 배치"
 _ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT = """Arrange existing academic figures, images, charts, panels, 그림, 이미지, 그리드, 배치, and 비율 without generating replacements or distorting source data. First inspect the target template and each asset's type, native dimensions, aspect ratio, labels, and crop constraints. Define one master grid with fixed gutters, reading order, panel labels, and caption space. Fit every asset with a uniform scale factor only: never stretch width and height independently, silently upscale a low-resolution raster, or crop data, labels, legends, scale bars, or microscopy context. Align comparable plot areas and keep captions and panel labels consistent. Render the final document or page to images at delivery size and inspect it visually for clipping, overlap, unequal spacing, warped aspect ratios, unreadable labels, low resolution, and bad page breaks. Correct defects and re-render before delivery. A supplied journal or document template overrides generic conventions; if none exists, preserve the closest existing document style and state that assumption."""
 _JOURNAL_MANUSCRIPT_EDITORIAL_QA_SKILL_NAME = "Journal manuscript editorial QA 논문 원고 검수"
@@ -1883,8 +1884,6 @@ class AgentApp:
                 self._active_tasks[task.id] = ActiveTask(task, runner)
                 active_task_count = len(self._active_tasks)
             self._write_menu_status(active_task_count)
-            if task.source == LOCAL_CONSOLE_SOURCE:
-                self.store.append_local_message("system", "Working…", task_id=task.id)
             try:
                 result = self._execute_task(
                     task,
@@ -4575,7 +4574,7 @@ class AgentApp:
         )
         return (
             "\n\n[Telegram final-response skill]\n"
-            f"{content}\n"
+            f"{content}\n\n{RESPONSE_LANGUAGE_CONTRACT}\n"
             "[/Telegram final-response skill]"
         )
 
@@ -4589,7 +4588,7 @@ class AgentApp:
     ) -> str:
         if file_delivery_enabled:
             prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
-        return prompt + telegram_response_contract
+        return prompt + "\n\n" + RESPONSE_LANGUAGE_CONTRACT + telegram_response_contract
 
     def _delivery_roots(
         self,

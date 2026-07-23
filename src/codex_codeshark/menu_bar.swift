@@ -812,6 +812,18 @@ private final class LocalConsoleModel: ObservableObject {
         attachments.removeAll { $0 == path }
     }
 
+    var hasPendingReply: Bool {
+        messages.contains { message in
+            guard message.role == "user", let taskID = message.taskID else { return false }
+            return !messages.contains { $0.role == "assistant" && $0.taskID == taskID }
+        }
+    }
+
+    func isPending(_ message: LocalConsoleMessage) -> Bool {
+        guard message.role == "user", let taskID = message.taskID else { return false }
+        return !messages.contains { $0.role == "assistant" && $0.taskID == taskID }
+    }
+
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = attachments
@@ -853,7 +865,6 @@ private struct LocalConsoleCommand: Identifiable {
 
 private struct LocalConsoleView: View {
     @ObservedObject var model: LocalConsoleModel
-    @ObservedObject var dashboard: DashboardModel
     let mascotPath: String
     let chooseFiles: () -> Void
     let revealArtifacts: ([String]) -> Void
@@ -875,7 +886,11 @@ private struct LocalConsoleView: View {
         LocalConsoleCommand(command: "/model_usage", description: "Open model usage"),
     ]
 
-    private var isWorking: Bool { dashboard.snapshot.state == "working" }
+    private var isWorking: Bool { model.sending || model.hasPendingReply }
+
+    private var visibleMessages: [LocalConsoleMessage] {
+        model.messages.filter { $0.role != "system" }
+    }
 
     @ViewBuilder
     private func mascot(size: CGFloat) -> some View {
@@ -927,21 +942,21 @@ private struct LocalConsoleView: View {
     }
 
     private func messageBubble(_ message: LocalConsoleMessage) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 9) {
             if message.role != "user" {
-                mascot(size: 28)
+                mascot(size: 30)
             } else {
-                Spacer(minLength: 74)
+                Spacer(minLength: 112)
             }
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 if message.role != "user" {
                     Text("Codeshark")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(accent)
                 }
                 if !message.text.isEmpty {
                     Text(message.text)
-                        .font(.system(size: 18))
+                        .font(.system(size: 17))
                         .foregroundStyle(.white)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -954,16 +969,31 @@ private struct LocalConsoleView: View {
                     .foregroundStyle(.white.opacity(0.63))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 10)
-            .frame(maxWidth: 560, alignment: .leading)
-            .background(message.role == "user" ? outgoing : incoming, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .padding(.horizontal, 15)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 500, alignment: .leading)
+            .background(message.role == "user" ? outgoing : incoming, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             if message.role == "user" {
-                Spacer(minLength: 8)
+                Spacer(minLength: 12)
             } else {
-                Spacer(minLength: 74)
+                Spacer(minLength: 102)
             }
         }
+    }
+
+    private var workingIndicator: some View {
+        HStack(spacing: 7) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(muted)
+            Text("Working…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(muted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(chrome, in: Capsule())
+        .frame(maxWidth: .infinity)
     }
 
     private var commandPalette: some View {
@@ -1009,14 +1039,14 @@ private struct LocalConsoleView: View {
     var body: some View {
         ZStack {
             canvas.ignoresSafeArea()
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 HStack(spacing: 11) {
-                    mascot(size: 38)
+                    mascot(size: 40)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Codeshark").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
+                        Text("Codeshark").font(.system(size: 24, weight: .semibold)).foregroundStyle(.white)
                         HStack(spacing: 5) {
                             Circle().fill(isWorking ? accent : .green).frame(width: 6, height: 6)
-                            Text(isWorking ? "working locally" : "local direct session")
+                            Text(isWorking ? "working locally" : "ready locally")
                                 .font(.system(size: 13)).foregroundStyle(muted)
                         }
                     }
@@ -1033,15 +1063,15 @@ private struct LocalConsoleView: View {
                     }
                     .menuStyle(.borderlessButton)
                 }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(chrome.opacity(0.86), in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
 
                 Rectangle().fill(.white.opacity(0.10)).frame(height: 1)
 
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        if model.messages.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                        if visibleMessages.isEmpty {
                             HStack(alignment: .top, spacing: 10) {
                                 mascot(size: 40)
                                 VStack(alignment: .leading, spacing: 5) {
@@ -1058,22 +1088,28 @@ private struct LocalConsoleView: View {
                             .background(incoming, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                             .padding(.top, 8)
                         } else {
-                            ForEach(model.messages) { message in
-                                if message.role == "system" {
-                                    Text(message.text)
-                                        .font(.caption.weight(.medium)).foregroundStyle(muted)
-                                        .padding(.horizontal, 12).padding(.vertical, 6)
-                                        .background(.white.opacity(0.08), in: Capsule())
-                                        .frame(maxWidth: .infinity)
-                                } else {
-                                    messageBubble(message)
+                            ForEach(visibleMessages) { message in
+                                messageBubble(message)
+                                if model.isPending(message) {
+                                    workingIndicator
+                                        .id("working-\(message.id)")
                                 }
                             }
                         }
+                        Color.clear.frame(height: 1).id("conversation-bottom")
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .padding(.horizontal, 8).padding(.vertical, 8)
+                    }
+                    .onAppear {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                    .onChange(of: model.messages.count) { _, _ in
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        }
+                    }
                 }
-                .frame(minHeight: 160, maxHeight: 360)
+                .frame(minHeight: 190, maxHeight: 430)
 
                 VStack(spacing: 8) {
                     if !model.attachments.isEmpty {
@@ -1116,6 +1152,8 @@ private struct LocalConsoleView: View {
                             .font(.system(size: 16))
                             .foregroundStyle(.white)
                             .lineLimit(1)
+                            .submitLabel(.send)
+                            .onSubmit { model.send() }
                             .frame(height: 46)
                             .padding(.horizontal, 13)
                         .background(composer, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -2819,7 +2857,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         panel.contentViewController = NSHostingController(
             rootView: LocalConsoleView(
                 model: model,
-                dashboard: dashboard,
                 mascotPath: fullColorMascotPath(),
                 chooseFiles: { [weak self] in self?.chooseLocalFiles() },
                 revealArtifacts: { [weak self] paths in self?.revealArtifacts(paths) },

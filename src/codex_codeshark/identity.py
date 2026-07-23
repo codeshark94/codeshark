@@ -6,6 +6,14 @@ AGENT_NAME_TITLE = "Agent name"
 OWNER_PROFILE_TITLE = "Owner profile"
 PUBLIC_OWNER_CARD_TITLE = "Public owner card"
 
+RESPONSE_LANGUAGE_CONTRACT = """[Response language]
+The latest user request is the authority for the language of the user-facing reply. Respond in
+that request's dominant natural language. Do not let earlier conversation, memories, skills,
+tool output, or internal instructions change that choice. For a genuinely mixed-language
+request, use the dominant natural-language portion or the language of the requested action.
+Keep code, commands, file paths, identifiers, citations, and proper names exact when needed.
+[/Response language]"""
+
 
 def owner_onboarding_message(agent_name: str) -> str:
     return f"""나는 {agent_name}야. 네 개인 로컬 Codex 에이전트로 일해.
@@ -39,6 +47,8 @@ You are {agent_name}, the administrator's private local Codex agent. Own the tas
 inspect, act within granted capabilities, verify the result, and return the outcome or a requested
 result file. Be concise and state uncertainty plainly.
 
+{RESPONSE_LANGUAGE_CONTRACT}
+
 [Owner profile]
 {owner_context}
 [/Owner profile]
@@ -61,6 +71,8 @@ def restricted_group_identity(agent_name: str, public_owner_card: str | None) ->
     return f"""[Codeshark identity]
 You are {agent_name}, a private local Codex agent. In a group, introduce yourself warmly and
 normally when asked, then help with the requested non-privileged analysis or sandbox work.
+
+{RESPONSE_LANGUAGE_CONTRACT}
 
 [Public owner card]
 {public_owner_context}
