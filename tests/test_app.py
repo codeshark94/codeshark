@@ -213,6 +213,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         thread_id: str,
         user_request: str,
         assistant_reply: str,
+        *,
+        append: bool = False,
     ) -> None:
         path = (
             self.config.codex_home
@@ -222,7 +224,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             / "23"
             / f"rollout-test-{thread_id}.jsonl"
         )
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         records = (
             {
                 "type": "response_item",
@@ -247,10 +249,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 },
             },
         )
-        path.write_text(
-            "\n".join(json.dumps(record) for record in records) + "\n",
-            encoding="utf-8",
-        )
+        mode = "a" if append else "w"
+        with path.open(mode, encoding="utf-8") as handle:
+            handle.write("\n".join(json.dumps(record) for record in records) + "\n")
 
     def test_ignores_unauthorized_user(self) -> None:
         self.app._handle_update(self.update(999, "do work"))
@@ -2783,6 +2784,29 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("Finish the simulation we were already running.", prompt)
         self.assertIn("The 32-layer simulation is active", prompt)
         self.assertIn("including one that needs prior project context", prompt)
+
+    def test_project_conversation_context_is_bounded_to_recent_turns(self) -> None:
+        project = "gnw_transport_paper"
+        self.app.state.set_session_thread_id(123, "thread-project", project)
+        self.write_persisted_conversation(
+            "thread-project",
+            "Older request " + ("x" * 4_000),
+            "Older response " + ("y" * 4_000),
+        )
+        self.write_persisted_conversation(
+            "thread-project",
+            "What is the current figure status?",
+            "Figure 8 is ready for the next revision.",
+            append=True,
+        )
+
+        context = self.app._conversation_context(123, project, max_chars=1_000)
+
+        self.assertLessEqual(len(context), 1_000)
+        self.assertIn("What is the current figure status?", context)
+        self.assertIn("Figure 8 is ready for the next revision.", context)
+        self.assertNotIn("Older response", context)
+        self.assertIn("Older history remains in the persisted project session", context)
 
     def test_project_router_receives_same_chat_context_from_other_project_sessions(self) -> None:
         (self.config.workdir / "FETM").mkdir()
