@@ -2953,7 +2953,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 756),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 590),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2966,38 +2966,34 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Role Models")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 720, width: 588, height: 20)
+        title.frame = NSRect(x: 16, y: 554, width: 588, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope; Triage chooses the execution tier; the final user-facing role receives the Telegram response skill.")
+        let detail = NSTextField(wrappingLabelWithString: "The persistent Primary owner chooses project scope and tier. Quick and Routine complete work in one session; review roles advise the owner only for Deep and High assurance.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 678, width: 588, height: 28)
+        detail.frame = NSRect(x: 16, y: 512, width: 588, height: 28)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 170, y: 648, width: 245, height: 14)
+        modelHeader.frame = NSRect(x: 170, y: 484, width: 245, height: 14)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 425, y: 648, width: 179, height: 14)
+        effortHeader.frame = NSRect(x: 425, y: 484, width: 179, height: 14)
         content.addSubview(effortHeader)
 
         let roles = [
-            ("Project Router", "Project Router", "gpt-5.4-mini", "low"),
-            ("Triage", "Triage", "gpt-5.4-mini", "low"),
             ("Quick execution", "Quick execution", "gpt-5.4-mini", "low"),
             ("Routine execution", "Routine execution", "gpt-5.6-luna", "low"),
+            ("Primary owner", "Primary ownership", "gpt-5.6-terra", "high"),
             ("Planning", "Planning", "gpt-5.6-luna", "low"),
             ("Research", "Research", "gpt-5.6-luna", "medium"),
-            ("Primary execution", "Primary execution", "gpt-5.6-terra", "xhigh"),
-            ("Rework", "Rework", "gpt-5.6-terra", "high"),
             ("Independent review", "Independent review", "gpt-5.6-terra", "medium"),
             ("Adversarial review", "Adversarial review", "gpt-5.6-sol", "xhigh"),
-            ("Finalization", "Finalization", "gpt-5.6-terra", "medium"),
         ]
         modelOptions = availableModelOptions()
         modelPickers = [:]
@@ -3007,12 +3003,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "Routine execution": "Routine",
             "Direct execution": "Routine",
             "Planning": "Planner",
-            "Primary execution": "Primary",
+            "Primary ownership": "Primary execution",
             "Independent review": "Validation",
             "Adversarial review": "Adversarial Review",
         ]
         for (index, role) in roles.enumerated() {
-            let y = 602 - (index * 44)
+            let y = 438 - (index * 48)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 12, weight: .medium)
             label.frame = NSRect(x: 16, y: y + 18, width: 145, height: 16)
@@ -3134,33 +3130,21 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let routinePicker = modelPickers["Routine execution"],
               let routine = selectedModel(routinePicker),
               let routineEffort = reasoningPickers["Routine execution"]?.titleOfSelectedItem,
-              let routerPicker = modelPickers["Project Router"],
-              let router = selectedModel(routerPicker),
-              let routerEffort = reasoningPickers["Project Router"]?.titleOfSelectedItem,
-              let triagePicker = modelPickers["Triage"],
-              let triage = selectedModel(triagePicker),
-              let triageEffort = reasoningPickers["Triage"]?.titleOfSelectedItem,
               let preflightPicker = modelPickers["Planning"],
               let preflight = selectedModel(preflightPicker),
               let preflightEffort = reasoningPickers["Planning"]?.titleOfSelectedItem,
               let researchPicker = modelPickers["Research"],
               let research = selectedModel(researchPicker),
               let researchEffort = reasoningPickers["Research"]?.titleOfSelectedItem,
-              let primaryPicker = modelPickers["Primary execution"],
+              let primaryPicker = modelPickers["Primary ownership"],
               let primary = selectedModel(primaryPicker),
-              let primaryEffort = reasoningPickers["Primary execution"]?.titleOfSelectedItem,
-              let reworkPicker = modelPickers["Rework"],
-              let rework = selectedModel(reworkPicker),
-              let reworkEffort = reasoningPickers["Rework"]?.titleOfSelectedItem,
+              let primaryEffort = reasoningPickers["Primary ownership"]?.titleOfSelectedItem,
               let validatorPicker = modelPickers["Independent review"],
               let validator = selectedModel(validatorPicker),
               let validatorEffort = reasoningPickers["Independent review"]?.titleOfSelectedItem,
               let feedbackPicker = modelPickers["Adversarial review"],
               let feedback = selectedModel(feedbackPicker),
-              let feedbackEffort = reasoningPickers["Adversarial review"]?.titleOfSelectedItem,
-              let finalizerPicker = modelPickers["Finalization"],
-              let finalizer = selectedModel(finalizerPicker),
-              let finalizerEffort = reasoningPickers["Finalization"]?.titleOfSelectedItem
+              let feedbackEffort = reasoningPickers["Adversarial review"]?.titleOfSelectedItem
         else {
             showError("Could not read the selected model routing.")
             return
@@ -3171,24 +3155,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--quick-effort", quickEffort,
             "--routine", routine,
             "--routine-effort", routineEffort,
-            "--router", router,
-            "--router-effort", routerEffort,
-            "--triage", triage,
-            "--triage-effort", triageEffort,
+            "--router", primary,
+            "--router-effort", primaryEffort,
+            "--triage", primary,
+            "--triage-effort", primaryEffort,
             "--preflight", preflight,
             "--preflight-effort", preflightEffort,
             "--research", research,
             "--research-effort", researchEffort,
             "--primary", primary,
             "--primary-effort", primaryEffort,
-            "--rework", rework,
-            "--rework-effort", reworkEffort,
+            "--rework", primary,
+            "--rework-effort", primaryEffort,
             "--validator", validator,
             "--validator-effort", validatorEffort,
             "--feedback", feedback,
             "--feedback-effort", feedbackEffort,
-            "--finalizer", finalizer,
-            "--finalizer-effort", finalizerEffort,
+            "--finalizer", primary,
+            "--finalizer-effort", primaryEffort,
         ]
         if runServiceCommand(arguments) {
             backFromModelRouting()
@@ -3219,7 +3203,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         title.frame = NSRect(x: 16, y: 314, width: 848, height: 20)
         content.addSubview(title)
         let detail = NSTextField(
-            wrappingLabelWithString: "Rows are task tiers selected by Triage; columns are roles enabled for that tier. Model selection is separate in Role Models."
+            wrappingLabelWithString: "Rows are task tiers selected by the Primary owner from project context. Columns enable supporting roles; Quick and Routine run with one executor."
         )
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor

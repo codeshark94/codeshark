@@ -82,15 +82,11 @@ def run_doctor() -> int:
         return (
             f"quick {config.quick_model} ({config.quick_reasoning_effort}); "
             f"routine {config.routine_model} ({config.routine_reasoning_effort}); "
-            f"primary {config.primary_model} ({config.primary_reasoning_effort}); "
-            f"rework {config.rework_model} ({config.rework_reasoning_effort}); "
-            f"validation {config.validator_model} ({config.validator_reasoning_effort}); "
-            f"feedback {config.feedback_model} ({config.feedback_reasoning_effort}); "
-            f"router {config.router_model} ({config.router_reasoning_effort}); "
-            f"triage {config.triage_model} ({config.triage_reasoning_effort}); "
+            f"primary owner {config.primary_model} ({config.primary_reasoning_effort}); "
             f"planner {config.preflight_model} ({config.preflight_reasoning_effort}); "
             f"research {config.research_model} ({config.research_reasoning_effort}); "
-            f"finalization {config.finalizer_model} ({config.finalizer_reasoning_effort}); Fast off"
+            f"independent review {config.validator_model} ({config.validator_reasoning_effort}); "
+            f"adversarial review {config.feedback_model} ({config.feedback_reasoning_effort}); Fast off"
         )
 
     check("Codex model", model_check)

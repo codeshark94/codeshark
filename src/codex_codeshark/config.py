@@ -111,9 +111,9 @@ class Config:
     routine_uses_adversarial_review: bool = False
     standard_uses_preflight: bool = False
     standard_uses_research: bool = False
-    standard_uses_validator: bool = True
+    standard_uses_validator: bool = False
     standard_feedback_iterations: int = 0
-    standard_uses_finalizer: bool = True
+    standard_uses_finalizer: bool = False
     standard_uses_adversarial_review: bool = False
     deep_uses_preflight: bool = True
     deep_uses_research: bool = False
@@ -194,7 +194,7 @@ def _require_reasoning_effort(data: dict[str, Any], key: str, default: str) -> s
 _DEFAULT_ORCHESTRATION_PROFILES = {
     "quick": OrchestrationProfile(False, False, False, 0, False),
     "routine": OrchestrationProfile(False, False, False, 0, False),
-    "standard": OrchestrationProfile(False, False, True, 0, True),
+    "standard": OrchestrationProfile(False, False, False, 0, False),
     "deep": OrchestrationProfile(True, False, True, 1, True, True),
     "high_assurance": OrchestrationProfile(True, True, True, 2, True, True),
 }
@@ -1366,9 +1366,9 @@ def write_local_config(
             "routine_uses_adversarial_review = false",
             "standard_uses_preflight = false",
             "standard_uses_research = false",
-            "standard_uses_validator = true",
+            "standard_uses_validator = false",
             "standard_feedback_iterations = 0",
-            "standard_uses_finalizer = true",
+            "standard_uses_finalizer = false",
             "standard_uses_adversarial_review = false",
             "deep_uses_preflight = true",
             "deep_uses_research = false",

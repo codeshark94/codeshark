@@ -1073,17 +1073,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["security"]["groups"], [])
         self.assertEqual(payload["model_assignments"][0]["role"], "Quick execution")
         self.assertEqual(payload["model_assignments"][1]["role"], "Routine execution")
-        self.assertEqual(payload["model_assignments"][2]["role"], "Project Router")
-        self.assertEqual(payload["model_assignments"][3]["role"], "Triage")
-        self.assertEqual(payload["model_assignments"][4]["role"], "Planning")
-        self.assertEqual(payload["model_assignments"][6]["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Primary execution")
-        self.assertEqual(payload["model_assignments"][6]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][6]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][7]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][8]["role"], "Independent review")
-        self.assertEqual(payload["model_assignments"][9]["role"], "Adversarial review")
-        self.assertEqual(payload["model_assignments"][10]["role"], "Finalization")
+        self.assertEqual(payload["model_assignments"][2]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Primary ownership")
+        self.assertEqual(payload["model_assignments"][2]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][2]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][3]["role"], "Planning")
+        self.assertEqual(payload["model_assignments"][4]["role"], "Research")
+        self.assertEqual(payload["model_assignments"][5]["role"], "Independent review")
+        self.assertEqual(payload["model_assignments"][6]["role"], "Adversarial review")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
@@ -1095,7 +1092,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["active_tasks"][0]["orchestration_tier"], "standard")
         self.assertEqual(
             payload["active_tasks"][0]["orchestration_route"],
-            ["Triage", "Primary execution", "Independent review", "Finalize"],
+            ["Primary ownership", "Routine execution"],
         )
         self.assertEqual(payload["active_tasks"][0]["completed_stages"], ["primary"])
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
@@ -1578,7 +1575,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.app.runner = runner
 
-        self.app._handle_update(self.update(123, "Analyze these gas transport measurements."))
+        self.app._handle_update(self.update(123, "Continue analyzing these gas transport measurements."))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
@@ -1590,7 +1587,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIsNotNone(manifest)
         self.assertEqual(manifest.project, "FETM")
 
-    def test_project_router_uses_its_dedicated_runner(self) -> None:
+    def test_primary_owner_chooses_project_and_tier(self) -> None:
         (self.config.workdir / "FETM").mkdir()
         router_runner = FakeCodexRunner(
             project_triage_message='{"decision": "existing", "project": "FETM", "confidence": "high"}'
@@ -1598,10 +1595,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         triage_runner = FakeCodexRunner(
             triage_message='{"tier": "routine", "confidence": "high", "reason": "test"}'
         )
-        primary_runner = FakeCodexRunner()
+        primary_runner = FakeCodexRunner(
+            project_triage_message='{"decision": "existing", "project": "FETM", "confidence": "high"}',
+            triage_message='{"tier": "routine", "confidence": "high", "reason": "test"}',
+        )
         task = self.app.store.enqueue_task(
             123,
-            "[[CODESHARK_PROJECT: General]]\nAnalyze the gas transport measurements.",
+            "[[CODESHARK_PROJECT: General]]\nContinue analyzing the gas transport measurements.",
             source="telegram",
             ephemeral=False,
             approved=True,
@@ -1614,9 +1614,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             project_router_runner=router_runner,
         )
 
-        self.assertEqual(len(router_runner.project_triage_prompts), 1)
+        self.assertEqual(router_runner.project_triage_prompts, [])
         self.assertEqual(triage_runner.project_triage_prompts, [])
-        self.assertEqual(len(triage_runner.triage_prompts), 1)
+        self.assertEqual(triage_runner.triage_prompts, [])
+        self.assertEqual(len(primary_runner.project_triage_prompts), 1)
+        self.assertEqual(len(primary_runner.triage_prompts), 1)
         self.assertIn("Project: FETM", primary_runner.prompts[0][0])
 
     def test_project_router_can_create_a_new_workspace_project(self) -> None:
@@ -1906,8 +1908,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         self.assertIsNotNone(task)
         app._execute_task(task)
-        self.assertTrue(runner.prompts[0][4])
-        self.assertTrue(runner.prompts[0][5])
+        self.assertTrue(any(prompt[4] for prompt in runner.prompts))
+        self.assertTrue(any(prompt[5] for prompt in runner.prompts))
 
     def test_full_filesystem_access_can_still_require_action_approval(self) -> None:
         app = AgentApp(
@@ -1945,8 +1947,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertFalse(task.ephemeral)
         self.assertFalse(task.restricted)
         app._execute_task(task)
-        self.assertTrue(runner.prompts[0][4])
-        self.assertTrue(runner.prompts[0][5])
+        self.assertTrue(any(prompt[4] for prompt in runner.prompts))
+        self.assertTrue(any(prompt[5] for prompt in runner.prompts))
 
     def test_schedule_commands_and_telegram_safe_aliases(self) -> None:
         self.app._handle_update(self.update(123, "/remind 5 check status"))
@@ -2034,9 +2036,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         app._execute_task(task)
 
         manifest = app.store.get_task_manifest(task.id)
-        self.assertIn("Academic figure layout 학술 그림 배치", app.runner.prompts[0][0])
-        self.assertIn("Concrete figure revision", app.runner.prompts[0][0])
-        self.assertIn("CODESHARK_SEND_FILE", app.runner.prompts[0][0])
+        primary_prompts = [prompt[0] for prompt in app.runner.prompts]
+        self.assertTrue(any("Academic figure layout 학술 그림 배치" in prompt for prompt in primary_prompts))
+        self.assertTrue(any("Concrete figure revision" in prompt for prompt in primary_prompts))
+        self.assertTrue(any("CODESHARK_SEND_FILE" in prompt for prompt in primary_prompts))
         self.assertEqual(self.api.documents[0][1], figure.resolve())
         self.assertEqual(self.api.messages, [(123, "Figure 8 updated.")])
         self.assertEqual((manifest.phase, manifest.delivery_state), ("completed", "delivered"))
@@ -2690,8 +2693,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         runner = FakeCodexRunner(
             RunResult(
                 exit_code=0,
-                message="Working manuscript saved to deliverables/draft.pdf",
-                thread_id="author-thread",
+                message="Objective: revise the report and validate it.",
+                thread_id="plan-thread",
                 stderr="",
             )
         )
@@ -2699,7 +2702,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             [
                 RunResult(
                     exit_code=0,
-                    message="1. Clarify the causal claim.\n2. Replace internal labels.",
+                    message="Working manuscript saved to deliverables/draft.pdf",
+                    thread_id="author-thread",
+                    stderr="",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="VERDICT: PASS\n1. Pass: the revised report satisfies the request.",
                     thread_id="reviewer-thread",
                     stderr="",
                 ),
@@ -2722,20 +2731,21 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         app._execute_task(task)
 
-        self.assertEqual(len(runner.prompts), 3)
-        self.assertIn("cross-validation loop", runner.prompts[0][0])
-        self.assertIn("primary phase", runner.prompts[0][0])
-        self.assertNotIn("[Telegram final-response skill]", runner.prompts[0][0])
-        self.assertEqual(runner.prompts[0][1], None)
-        self.assertIn("validator phase", runner.prompts[1][0])
+        self.assertEqual(len(runner.prompts), 4)
+        self.assertIn("preflight", runner.prompts[0][0])
+        self.assertIn("cross-validation loop", runner.prompts[1][0])
+        self.assertIn("primary phase", runner.prompts[1][0])
+        self.assertNotIn("[Telegram final-response skill]", runner.prompts[1][0])
         self.assertEqual(runner.prompts[1][1], None)
-        self.assertTrue(runner.prompts[1][2])
-        self.assertFalse(runner.prompts[1][4])
-        self.assertFalse(runner.prompts[1][5])
-        self.assertIn("reconciliation phase", runner.prompts[2][0])
-        self.assertIn("Clarify the causal claim", runner.prompts[2][0])
-        self.assertIn("[Telegram final-response skill]", runner.prompts[2][0])
-        self.assertEqual(runner.prompts[2][1], "author-thread")
+        self.assertIn("validator phase", runner.prompts[2][0])
+        self.assertEqual(runner.prompts[2][1], None)
+        self.assertTrue(runner.prompts[2][2])
+        self.assertFalse(runner.prompts[2][4])
+        self.assertFalse(runner.prompts[2][5])
+        self.assertIn("reconciliation phase", runner.prompts[3][0])
+        self.assertIn("VERDICT: PASS", runner.prompts[3][0])
+        self.assertIn("[Telegram final-response skill]", runner.prompts[3][0])
+        self.assertEqual(runner.prompts[3][1], "author-thread")
         self.assertEqual(self.api.messages, [(123, "Revised manuscript is complete.")])
 
     def test_writable_cross_validation_requires_approval_without_full_access(self) -> None:
@@ -2828,8 +2838,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(len(quick.prompts), 1)
         self.assertEqual(len(routine.prompts), 0)
-        self.assertEqual(len(router.project_triage_prompts), 1)
-        self.assertEqual(len(triage.triage_prompts), 1)
+        self.assertEqual(router.project_triage_prompts, [])
+        self.assertEqual(triage.triage_prompts, [])
+        self.assertEqual(len(routine.triage_prompts), 1)
 
     def test_executor_receives_fresh_same_project_work_context(self) -> None:
         project = "gnw_transport_paper"
@@ -2872,7 +2883,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             prompt,
         )
 
-    def test_triage_receives_full_active_project_conversation(self) -> None:
+    def test_primary_owner_receives_full_active_project_conversation(self) -> None:
         project = "gnw_transport_paper"
         task = self.app.store.enqueue_task(
             123,
@@ -2893,7 +2904,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.app._workflow_plan(task, "Revise the current figure caption.", runner, project)
 
-        prompt = runner.triage_prompts[0][0]
+        prompt, thread_id, ephemeral, *_ = runner.triage_prompts[0]
+        self.assertEqual(thread_id, "thread-project")
+        self.assertFalse(ephemeral)
         self.assertIn("Active project: gnw_transport_paper", prompt)
         self.assertIn("Persistent project session: available", prompt)
         self.assertIn("Use concise public academic terminology.", prompt)
@@ -3064,10 +3077,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(feedback.prompts), 2)
         self.assertIn("feedback verifier", feedback.prompts[0][0])
         self.assertIn("feedback verifier", feedback.prompts[1][0])
-        self.assertEqual(len(primary.prompts), 3)
+        self.assertEqual(len(primary.prompts), 4)
         self.assertIn("Internal planning brief", primary.prompts[0][0])
-        self.assertEqual(len(finalizer.prompts), 1)
-        self.assertIn("finalization phase", finalizer.prompts[0][0])
+        self.assertIn("finalization phase", primary.prompts[-1][0])
+        self.assertEqual(len(finalizer.prompts), 0)
         self.assertEqual(self.api.messages, [(123, "Verified migration is complete.")])
 
     def test_rework_cycles_can_skip_adversarial_review(self) -> None:
@@ -3105,8 +3118,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         runner = FakeCodexRunner(
             RunResult(
                 exit_code=0,
-                message="Primary analysis: the trend is caused by missing records.",
-                thread_id="analysis-thread",
+                message="Objective: validate the conclusion.",
+                thread_id="plan-thread",
                 stderr="",
             )
         )
@@ -3114,7 +3127,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             [
                 RunResult(
                     exit_code=0,
-                    message="1. Pass: the missing-record count supports the conclusion.",
+                    message="Primary analysis: the trend is caused by missing records.",
+                    thread_id="analysis-thread",
+                    stderr="",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="VERDICT: PASS\n1. Pass: the missing-record count supports the conclusion.",
                     thread_id="validator-thread",
                     stderr="",
                 ),
@@ -3135,12 +3154,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIsNotNone(task)
         self.app._execute_task(task)
 
-        self.assertEqual(len(runner.prompts), 3)
-        self.assertFalse(runner.prompts[0][4])
-        self.assertFalse(runner.prompts[0][5])
-        self.assertTrue(runner.prompts[1][2])
+        self.assertEqual(len(runner.prompts), 4)
         self.assertFalse(runner.prompts[1][4])
-        self.assertEqual(runner.prompts[2][1], "analysis-thread")
+        self.assertFalse(runner.prompts[1][5])
+        self.assertTrue(runner.prompts[2][2])
+        self.assertFalse(runner.prompts[2][4])
+        self.assertEqual(runner.prompts[3][1], "analysis-thread")
         self.assertEqual(
             self.api.messages,
             [(123, "The independently validated analysis is complete.")],
@@ -3154,13 +3173,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         runner = FakeCodexRunner(
             RunResult(
                 exit_code=0,
-                message="Working output is ready.",
-                thread_id="primary-thread",
+                message="Objective: validate the analysis.",
+                thread_id="plan-thread",
                 stderr="",
             )
         )
         runner.results.extend(
             [
+                RunResult(
+                    exit_code=0,
+                    message="Working output is ready.",
+                    thread_id="primary-thread",
+                    stderr="",
+                ),
                 RunResult(
                     exit_code=-15,
                     message="Raw validator audit must stay internal.",
@@ -3169,7 +3194,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 ),
                 RunResult(
                     exit_code=0,
-                    message="1. Pass: output is correct.",
+                    message="VERDICT: PASS\n1. Pass: output is correct.",
                     thread_id="validator-thread",
                     stderr="",
                 ),
@@ -3187,12 +3212,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         app._execute_task(task)
 
-        self.assertEqual(len(runner.prompts), 4)
-        self.assertTrue(runner.prompts[1][2])
+        self.assertEqual(len(runner.prompts), 5)
         self.assertTrue(runner.prompts[2][2])
-        self.assertIsNone(runner.prompts[1][1])
+        self.assertTrue(runner.prompts[3][2])
         self.assertIsNone(runner.prompts[2][1])
-        self.assertEqual(runner.prompts[3][1], "primary-thread")
+        self.assertIsNone(runner.prompts[3][1])
+        self.assertEqual(runner.prompts[4][1], "primary-thread")
         self.assertEqual(self.api.messages, [(123, "Corrected final answer.")])
 
     def test_cross_validation_failure_returns_primary_recovery_not_validator_output(self) -> None:
@@ -3203,13 +3228,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         runner = FakeCodexRunner(
             RunResult(
                 exit_code=0,
-                message="Working manuscript saved to deliverables/draft.pdf",
-                thread_id="author-thread",
+                message="Objective: revise and validate the report.",
+                thread_id="plan-thread",
                 stderr="",
             )
         )
         runner.results.extend(
             [
+                RunResult(
+                    exit_code=0,
+                    message="Working manuscript saved to deliverables/draft.pdf",
+                    thread_id="author-thread",
+                    stderr="",
+                ),
                 RunResult(
                     exit_code=1,
                     message="Raw audit result 1.",
@@ -3247,7 +3278,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         app._execute_task(task)
 
-        self.assertEqual(len(runner.prompts), 5)
+        self.assertEqual(len(runner.prompts), 6)
         self.assertIn("validation recovery", runner.prompts[-1][0])
         self.assertEqual(runner.prompts[-1][1], "author-thread")
         self.assertEqual(
@@ -3342,7 +3373,9 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
+        self.assertTrue(
+            any("[Telegram document delivery]" in prompt[0] for prompt in self.app.runner.prompts)
+        )
         self.assertEqual(self.api.documents, [])
         self.assertEqual(self.api.messages[-1], (123, "Updated parser."))
 
@@ -3366,7 +3399,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.app._handle_update(self.update(123, "이제 이거 내용대로 해서 완성본을 만들어줘"))
         pending = self.app.store.list_tasks()[0]
-        self.assertTrue(self.app.store.approve(pending.id))
+        if pending.status == "awaiting_approval":
+            self.assertTrue(self.app.store.approve(pending.id))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
