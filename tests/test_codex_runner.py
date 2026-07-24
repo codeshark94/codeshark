@@ -246,6 +246,34 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertTrue(result.startup_retried)
         self.assertEqual(result.thread_id, "thread-new")
 
+    def test_rolls_over_missing_persistent_session_before_turn_start(self) -> None:
+        rejected = RunResult(
+            exit_code=1,
+            message="",
+            thread_id="thread-old",
+            stderr="no rollout found for thread id thread-old",
+        )
+        completed = RunResult(
+            exit_code=0,
+            message="done",
+            thread_id="thread-new",
+            stderr="",
+            turn_started=True,
+        )
+        with patch.object(
+            self.runner,
+            "_run_app_server",
+            side_effect=[rejected, completed],
+        ) as run:
+            result = self.runner.run("continue the figure revision", "thread-old")
+
+        self.assertEqual(run.call_count, 2)
+        retry_prompt, retry_thread_id = run.call_args.args[:2]
+        self.assertIsNone(retry_thread_id)
+        self.assertIn("project-session rollover", retry_prompt)
+        self.assertTrue(result.startup_retried)
+        self.assertEqual(result.thread_id, "thread-new")
+
     def test_does_not_roll_over_oversized_session_after_turn_start(self) -> None:
         failed = RunResult(
             exit_code=1,

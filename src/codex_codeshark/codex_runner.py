@@ -165,6 +165,9 @@ class CodexRunner:
     _OVERSIZED_RESUME_ERROR = re.compile(
         r"Codex app-server returned an oversized protocol message", re.IGNORECASE
     )
+    _MISSING_ROLLOUT_RESUME_ERROR = re.compile(
+        r"no rollout found for thread id", re.IGNORECASE
+    )
     _CHILD_ENV_ALLOWLIST = {
         "CODEX_HOME",
         "HOME",
@@ -674,14 +677,17 @@ class CodexRunner:
         result: RunResult,
         requested_thread_id: str | None,
     ) -> bool:
-        """Recover a project session whose app-server resume response has grown too large."""
+        """Recover a project session that app-server cannot resume before a turn starts."""
         return (
             requested_thread_id is not None
             and result.exit_code != 0
             and not result.cancelled
             and not result.timed_out
             and not result.turn_started
-            and bool(cls._OVERSIZED_RESUME_ERROR.search(result.stderr))
+            and bool(
+                cls._OVERSIZED_RESUME_ERROR.search(result.stderr)
+                or cls._MISSING_ROLLOUT_RESUME_ERROR.search(result.stderr)
+            )
         )
 
     @staticmethod
@@ -702,8 +708,8 @@ class CodexRunner:
             (
                 prompt,
                 "[Codeshark project-session rollover]",
-                "The prior persisted project thread could not be resumed because its transport response exceeded "
-                "the app-server message limit. This is a new successor thread for the same project. Continue "
+                "The prior persisted project thread could not be resumed by the current app-server runtime. "
+                "This is a new successor thread for the same project. Continue "
                 "from the project context and workspace state already included above; do not repeat completed "
                 "work or external side effects. Keep the prior thread as historical context.",
                 "[/Codeshark project-session rollover]",

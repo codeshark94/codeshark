@@ -13,6 +13,7 @@ from codex_codeshark.config import (
     validate_bot_token,
     configured_mcp_servers,
     load_config,
+    migrate_codex_session_rollouts,
     prompt_and_store_bot_token,
     prepare_codex_runtime,
     prepare_group_runtime,
@@ -691,6 +692,39 @@ class ConfigTests(unittest.TestCase):
                 validate_codex_profile(settings, codex_home=runtime_home),
                 "codex-codeshark",
             )
+
+    def test_migrates_known_session_rollouts_into_private_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_home = root / "main-codex-home"
+            source_home.mkdir()
+            (source_home / "auth.json").write_text("{}", encoding="utf-8")
+            runtime_home = root / "codeshark-codex-home"
+            thread_id = "019f8d1c-b384-72f2-9c95-bf8a5360d1f3"
+            source_rollout = (
+                source_home
+                / "sessions"
+                / "2026"
+                / "07"
+                / "24"
+                / f"rollout-2026-07-24T00-00-00-{thread_id}.jsonl"
+            )
+            source_rollout.parent.mkdir(parents=True)
+            source_rollout.write_text('{"type":"session_meta"}\n', encoding="utf-8")
+            settings = Config(
+                allowed_user_ids=frozenset({123}),
+                workdir=root,
+                codex_binary=Path(__file__),
+                codex_home=source_home,
+                runtime_codex_home=runtime_home,
+            )
+
+            prepare_codex_runtime(settings)
+            self.assertEqual(migrate_codex_session_rollouts(settings, {thread_id}), 1)
+            destination = runtime_home / source_rollout.relative_to(source_home)
+            self.assertEqual(destination.read_text(encoding="utf-8"), '{"type":"session_meta"}\n')
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(migrate_codex_session_rollouts(settings, {thread_id}), 0)
 
     def test_writes_and_validates_restricted_codex_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

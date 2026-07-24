@@ -4,6 +4,7 @@ import getpass
 import json
 import os
 import re
+import shutil
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -1091,6 +1092,49 @@ def prepare_codex_runtime(config: Config) -> Path:
 
     write_codex_profile(config.codex_profile, codex_home=runtime_home)
     return runtime_home
+
+
+def migrate_codex_session_rollouts(config: Config, thread_ids: set[str]) -> int:
+    """Copy only known Codeshark session rollouts into its private Codex home."""
+    valid_thread_ids = {
+        thread_id
+        for thread_id in thread_ids
+        if re.fullmatch(r"[A-Za-z0-9-]+", thread_id)
+    }
+    if not valid_thread_ids:
+        return 0
+    source_sessions = config.codex_home.expanduser().resolve() / "sessions"
+    target_sessions = config.runtime_codex_home.expanduser().resolve() / "sessions"
+    if not source_sessions.is_dir():
+        return 0
+
+    migrated = 0
+    try:
+        candidates = tuple(source_sessions.rglob("*.jsonl"))
+    except OSError as exc:
+        raise ConfigError(f"cannot inspect existing Codex sessions: {exc}") from exc
+    for source in candidates:
+        if source.is_symlink() or not source.is_file():
+            continue
+        if not any(source.name.endswith(f"-{thread_id}.jsonl") for thread_id in valid_thread_ids):
+            continue
+        try:
+            relative = source.relative_to(source_sessions)
+        except ValueError:
+            continue
+        destination = target_sessions / relative
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() or not destination.is_file():
+                raise ConfigError(f"Codeshark session path is unsafe: {destination}")
+            continue
+        ensure_private_directory(destination.parent)
+        try:
+            shutil.copyfile(source, destination)
+            destination.chmod(0o600)
+        except OSError as exc:
+            raise ConfigError(f"cannot migrate Codeshark session {source.name}: {exc}") from exc
+        migrated += 1
+    return migrated
 
 
 def validate_mcp_policy(config: Config, *, codex_home: Path | None = None) -> str:

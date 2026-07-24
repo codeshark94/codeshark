@@ -17,6 +17,7 @@ from .config import (
     Config,
     PROJECT_ROOT,
     group_worker_runtime,
+    migrate_codex_session_rollouts,
     orchestration_profiles,
     prepare_codex_runtime,
     prepare_group_runtime,
@@ -445,6 +446,20 @@ class AgentApp:
         self._quarantine_legacy_automatic_learning()
         self.risk_policy = RiskPolicy()
         prepare_codex_runtime(config)
+        state_snapshot = self.state.snapshot()
+        session_thread_ids = {
+            session.codex_thread_id
+            for session in (
+                *state_snapshot.chat_sessions.values(),
+                *(
+                    session
+                    for projects in state_snapshot.project_sessions.values()
+                    for session in projects.values()
+                ),
+            )
+            if session.codex_thread_id
+        }
+        migrate_codex_session_rollouts(config, session_thread_ids)
         prepare_group_runtime(config)
         self._administrator_write_roots = self._roots_with_agent_repository(
             config.delegated_roots
