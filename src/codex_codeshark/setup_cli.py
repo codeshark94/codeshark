@@ -9,10 +9,10 @@ from .config import (
     DEFAULT_CODEX_PROFILE,
     ConfigError,
     load_config,
+    prepare_codex_runtime,
     prepare_group_runtime,
     prompt_and_store_bot_token,
     validate_codex_version,
-    write_codex_profile,
     write_local_config,
 )
 from .telegram_api import TelegramAPI
@@ -77,8 +77,9 @@ def interactive_setup() -> int:
         return 1
 
     config_path = write_local_config(paired_user_id)
-    profile_path = write_codex_profile(DEFAULT_CODEX_PROFILE)
-    prepare_group_runtime(load_config(config_path))
+    config = load_config(config_path)
+    profile_path = prepare_codex_runtime(config) / f"{DEFAULT_CODEX_PROFILE}.config.toml"
+    prepare_group_runtime(config)
     api.set_commands()
     api.delete_webhook(drop_pending_updates=True)
     api.send_message(paired_user_id, "Pairing complete. Run the local doctor command next.")

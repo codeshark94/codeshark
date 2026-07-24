@@ -162,6 +162,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             codex_binary=binary,
             state_path=root / "state.json",
             codex_home=codex_home,
+            runtime_codex_home=root / "runtime-codex-home",
             group_workdir=root / "group-workspace",
             group_codex_home=root / "group-codex-home",
         )
@@ -1123,9 +1124,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["model_usage_5h"][0]["long_context_runs"], 0)
         self.assertEqual(payload["model_usage_5h"][0]["web_search_calls"], 0)
         self.assertEqual(payload["model_usage_7d"][0]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_usage_lifetime"][0]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["project_usage_5h"][0]["project"], "Private Project")
         self.assertEqual(payload["project_usage_5h"][0]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["project_usage_7d"][0]["project"], "Private Project")
+        self.assertEqual(payload["project_usage_lifetime"][0]["project"], "Private Project")
         self.assertNotIn(
             "Stale Project",
             {item["project"] for item in payload["project_usage_5h"]},
@@ -1899,6 +1902,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("exact tokens", text)
         self.assertIn("gpt-5.6-luna (medium), routine", text)
         self.assertIn("160 tokens from 1/1 turns", text)
+        self.assertIn("Lifetime:", text)
         self.assertIn("Live account quota", text)
 
     def test_existing_figure_layout_request_loads_the_layout_skill(self) -> None:
@@ -2052,6 +2056,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         homes = {runner.restricted_codex_home for runner in self.app._worker_runners}
         self.assertEqual(len(workdirs), self.config.worker_count)
         self.assertEqual(len(homes), self.config.worker_count)
+        self.assertTrue(
+            all(
+                runner.codex_home == self.config.runtime_codex_home
+                for runner in self.app._worker_runners
+            )
+        )
         self.assertTrue(
             all(
                 runner.model == self.config.routine_model

@@ -26,6 +26,12 @@ DEFAULT_CODEX_HOME = Path(
     os.environ.get("CODEX_HOME", Path.home() / ".codex")
 ).expanduser().resolve()
 DEFAULT_CODEX_BINARY = Path("/Applications/Codex.app/Contents/Resources/codex")
+_DEFAULT_CODESHARK_RUNTIME_CODEX_HOME = (
+    Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "codex"
+)
+DEFAULT_RUNTIME_CODEX_HOME = Path(
+    os.environ.get("CODEX_CODESHARK_RUNTIME_CODEX_HOME", _DEFAULT_CODESHARK_RUNTIME_CODEX_HOME)
+).expanduser().resolve()
 _DEFAULT_GROUP_RUNTIME_ROOT = Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "group"
 GROUP_RUNTIME_ROOT = Path(
     os.environ.get("CODEX_CODESHARK_GROUP_HOME", _DEFAULT_GROUP_RUNTIME_ROOT)
@@ -149,6 +155,7 @@ class Config:
     mcp_allowed_tools: tuple[tuple[str, tuple[str, ...]], ...] = ()
     state_path: Path = PROJECT_ROOT / "runtime" / "state.json"
     codex_home: Path = DEFAULT_CODEX_HOME
+    runtime_codex_home: Path = DEFAULT_RUNTIME_CODEX_HOME
     group_workdir: Path = GROUP_RUNTIME_ROOT / "workspace"
     group_codex_home: Path = GROUP_RUNTIME_ROOT / "codex-home"
     agent_repository_root: Path = PROJECT_ROOT
@@ -300,6 +307,9 @@ def load_config(path: Path | None = None) -> Config:
 
     workdir = Path(str(data.get("workdir", ""))).expanduser()
     codex_binary = Path(str(data.get("codex_binary", ""))).expanduser()
+    runtime_codex_home = Path(
+        str(data.get("runtime_codex_home", DEFAULT_RUNTIME_CODEX_HOME))
+    ).expanduser()
     codex_profile = data.get("codex_profile", DEFAULT_CODEX_PROFILE)
     quick_model = _require_model_setting(data, "quick_model", "gpt-5.4-mini")
     quick_reasoning_effort = _require_reasoning_effort(
@@ -368,6 +378,8 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError(f"codex_binary must be an existing absolute file: {codex_binary}")
     if not isinstance(codex_profile, str) or not codex_profile.strip():
         raise ConfigError("codex_profile must be a non-empty string")
+    if not runtime_codex_home.is_absolute():
+        raise ConfigError("runtime_codex_home must be an absolute directory")
     agent_repository_root = PROJECT_ROOT.resolve()
     if not agent_repository_root.is_dir():
         raise ConfigError(
@@ -599,6 +611,7 @@ def load_config(path: Path | None = None) -> Config:
         delegated_roots=tuple(delegated_roots),
         mcp_known_servers=tuple(raw_known_servers),
         mcp_allowed_tools=tuple(allowed_tools),
+        runtime_codex_home=runtime_codex_home.resolve(),
         agent_repository_root=agent_repository_root,
     )
 
@@ -1051,6 +1064,35 @@ def prepare_group_runtime(config: Config) -> str:
     return str(workdir)
 
 
+def prepare_codex_runtime(config: Config) -> Path:
+    """Create Codeshark's private CLI state home without copying account credentials."""
+    runtime_home = config.runtime_codex_home.expanduser().resolve()
+    source_home = config.codex_home.expanduser().resolve()
+    if runtime_home == source_home:
+        raise ConfigError("runtime_codex_home must be separate from the main Codex home")
+
+    ensure_private_directory(runtime_home)
+    for name, required in (("auth.json", True), ("config.toml", False)):
+        source = source_home / name
+        destination = runtime_home / name
+        if not source.is_file():
+            if required:
+                raise ConfigError(f"Codex authentication file is missing: {source}")
+            continue
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() and destination.resolve() == source.resolve():
+                continue
+            if required:
+                raise ConfigError(
+                    "Codeshark Codex home contains an unexpected auth.json; remove it and rerun doctor"
+                )
+            continue
+        destination.symlink_to(source)
+
+    write_codex_profile(config.codex_profile, codex_home=runtime_home)
+    return runtime_home
+
+
 def validate_mcp_policy(config: Config, *, codex_home: Path | None = None) -> str:
     configured = configured_mcp_servers(config.codex_profile, codex_home=codex_home)
     known = frozenset(config.mcp_known_servers)
@@ -1241,6 +1283,7 @@ def write_local_config(
             f"workdir = {json.dumps(str(workdir), ensure_ascii=False)}",
             f"codex_binary = {json.dumps(str(codex_binary), ensure_ascii=False)}",
             f'codex_profile = "{DEFAULT_CODEX_PROFILE}"',
+            f"runtime_codex_home = {json.dumps(str(DEFAULT_RUNTIME_CODEX_HOME), ensure_ascii=False)}",
             'quick_model = "gpt-5.4-mini"',
             'quick_reasoning_effort = "low"',
             'routine_model = "gpt-5.6-luna"',

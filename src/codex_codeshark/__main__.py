@@ -14,6 +14,7 @@ from .config import (
     PROJECT_ROOT,
     load_bot_token,
     load_config,
+    prepare_codex_runtime,
     set_model_assignments,
     set_orchestration,
     set_security_settings,
@@ -377,8 +378,9 @@ def main() -> int:
             return 0
         config = load_config()
         validate_codex_version(config.codex_binary)
-        validate_codex_profile(config)
-        validate_mcp_policy(config)
+        prepare_codex_runtime(config)
+        validate_codex_profile(config, codex_home=config.runtime_codex_home)
+        validate_mcp_policy(config, codex_home=config.runtime_codex_home)
         token = load_bot_token()
         AgentApp(config, TelegramAPI(token)).run_forever()
         return 0

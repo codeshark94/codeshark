@@ -260,6 +260,7 @@ class AgentStoreTests(unittest.TestCase):
             )
 
             usage = store.project_model_usage(since=150.0)
+            lifetime_usage = store.project_model_usage()
 
             self.assertEqual(len(usage), 1)
             self.assertEqual(usage[0].project, "Research")
@@ -267,6 +268,7 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(usage[0].measured_runs, 1)
             self.assertEqual(usage[0].cached_input_tokens, 30)
             self.assertEqual(usage[0].reasoning_output_tokens, 15)
+            self.assertEqual(lifetime_usage[0].total_tokens, 160)
 
     def test_tracks_long_context_and_observed_tool_items(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

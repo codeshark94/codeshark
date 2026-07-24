@@ -14,6 +14,7 @@ from codex_codeshark.config import (
     configured_mcp_servers,
     load_config,
     prompt_and_store_bot_token,
+    prepare_codex_runtime,
     prepare_group_runtime,
     set_model_assignments,
     set_orchestration,
@@ -662,6 +663,34 @@ class ConfigTests(unittest.TestCase):
                 self.assertTrue(
                     (config.group_codex_home / f"worker-{worker_index + 1}" / "auth.json").is_symlink()
                 )
+
+    def test_prepares_private_runtime_with_shared_auth_and_config_links(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_home = root / "main-codex-home"
+            source_home.mkdir()
+            auth = source_home / "auth.json"
+            auth.write_text("{}", encoding="utf-8")
+            config = source_home / "config.toml"
+            config.write_text('[mcp_servers.docs]\ncommand = "docs"\n', encoding="utf-8")
+            runtime_home = root / "codeshark-codex-home"
+            settings = Config(
+                allowed_user_ids=frozenset({123}),
+                workdir=root,
+                codex_binary=Path(__file__),
+                codex_home=source_home,
+                runtime_codex_home=runtime_home,
+            )
+
+            self.assertEqual(prepare_codex_runtime(settings), runtime_home.resolve())
+            self.assertTrue((runtime_home / "auth.json").is_symlink())
+            self.assertEqual((runtime_home / "auth.json").resolve(), auth.resolve())
+            self.assertTrue((runtime_home / "config.toml").is_symlink())
+            self.assertEqual((runtime_home / "config.toml").resolve(), config.resolve())
+            self.assertEqual(
+                validate_codex_profile(settings, codex_home=runtime_home),
+                "codex-codeshark",
+            )
 
     def test_writes_and_validates_restricted_codex_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

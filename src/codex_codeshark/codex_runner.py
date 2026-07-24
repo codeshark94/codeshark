@@ -185,6 +185,7 @@ class CodexRunner:
         binary: Path,
         profile: str,
         workdir: Path,
+        codex_home: Path | None = None,
         restricted_workdir: Path | None = None,
         restricted_codex_home: Path | None = None,
         timeout_seconds: int,
@@ -201,6 +202,7 @@ class CodexRunner:
         self.binary = binary
         self.profile = profile
         self.workdir = workdir
+        self.codex_home = codex_home
         self.restricted_workdir = restricted_workdir or workdir
         self.restricted_codex_home = restricted_codex_home
         self.timeout_seconds = timeout_seconds or None
@@ -250,6 +252,8 @@ class CodexRunner:
             if self.restricted_codex_home is None:
                 raise RuntimeError("restricted Codex home is not configured")
             env["CODEX_HOME"] = str(self.restricted_codex_home)
+        elif self.codex_home is not None:
+            env["CODEX_HOME"] = str(self.codex_home)
         env["NO_COLOR"] = "1"
         return env
 
@@ -379,6 +383,8 @@ class CodexRunner:
             self.profile,
             "-C",
             str(self.workdir),
+            "-c",
+            'history.persistence="none"',
         ]
         if approved or full_access:
             for root in self.additional_write_roots:
@@ -429,7 +435,14 @@ class CodexRunner:
         full_access: bool,
     ) -> list[str]:
         command = [str(self.binary), "-C", str(self.workdir)]
-        command.extend(["-c", 'service_tier="standard"'])
+        command.extend(
+            [
+                "-c",
+                'service_tier="standard"',
+                "-c",
+                'history.persistence="none"',
+            ]
+        )
         if self.model:
             command.extend(["-c", f"model={json.dumps(self.model)}"])
         if self.model_reasoning_effort:

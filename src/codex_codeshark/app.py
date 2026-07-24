@@ -18,6 +18,7 @@ from .config import (
     PROJECT_ROOT,
     group_worker_runtime,
     orchestration_profiles,
+    prepare_codex_runtime,
     prepare_group_runtime,
 )
 from .identity import (
@@ -75,7 +76,7 @@ HELP_TEXT = """Codex-codeshark
 
 Plain text: submit a task or steer active private work
 /status: show the active task, queue, and session
-/model_usage: show recorded model activity for the last 5 hours and 7 days
+/model_usage: show recorded model activity for the last 5 hours, 7 days, and lifetime
 /project [NAME]: show or switch the active project (default: General)
 /new, /clear_temp: delete this project's temporary session and start fresh
 /name NAME: set Codeshark's self-introduction name
@@ -443,6 +444,7 @@ class AgentApp:
         self.store = AgentStore(database_path)
         self._quarantine_legacy_automatic_learning()
         self.risk_policy = RiskPolicy()
+        prepare_codex_runtime(config)
         prepare_group_runtime(config)
         self._administrator_write_roots = self._roots_with_agent_repository(
             config.delegated_roots
@@ -745,6 +747,7 @@ class AgentApp:
                 )
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
             weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
+            lifetime_model_usage = self.store.model_run_summaries()
             project_usage = [
                 summary
                 for summary in self.store.project_model_usage(since=now - 5 * 60 * 60)
@@ -755,6 +758,11 @@ class AgentApp:
                 for summary in self.store.project_model_usage(
                     since=now - 7 * 24 * 60 * 60
                 )
+                if summary.project in registered_project_names
+            ]
+            lifetime_project_usage = [
+                summary
+                for summary in self.store.project_model_usage()
                 if summary.project in registered_project_names
             ]
             weekly_role_usage = {
@@ -824,6 +832,58 @@ class AgentApp:
                     "recent_total_tokens": usage.total_tokens if usage else 0,
                     "recent_measured_turns": usage.measured_runs if usage else 0,
                     "recent_runs": usage.runs if usage else 0,
+                }
+
+            def model_usage_payload(summary) -> dict[str, object]:
+                return {
+                    "model": summary.model,
+                    "reasoning_effort": summary.reasoning_effort,
+                    "phase": summary.phase,
+                    "runs": summary.runs,
+                    "completed": summary.completed,
+                    "elapsed_seconds": round(summary.elapsed_seconds, 1),
+                    "measured_runs": summary.measured_runs,
+                    "input_tokens": summary.input_tokens,
+                    "cached_input_tokens": summary.cached_input_tokens,
+                    "cache_write_input_tokens": summary.cache_write_input_tokens,
+                    "output_tokens": summary.output_tokens,
+                    "reasoning_output_tokens": summary.reasoning_output_tokens,
+                    "total_tokens": summary.total_tokens,
+                    "long_context_runs": summary.long_context_runs,
+                    "long_context_input_tokens": summary.long_context_input_tokens,
+                    "long_context_cached_input_tokens": summary.long_context_cached_input_tokens,
+                    "long_context_cache_write_input_tokens": summary.long_context_cache_write_input_tokens,
+                    "long_context_output_tokens": summary.long_context_output_tokens,
+                    "command_execution_calls": summary.command_execution_calls,
+                    "file_change_calls": summary.file_change_calls,
+                    "mcp_tool_calls": summary.mcp_tool_calls,
+                    "web_search_calls": summary.web_search_calls,
+                    "image_generation_calls": summary.image_generation_calls,
+                }
+
+            def project_usage_payload(summary) -> dict[str, object]:
+                return {
+                    "project": summary.project,
+                    "model": summary.model,
+                    "reasoning_effort": summary.reasoning_effort,
+                    "runs": summary.runs,
+                    "measured_runs": summary.measured_runs,
+                    "input_tokens": summary.input_tokens,
+                    "cached_input_tokens": summary.cached_input_tokens,
+                    "cache_write_input_tokens": summary.cache_write_input_tokens,
+                    "output_tokens": summary.output_tokens,
+                    "reasoning_output_tokens": summary.reasoning_output_tokens,
+                    "total_tokens": summary.total_tokens,
+                    "long_context_runs": summary.long_context_runs,
+                    "long_context_input_tokens": summary.long_context_input_tokens,
+                    "long_context_cached_input_tokens": summary.long_context_cached_input_tokens,
+                    "long_context_cache_write_input_tokens": summary.long_context_cache_write_input_tokens,
+                    "long_context_output_tokens": summary.long_context_output_tokens,
+                    "command_execution_calls": summary.command_execution_calls,
+                    "file_change_calls": summary.file_change_calls,
+                    "mcp_tool_calls": summary.mcp_tool_calls,
+                    "web_search_calls": summary.web_search_calls,
+                    "image_generation_calls": summary.image_generation_calls,
                 }
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
@@ -1082,6 +1142,14 @@ class AgentApp:
                             }
                             for summary in weekly_project_usage
                         ],
+                        "model_usage_lifetime": [
+                            model_usage_payload(summary)
+                            for summary in lifetime_model_usage
+                        ],
+                        "project_usage_lifetime": [
+                            project_usage_payload(summary)
+                            for summary in lifetime_project_usage
+                        ],
                         "account_usage": self._account_usage_payload(),
                         "activity_log": [
                             {
@@ -1224,6 +1292,7 @@ class AgentApp:
             binary=self.config.codex_binary,
             profile=self.config.codex_profile,
             workdir=self.config.workdir,
+            codex_home=self.config.runtime_codex_home,
             restricted_workdir=group_workdir,
             restricted_codex_home=group_codex_home,
             timeout_seconds=self.config.task_timeout_seconds,
@@ -3169,14 +3238,15 @@ class AgentApp:
         """Extract the newest complete user-facing turns within a strict context budget."""
         if not re.fullmatch(r"[A-Za-z0-9-]+", thread_id):
             return ""
-        sessions_root = self.config.codex_home.expanduser() / "sessions"
-        if not sessions_root.is_dir():
-            return ""
-        try:
-            candidates = tuple(sessions_root.rglob(f"*-{thread_id}.jsonl"))
-        except OSError as exc:
-            LOGGER.warning("could not locate Codex session transcript %s: %s", thread_id, exc)
-            return ""
+        candidates: tuple[Path, ...] = ()
+        for codex_home in (self.config.runtime_codex_home, self.config.codex_home):
+            sessions_root = codex_home.expanduser() / "sessions"
+            if not sessions_root.is_dir():
+                continue
+            try:
+                candidates += tuple(sessions_root.rglob(f"*-{thread_id}.jsonl"))
+            except OSError as exc:
+                LOGGER.warning("could not locate Codex session transcript %s: %s", thread_id, exc)
         if not candidates:
             return ""
         try:
@@ -5169,6 +5239,7 @@ class AgentApp:
         windows = (
             ("Last 5 hours", now - 5 * 60 * 60),
             ("Last 7 days", now - 7 * 24 * 60 * 60),
+            ("Lifetime", None),
         )
         lines = [
             "Codex usage telemetry",

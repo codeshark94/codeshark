@@ -6,6 +6,7 @@ from .config import (
     ConfigError,
     load_bot_token,
     load_config,
+    prepare_codex_runtime,
     prepare_group_runtime,
     validate_codex_profile,
     validate_codex_version,
@@ -65,7 +66,8 @@ def run_doctor() -> int:
 
     def profile_check() -> str:
         config = config_holder.get("value") or load_config()
-        return validate_codex_profile(config)
+        prepare_codex_runtime(config)
+        return validate_codex_profile(config, codex_home=config.runtime_codex_home)
 
     check("Codex profile", profile_check)
 
@@ -95,7 +97,7 @@ def run_doctor() -> int:
 
     def mcp_policy_check() -> str:
         config = config_holder.get("value") or load_config()
-        return validate_mcp_policy(config)
+        return validate_mcp_policy(config, codex_home=config.runtime_codex_home)
 
     check("MCP allowlist", mcp_policy_check)
     return 1 if failures else 0

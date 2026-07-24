@@ -450,6 +450,20 @@ class CodexRunnerTests(unittest.TestCase):
         environment = self.runner._child_env(restricted=True)
         self.assertEqual(environment["CODEX_HOME"], "/tmp/group-codex-home")
 
+    def test_admin_child_environment_uses_private_codeshark_home(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            codex_home=Path("/tmp/codeshark-codex-home"),
+            timeout_seconds=60,
+        )
+
+        self.assertEqual(
+            runner._child_env()["CODEX_HOME"],
+            "/tmp/codeshark-codex-home",
+        )
+
     def test_restricted_workspace_is_cleared_after_a_group_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

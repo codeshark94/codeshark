@@ -1090,10 +1090,19 @@ class AgentStore:
             for row in rows
         ]
 
-    def project_model_usage(self, *, since: float) -> list[ProjectModelUsage]:
+    def project_model_usage(
+        self,
+        *,
+        since: float | None = None,
+    ) -> list[ProjectModelUsage]:
+        filters = ""
+        parameters: tuple[float, ...] = ()
+        if since is not None:
+            filters = "WHERE runs.finished_at >= ?"
+            parameters = (since,)
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT COALESCE(manifests.project, 'General') AS project,
                        runs.model, runs.reasoning_effort, COUNT(*) AS runs,
                        SUM(runs.token_usage_recorded) AS measured_runs,
@@ -1115,11 +1124,11 @@ class AgentStore:
                        SUM(runs.image_generation_calls) AS image_generation_calls
                 FROM model_runs AS runs
                 LEFT JOIN task_manifests AS manifests ON manifests.task_id = runs.task_id
-                WHERE runs.finished_at >= ?
+                {filters}
                 GROUP BY project, runs.model, runs.reasoning_effort
                 ORDER BY total_tokens DESC, project, runs.model, runs.reasoning_effort
                 """,
-                (since,),
+                parameters,
             ).fetchall()
         return [
             ProjectModelUsage(

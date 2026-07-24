@@ -593,8 +593,10 @@ struct DashboardSnapshot: Decodable {
     let activityLog: [DashboardActivityLog]
     let modelUsage5h: [DashboardModelUsage]
     let modelUsage7d: [DashboardModelUsage]
+    let modelUsageLifetime: [DashboardModelUsage]
     let projectUsage5h: [DashboardProjectUsage]
     let projectUsage7d: [DashboardProjectUsage]
+    let projectUsageLifetime: [DashboardProjectUsage]
     let accountUsage: DashboardAccountUsage?
     let orchestration: DashboardOrchestration?
     let security: DashboardSecurity?
@@ -615,8 +617,10 @@ struct DashboardSnapshot: Decodable {
         activityLog: [],
         modelUsage5h: [],
         modelUsage7d: [],
+        modelUsageLifetime: [],
         projectUsage5h: [],
         projectUsage7d: [],
+        projectUsageLifetime: [],
         accountUsage: nil,
         orchestration: nil,
         security: nil
@@ -638,8 +642,10 @@ struct DashboardSnapshot: Decodable {
         case activityLog = "activity_log"
         case modelUsage5h = "model_usage_5h"
         case modelUsage7d = "model_usage_7d"
+        case modelUsageLifetime = "model_usage_lifetime"
         case projectUsage5h = "project_usage_5h"
         case projectUsage7d = "project_usage_7d"
+        case projectUsageLifetime = "project_usage_lifetime"
         case accountUsage = "account_usage"
         case orchestration
         case security
@@ -661,8 +667,10 @@ struct DashboardSnapshot: Decodable {
         activityLog: [DashboardActivityLog],
         modelUsage5h: [DashboardModelUsage],
         modelUsage7d: [DashboardModelUsage],
+        modelUsageLifetime: [DashboardModelUsage],
         projectUsage5h: [DashboardProjectUsage],
         projectUsage7d: [DashboardProjectUsage],
+        projectUsageLifetime: [DashboardProjectUsage],
         accountUsage: DashboardAccountUsage?,
         orchestration: DashboardOrchestration?,
         security: DashboardSecurity?
@@ -682,8 +690,10 @@ struct DashboardSnapshot: Decodable {
         self.activityLog = activityLog
         self.modelUsage5h = modelUsage5h
         self.modelUsage7d = modelUsage7d
+        self.modelUsageLifetime = modelUsageLifetime
         self.projectUsage5h = projectUsage5h
         self.projectUsage7d = projectUsage7d
+        self.projectUsageLifetime = projectUsageLifetime
         self.accountUsage = accountUsage
         self.orchestration = orchestration
         self.security = security
@@ -706,8 +716,10 @@ struct DashboardSnapshot: Decodable {
         activityLog = try container.decodeIfPresent([DashboardActivityLog].self, forKey: .activityLog) ?? []
         modelUsage5h = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage5h) ?? []
         modelUsage7d = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage7d) ?? []
+        modelUsageLifetime = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsageLifetime) ?? []
         projectUsage5h = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage5h) ?? []
         projectUsage7d = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage7d) ?? []
+        projectUsageLifetime = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsageLifetime) ?? []
         accountUsage = try container.decodeIfPresent(DashboardAccountUsage.self, forKey: .accountUsage)
         orchestration = try container.decodeIfPresent(DashboardOrchestration.self, forKey: .orchestration)
         security = try container.decodeIfPresent(DashboardSecurity.self, forKey: .security)
@@ -2012,7 +2024,15 @@ struct ModelUsageView: View {
     }
 
     private var entries: [DashboardModelUsage] {
-        let source = period == 0 ? model.snapshot.modelUsage5h : model.snapshot.modelUsage7d
+        let source: [DashboardModelUsage]
+        switch period {
+        case 0:
+            source = model.snapshot.modelUsage5h
+        case 1:
+            source = model.snapshot.modelUsage7d
+        default:
+            source = model.snapshot.modelUsageLifetime
+        }
         guard !routedModelKeys.isEmpty else { return source }
         return source.filter {
             routedModelKeys.contains(routingKey(model: $0.model, reasoningEffort: $0.reasoningEffort))
@@ -2020,7 +2040,14 @@ struct ModelUsageView: View {
     }
 
     private var projectEntries: [DashboardProjectUsage] {
-        period == 0 ? model.snapshot.projectUsage5h : model.snapshot.projectUsage7d
+        switch period {
+        case 0:
+            return model.snapshot.projectUsage5h
+        case 1:
+            return model.snapshot.projectUsage7d
+        default:
+            return model.snapshot.projectUsageLifetime
+        }
     }
 
     private var groups: [ModelUsageGroup] {
@@ -2168,6 +2195,7 @@ struct ModelUsageView: View {
                 Picker("Period", selection: $period) {
                     Text("5 hours").tag(0)
                     Text("7 days").tag(1)
+                    Text("Lifetime").tag(2)
                 }
                 Picker("Breakdown", selection: $breakdown) {
                     Text("Models").tag(0)
