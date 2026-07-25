@@ -2975,7 +2975,10 @@ class AgentApp:
             _INDEPENDENT_REVIEW_CUE.search(prompt) or _AUTHORING_CUE.search(prompt)
         ):
             return True
-        return self._is_manuscript_authoring(prompt) or self._is_figure_revision(prompt)
+        # A focused figure revision is ordinary project work. The persistent
+        # owner sees its project context and decides its tier; do not override
+        # that choice with a costly review loop merely because it edits Fig. N.
+        return self._is_manuscript_authoring(prompt)
 
     def _requires_writable_cross_validation(self, prompt: str) -> bool:
         return self._is_figure_revision(prompt) or (

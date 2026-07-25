@@ -2767,6 +2767,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertFalse(self.app._cross_validation_requested("Push the existing branch."))
 
+    def test_focused_figure_update_keeps_the_owner_selected_routine_tier(self) -> None:
+        request = "이제 원고의 fig5에다 반영하되 원래 형식에 데이터만 교체해"
+        task = self.app.store.enqueue_task(123, request, source="test", ephemeral=False)
+        runner = FakeCodexRunner(
+            triage_message=json.dumps({"tier": "routine", "confidence": "high", "reason": "test"})
+        )
+
+        plan = self.app._workflow_plan(task, request, runner)
+
+        self.assertFalse(self.app._cross_validation_requested(request))
+        self.assertEqual(plan.tier, "routine")
+        self.assertFalse(plan.uses_validator)
+
     def test_triage_agent_selects_a_chain_by_request_weight(self) -> None:
         def plan_for(request: str, tier: str):
             task = self.app.store.enqueue_task(
