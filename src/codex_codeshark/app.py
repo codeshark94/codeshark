@@ -263,7 +263,7 @@ _AUTOMATIC_RESULT_SUFFIXES = frozenset(
     }
 )
 _CROSS_VALIDATION_SKILL_NAME = "Independent cross validation 교차 검증"
-_CROSS_VALIDATION_SKILL_CONTENT = """The persistent Primary owner first selects project scope and task tier from the active project context. Quick, Routine, and Standard use one executor session with directly relevant checks. Deep adds a concise planning pass and bounded correction-and-recheck loop. High assurance also adds a separate research pass before primary execution. The Primary owns the user response and receives support findings only as advisory evidence. In administrator work, every phase receives the configured administrator capabilities; support roles must still inspect and advise rather than edit or address the user. Validators inspect, test, recalculate, or challenge work independently and return a clear PASS or REWORK verdict with concrete findings. When a recheck reports REWORK, the Primary corrects the result and sends it through the next fresh recheck. Deliver the corrected result rather than a validator memo. For manuscripts, include rendered-PDF, public terminology, evidence-to-claim alignment, figure, originality, and research-necessity checks. If independent validation does not complete, clearly distinguish completed work from remaining verification."""
+_CROSS_VALIDATION_SKILL_CONTENT = """The persistent Primary owner first selects project scope and task tier from the active project context. Quick and Routine use their direct executors; Standard, Deep, and High assurance use the Primary model configured for that specific tier. Deep adds a concise planning pass and bounded correction-and-recheck loop. High assurance also adds a separate research pass before primary execution. The selected tier executor owns the user-facing completion and receives support findings only as advisory evidence. In administrator work, every phase receives the configured administrator capabilities; support roles must still inspect and advise rather than edit or address the user. Validators inspect, test, recalculate, or challenge work independently and return a clear PASS or REWORK verdict with concrete findings. When a recheck reports REWORK, the tier Primary corrects the result and sends it through the next fresh recheck. Deliver the corrected result rather than a validator memo. For manuscripts, include rendered-PDF, public terminology, evidence-to-claim alignment, figure, originality, and research-necessity checks. If independent validation does not complete, clearly distinguish completed work from remaining verification."""
 _TASK_CLOSURE_SKILL_NAME = "Task closure and delivery"
 _TASK_CLOSURE_SKILL_CONTENT = """Start substantive work by identifying the requested outcome, acceptance evidence, expected artifacts, and direct validation. Inspect repository instructions, project manifests, tests, and CI before changing project work. Keep a concise internal handoff for every nontrivial phase. Before reporting completion, verify the final artifact exists and is readable, run relevant checks, and ensure a requested result file is tagged for delivery. Treat a failed verification or absent requested artifact as unfinished work. Convert explicit negative user feedback into a concrete regression-rule candidate with a reproducer and passing condition."""
 _TELEGRAM_DELIVERY_SKILL_NAME = "Telegram final response and attachment"
@@ -497,12 +497,39 @@ class AgentApp:
             )
             for worker_index in range(config.worker_count)
         )
+        self._standard_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.standard_model,
+                reasoning_effort=self.config.standard_reasoning_effort,
+                role="Standard Primary",
+            )
+            for worker_index in range(config.worker_count)
+        )
         self._primary_runners = tuple(
             self._build_runner(
                 worker_index,
                 model=self.config.primary_model,
                 reasoning_effort=self.config.primary_reasoning_effort,
                 role="Primary",
+            )
+            for worker_index in range(config.worker_count)
+        )
+        self._deep_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.deep_model,
+                reasoning_effort=self.config.deep_reasoning_effort,
+                role="Deep Primary",
+            )
+            for worker_index in range(config.worker_count)
+        )
+        self._high_assurance_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.high_assurance_model,
+                reasoning_effort=self.config.high_assurance_reasoning_effort,
+                role="High Assurance Primary",
             )
             for worker_index in range(config.worker_count)
         )
@@ -804,18 +831,21 @@ class AgentApp:
             def orchestration_route(tier: str) -> list[str]:
                 profile = profiles.get(tier.replace("-", "_"))
                 if profile is None:
-                    return ["Primary ownership", "Primary execution"]
+                    return ["Primary ownership", "Standard primary"]
                 stages: list[str] = ["Primary ownership"]
                 if profile.uses_preflight:
                     stages.append("Planning")
                 if profile.uses_research:
                     stages.append("Research")
-                if profile.uses_validator:
-                    stages.append("Primary execution")
-                elif tier == "quick":
-                    stages.append("Quick execution")
-                else:
-                    stages.append("Routine execution")
+                stages.append(
+                    {
+                        "quick": "Quick execution",
+                        "routine": "Routine execution",
+                        "standard": "Standard primary",
+                        "deep": "Deep primary",
+                        "high-assurance": "High-assurance primary",
+                    }.get(tier, "Standard primary")
+                )
                 if profile.uses_validator:
                     stages.append("Independent review")
                 if profile.feedback_iterations:
@@ -967,6 +997,24 @@ class AgentApp:
                                 self.config.routine_model,
                                 self.config.routine_reasoning_effort,
                                 usage_role="Routine",
+                            ),
+                            assignment(
+                                "Standard primary",
+                                self.config.standard_model,
+                                self.config.standard_reasoning_effort,
+                                usage_role="Standard Primary",
+                            ),
+                            assignment(
+                                "Deep primary",
+                                self.config.deep_model,
+                                self.config.deep_reasoning_effort,
+                                usage_role="Deep Primary",
+                            ),
+                            assignment(
+                                "High-assurance primary",
+                                self.config.high_assurance_model,
+                                self.config.high_assurance_reasoning_effort,
+                                usage_role="High Assurance Primary",
                             ),
                             assignment(
                                 "Primary ownership",
@@ -1353,7 +1401,10 @@ class AgentApp:
         for worker_index, (
             runner,
             quick_runner,
+            standard_runner,
             primary_runner,
+            deep_runner,
+            high_assurance_runner,
             rework_runner,
             subagent_runner,
             feedback_runner,
@@ -1366,7 +1417,10 @@ class AgentApp:
             zip(
                 self._worker_runners,
                 self._quick_runners,
+                self._standard_runners,
                 self._primary_runners,
+                self._deep_runners,
+                self._high_assurance_runners,
                 self._rework_runners,
                 self._subagent_runners,
                 self._feedback_runners,
@@ -1384,7 +1438,10 @@ class AgentApp:
                 args=(
                     runner,
                     quick_runner,
+                    standard_runner,
                     primary_runner,
+                    deep_runner,
+                    high_assurance_runner,
                     rework_runner,
                     subagent_runner,
                     feedback_runner,
@@ -1936,7 +1993,10 @@ class AgentApp:
         self,
         runner: CodexRunner,
         quick_runner: CodexRunner,
+        standard_runner: CodexRunner,
         primary_runner: CodexRunner,
+        deep_runner: CodexRunner,
+        high_assurance_runner: CodexRunner,
         rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
         feedback_runner: CodexRunner,
@@ -1974,9 +2034,12 @@ class AgentApp:
                     subagent_runner,
                     preflight_runner,
                     quick_runner=quick_runner,
+                    standard_runner=standard_runner,
                     triage_runner=triage_runner,
                     project_router_runner=project_router_runner,
                     primary_runner=primary_runner,
+                    deep_runner=deep_runner,
+                    high_assurance_runner=high_assurance_runner,
                     rework_runner=rework_runner,
                     feedback_runner=feedback_runner,
                     research_runner=research_runner,
@@ -2025,8 +2088,11 @@ class AgentApp:
         triage_runner: CodexRunner | None = None,
         *,
         quick_runner: CodexRunner | None = None,
+        standard_runner: CodexRunner | None = None,
         project_router_runner: CodexRunner | None = None,
         primary_runner: CodexRunner | None = None,
+        deep_runner: CodexRunner | None = None,
+        high_assurance_runner: CodexRunner | None = None,
         rework_runner: CodexRunner | None = None,
         feedback_runner: CodexRunner | None = None,
         research_runner: CodexRunner | None = None,
@@ -2039,6 +2105,9 @@ class AgentApp:
         triage_runner = triage_runner or preflight_runner
         project_router_runner = project_router_runner or triage_runner
         primary_runner = primary_runner or runner
+        standard_runner = standard_runner or primary_runner
+        deep_runner = deep_runner or primary_runner
+        high_assurance_runner = high_assurance_runner or primary_runner
         rework_runner = rework_runner or primary_runner
         feedback_runner = feedback_runner or subagent_runner
         research_runner = research_runner or subagent_runner
@@ -2106,12 +2175,17 @@ class AgentApp:
             or file_delivery_required
             or automatic_file_delivery
         )
+        tier_primary_runner = {
+            "standard": standard_runner,
+            "deep": deep_runner,
+            "high-assurance": high_assurance_runner,
+        }.get(workflow_plan.tier, primary_runner)
         execution_runner = (
-            primary_runner
-            if workflow_plan.uses_validator
-            else quick_runner
+            quick_runner
             if workflow_plan.tier == "quick" and not task.restricted
             else runner
+            if workflow_plan.tier == "routine" or task.restricted
+            else tier_primary_runner
         )
         delivery_roots = self._delivery_roots(
             restricted_runner=execution_runner if task.restricted else None
@@ -2224,13 +2298,13 @@ class AgentApp:
                 delivery_state="required" if file_delivery_required else "not-requested",
             )
             result = self._run_cross_validation_workflow(
-                primary_runner,
-                primary_runner,
+                tier_primary_runner,
+                tier_primary_runner,
                 subagent_runner,
                 feedback_runner,
                 preflight_runner,
                 research_runner,
-                primary_runner,
+                tier_primary_runner,
                 prompt,
                 thread_id,
                 request=request,

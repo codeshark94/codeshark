@@ -77,8 +77,14 @@ class Config:
     quick_reasoning_effort: str = "low"
     routine_model: str = "gpt-5.6-luna"
     routine_reasoning_effort: str = "low"
+    standard_model: str = "gpt-5.6-terra"
+    standard_reasoning_effort: str = "medium"
     primary_model: str = "gpt-5.6-sol"
     primary_reasoning_effort: str = "high"
+    deep_model: str = "gpt-5.6-terra"
+    deep_reasoning_effort: str = "high"
+    high_assurance_model: str = "gpt-5.6-sol"
+    high_assurance_reasoning_effort: str = "high"
     rework_model: str = "gpt-5.6-sol"
     rework_reasoning_effort: str = "high"
     validator_model: str = "gpt-5.6-terra"
@@ -322,9 +328,23 @@ def load_config(path: Path | None = None) -> Config:
     routine_reasoning_effort = _require_reasoning_effort(
         data, "routine_reasoning_effort", "low"
     )
+    standard_model = _require_model_setting(data, "standard_model", routine_model)
+    standard_reasoning_effort = _require_reasoning_effort(
+        data, "standard_reasoning_effort", routine_reasoning_effort
+    )
     primary_model = _require_model_setting(data, "primary_model", "gpt-5.6-sol")
     primary_reasoning_effort = _require_reasoning_effort(
         data, "primary_reasoning_effort", "high"
+    )
+    deep_model = _require_model_setting(data, "deep_model", primary_model)
+    deep_reasoning_effort = _require_reasoning_effort(
+        data, "deep_reasoning_effort", primary_reasoning_effort
+    )
+    high_assurance_model = _require_model_setting(
+        data, "high_assurance_model", primary_model
+    )
+    high_assurance_reasoning_effort = _require_reasoning_effort(
+        data, "high_assurance_reasoning_effort", primary_reasoning_effort
     )
     rework_model = _require_model_setting(data, "rework_model", primary_model)
     rework_reasoning_effort = _require_reasoning_effort(
@@ -533,8 +553,14 @@ def load_config(path: Path | None = None) -> Config:
         quick_reasoning_effort=quick_reasoning_effort,
         routine_model=routine_model,
         routine_reasoning_effort=routine_reasoning_effort,
+        standard_model=standard_model,
+        standard_reasoning_effort=standard_reasoning_effort,
         primary_model=primary_model,
         primary_reasoning_effort=primary_reasoning_effort,
+        deep_model=deep_model,
+        deep_reasoning_effort=deep_reasoning_effort,
+        high_assurance_model=high_assurance_model,
+        high_assurance_reasoning_effort=high_assurance_reasoning_effort,
         rework_model=rework_model,
         rework_reasoning_effort=rework_reasoning_effort,
         validator_model=validator_model,
@@ -652,7 +678,13 @@ def set_model_assignments(
     preflight_model: str,
     config_path: Path | None = None,
     routine_reasoning_effort: str | None = None,
+    standard_model: str | None = None,
+    standard_reasoning_effort: str | None = None,
     primary_reasoning_effort: str | None = None,
+    deep_model: str | None = None,
+    deep_reasoning_effort: str | None = None,
+    high_assurance_model: str | None = None,
+    high_assurance_reasoning_effort: str | None = None,
     rework_model: str | None = None,
     rework_reasoning_effort: str | None = None,
     validator_reasoning_effort: str | None = None,
@@ -680,8 +712,18 @@ def set_model_assignments(
         "quick_reasoning_effort": quick_reasoning_effort or current.quick_reasoning_effort,
         "routine_model": routine_model,
         "routine_reasoning_effort": routine_reasoning_effort or current.routine_reasoning_effort,
+        "standard_model": standard_model or current.standard_model,
+        "standard_reasoning_effort": (
+            standard_reasoning_effort or current.standard_reasoning_effort
+        ),
         "primary_model": primary_model,
         "primary_reasoning_effort": primary_reasoning_effort or current.primary_reasoning_effort,
+        "deep_model": deep_model or current.deep_model,
+        "deep_reasoning_effort": deep_reasoning_effort or current.deep_reasoning_effort,
+        "high_assurance_model": high_assurance_model or current.high_assurance_model,
+        "high_assurance_reasoning_effort": (
+            high_assurance_reasoning_effort or current.high_assurance_reasoning_effort
+        ),
         "rework_model": rework_model or current.rework_model,
         "rework_reasoning_effort": rework_reasoning_effort or current.rework_reasoning_effort,
         "validator_model": validator_model,
@@ -1332,8 +1374,14 @@ def write_local_config(
             'quick_reasoning_effort = "low"',
             'routine_model = "gpt-5.6-luna"',
             'routine_reasoning_effort = "low"',
+            'standard_model = "gpt-5.6-terra"',
+            'standard_reasoning_effort = "medium"',
             'primary_model = "gpt-5.6-sol"',
             'primary_reasoning_effort = "high"',
+            'deep_model = "gpt-5.6-terra"',
+            'deep_reasoning_effort = "high"',
+            'high_assurance_model = "gpt-5.6-sol"',
+            'high_assurance_reasoning_effort = "high"',
             'rework_model = "gpt-5.6-sol"',
             'rework_reasoning_effort = "high"',
             'validator_model = "gpt-5.6-terra"',

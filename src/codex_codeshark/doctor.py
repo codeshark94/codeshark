@@ -82,6 +82,9 @@ def run_doctor() -> int:
         return (
             f"quick {config.quick_model} ({config.quick_reasoning_effort}); "
             f"routine {config.routine_model} ({config.routine_reasoning_effort}); "
+            f"standard primary {config.standard_model} ({config.standard_reasoning_effort}); "
+            f"deep primary {config.deep_model} ({config.deep_reasoning_effort}); "
+            f"high-assurance primary {config.high_assurance_model} ({config.high_assurance_reasoning_effort}); "
             f"primary owner {config.primary_model} ({config.primary_reasoning_effort}); "
             f"planner {config.preflight_model} ({config.preflight_reasoning_effort}); "
             f"research {config.research_model} ({config.research_reasoning_effort}); "

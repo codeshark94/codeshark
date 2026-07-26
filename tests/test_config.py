@@ -215,7 +215,10 @@ class ConfigTests(unittest.TestCase):
             )
 
             self.assertEqual(updated.routine_model, "gpt-5.6-terra")
+            self.assertEqual(updated.standard_model, "gpt-5.6-luna")
             self.assertEqual(updated.primary_model, "gpt-5.6-sol")
+            self.assertEqual(updated.deep_model, "gpt-5.6-sol")
+            self.assertEqual(updated.high_assurance_model, "gpt-5.6-sol")
             self.assertEqual(updated.validator_model, "gpt-5.6-luna")
             self.assertEqual(updated.feedback_model, "gpt-5.6-terra")
             self.assertEqual(updated.quick_model, "gpt-5.4-mini")
@@ -254,8 +257,14 @@ class ConfigTests(unittest.TestCase):
                 quick_reasoning_effort="low",
                 routine_model="gpt-5.6-luna",
                 routine_reasoning_effort="max",
+                standard_model="gpt-5.6-terra",
+                standard_reasoning_effort="medium",
                 primary_model="gpt-5.6-sol",
                 primary_reasoning_effort="ultra",
+                deep_model="gpt-5.6-terra",
+                deep_reasoning_effort="high",
+                high_assurance_model="gpt-5.6-sol",
+                high_assurance_reasoning_effort="high",
                 rework_model="gpt-5.4-nano",
                 rework_reasoning_effort="xhigh",
                 validator_model="gpt-5.6-terra",
@@ -274,6 +283,12 @@ class ConfigTests(unittest.TestCase):
             )
 
             self.assertEqual(updated.primary_reasoning_effort, "ultra")
+            self.assertEqual(updated.standard_model, "gpt-5.6-terra")
+            self.assertEqual(updated.standard_reasoning_effort, "medium")
+            self.assertEqual(updated.deep_model, "gpt-5.6-terra")
+            self.assertEqual(updated.deep_reasoning_effort, "high")
+            self.assertEqual(updated.high_assurance_model, "gpt-5.6-sol")
+            self.assertEqual(updated.high_assurance_reasoning_effort, "high")
             self.assertEqual(updated.quick_model, "gpt-5.4-mini")
             self.assertEqual(updated.quick_reasoning_effort, "low")
             self.assertEqual(updated.rework_model, "gpt-5.4-nano")
@@ -403,8 +418,14 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.quick_reasoning_effort, "low")
             self.assertEqual(loaded.routine_model, "gpt-5.6-luna")
             self.assertEqual(loaded.routine_reasoning_effort, "low")
+            self.assertEqual(loaded.standard_model, "gpt-5.6-luna")
+            self.assertEqual(loaded.standard_reasoning_effort, "low")
             self.assertEqual(loaded.primary_model, "gpt-5.6-sol")
             self.assertEqual(loaded.primary_reasoning_effort, "high")
+            self.assertEqual(loaded.deep_model, "gpt-5.6-sol")
+            self.assertEqual(loaded.deep_reasoning_effort, "high")
+            self.assertEqual(loaded.high_assurance_model, "gpt-5.6-sol")
+            self.assertEqual(loaded.high_assurance_reasoning_effort, "high")
             self.assertEqual(loaded.validator_model, "gpt-5.6-terra")
             self.assertEqual(loaded.validator_reasoning_effort, "high")
             self.assertEqual(loaded.feedback_model, "gpt-5.6-terra")
@@ -787,7 +808,10 @@ class ConfigTests(unittest.TestCase):
             self.assertIn("read_only_roots = []", path.read_text(encoding="utf-8"))
             self.assertIn("delegated_roots = []", path.read_text(encoding="utf-8"))
             self.assertIn('routine_model = "gpt-5.6-luna"', path.read_text(encoding="utf-8"))
+            self.assertIn('standard_model = "gpt-5.6-terra"', path.read_text(encoding="utf-8"))
             self.assertIn('primary_model = "gpt-5.6-sol"', path.read_text(encoding="utf-8"))
+            self.assertIn('deep_model = "gpt-5.6-terra"', path.read_text(encoding="utf-8"))
+            self.assertIn('high_assurance_model = "gpt-5.6-sol"', path.read_text(encoding="utf-8"))
             self.assertIn('validator_model = "gpt-5.6-terra"', path.read_text(encoding="utf-8"))
             self.assertIn('feedback_model = "gpt-5.6-terra"', path.read_text(encoding="utf-8"))
             self.assertIn(

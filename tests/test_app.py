@@ -1073,14 +1073,17 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["security"]["groups"], [])
         self.assertEqual(payload["model_assignments"][0]["role"], "Quick execution")
         self.assertEqual(payload["model_assignments"][1]["role"], "Routine execution")
-        self.assertEqual(payload["model_assignments"][2]["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_assignments"][2]["role"], "Primary ownership")
-        self.assertEqual(payload["model_assignments"][2]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][2]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][3]["role"], "Planning")
-        self.assertEqual(payload["model_assignments"][4]["role"], "Research")
-        self.assertEqual(payload["model_assignments"][5]["role"], "Independent review")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Adversarial review")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Standard primary")
+        self.assertEqual(payload["model_assignments"][3]["role"], "Deep primary")
+        self.assertEqual(payload["model_assignments"][4]["role"], "High-assurance primary")
+        self.assertEqual(payload["model_assignments"][5]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][5]["role"], "Primary ownership")
+        self.assertEqual(payload["model_assignments"][5]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][5]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][6]["role"], "Planning")
+        self.assertEqual(payload["model_assignments"][7]["role"], "Research")
+        self.assertEqual(payload["model_assignments"][8]["role"], "Independent review")
+        self.assertEqual(payload["model_assignments"][9]["role"], "Adversarial review")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
@@ -1092,7 +1095,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["active_tasks"][0]["orchestration_tier"], "standard")
         self.assertEqual(
             payload["active_tasks"][0]["orchestration_route"],
-            ["Primary ownership", "Routine execution"],
+            ["Primary ownership", "Standard primary"],
         )
         self.assertEqual(payload["active_tasks"][0]["completed_stages"], ["primary"])
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
@@ -1621,6 +1624,31 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(primary_runner.triage_prompts), 1)
         self.assertIn("Project: FETM", primary_runner.prompts[0][0])
 
+    def test_standard_tier_uses_its_own_primary_runner(self) -> None:
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: General]]\n"
+            "[[CODESHARK_RESUME: standard|primary]]\n"
+            "Analyze the supplied dataset.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+        routine_runner = FakeCodexRunner()
+        owner_runner = FakeCodexRunner()
+        standard_runner = FakeCodexRunner()
+
+        self.app._execute_task(
+            task,
+            runner=routine_runner,
+            primary_runner=owner_runner,
+            standard_runner=standard_runner,
+        )
+
+        self.assertEqual(len(standard_runner.prompts), 1)
+        self.assertEqual(routine_runner.prompts, [])
+        self.assertEqual(owner_runner.prompts, [])
+
     def test_project_router_can_create_a_new_workspace_project(self) -> None:
         runner = FakeCodexRunner(
             project_triage_message='{"decision": "new", "project": "Catalyst study", "confidence": "high"}'
@@ -2140,7 +2168,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
     def test_creates_configured_isolated_group_worker_runners(self) -> None:
         self.assertEqual(len(self.app._worker_runners), self.config.worker_count)
         self.assertEqual(len(self.app._quick_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._standard_runners), self.config.worker_count)
         self.assertEqual(len(self.app._primary_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._deep_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._high_assurance_runners), self.config.worker_count)
         self.assertEqual(len(self.app._rework_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
         self.assertEqual(len(self.app._feedback_runners), self.config.worker_count)
@@ -2175,9 +2206,30 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
+                runner.model == self.config.standard_model
+                and runner.model_reasoning_effort == self.config.standard_reasoning_effort
+                for runner in self.app._standard_runners
+            )
+        )
+        self.assertTrue(
+            all(
                 runner.model == self.config.primary_model
                 and runner.model_reasoning_effort == self.config.primary_reasoning_effort
                 for runner in self.app._primary_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.deep_model
+                and runner.model_reasoning_effort == self.config.deep_reasoning_effort
+                for runner in self.app._deep_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.high_assurance_model
+                and runner.model_reasoning_effort == self.config.high_assurance_reasoning_effort
+                for runner in self.app._high_assurance_runners
             )
         )
         self.assertTrue(

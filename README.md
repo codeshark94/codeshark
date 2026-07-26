@@ -193,13 +193,19 @@ worker_count = 8
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
-Codeshark first separates **project routing** from **task triage**. Project Router runs in a read-only, network-disabled, ephemeral session before any task-tier decision and selects active, existing, new, or projectless scope; it creates a project only for an explicit user request. Triage then selects one task tier—Quick, Routine, Standard, Deep, or High assurance—using that resolved project plus relevant project memory/assets, but no MCP or persistent session. **Quick is the default for ordinary bounded work**; Routine is reserved for work that genuinely needs a separate verifier. Task tiers decide which roles run: Direct execution serves both Quick and Routine; Standard adds independent review; Deep adds Planning and one rework/recheck loop; High assurance also adds Research and two loops. Project Router, Triage, Planning, Research, Primary execution, Independent review, Adversarial review, Rework, and Finalization are reusable roles with separately configurable model and reasoning settings. Existing configurations keep Router aligned with Triage until Router is changed. If Triage fails to return a valid structured decision, Codeshark safely falls back to Quick. The dedicated profile disables Fast mode.
+Codeshark first separates **project routing** from **task triage**. Project Router runs in a read-only, network-disabled, ephemeral session before any task-tier decision and selects active, existing, new, or projectless scope; it creates a project only for an explicit user request. Triage then selects one task tier—Quick, Routine, Standard, Deep, or High assurance—using that resolved project plus relevant project memory/assets, but no MCP or persistent session. **Quick is the default for ordinary bounded work**; Routine is reserved for work that genuinely needs a separate verifier. Each tier has its own execution model: Quick and Routine use their direct executors, while Standard, Deep, and High assurance use their respective Primary model. Deep adds Planning and one rework/recheck loop; High assurance also adds Research and two loops. The persistent Primary owner chooses project scope and tier but does not force its own model onto every tier. Project Router, Triage, Planning, Research, Independent review, Adversarial review, Rework, and Finalization are reusable roles with separately configurable model and reasoning settings. Existing configurations keep Router aligned with Triage until Router is changed. If Triage fails to return a valid structured decision, Codeshark safely falls back to Quick. The dedicated profile disables Fast mode.
 
 ```toml
 routine_model = "gpt-5.6-luna"
 routine_reasoning_effort = "medium"
+standard_model = "gpt-5.6-terra"
+standard_reasoning_effort = "medium"
 primary_model = "gpt-5.6-sol"
 primary_reasoning_effort = "high"
+deep_model = "gpt-5.6-terra"
+deep_reasoning_effort = "high"
+high_assurance_model = "gpt-5.6-sol"
+high_assurance_reasoning_effort = "high"
 rework_model = "gpt-5.6-sol"
 rework_reasoning_effort = "high"
 validator_model = "gpt-5.6-terra"

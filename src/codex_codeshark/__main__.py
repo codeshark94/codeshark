@@ -85,8 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--quick-effort")
     models.add_argument("--routine", required=True)
     models.add_argument("--routine-effort", required=True)
+    models.add_argument("--standard")
+    models.add_argument("--standard-effort")
     models.add_argument("--primary", required=True)
     models.add_argument("--primary-effort", required=True)
+    models.add_argument("--deep")
+    models.add_argument("--deep-effort")
+    models.add_argument("--high-assurance")
+    models.add_argument("--high-assurance-effort")
     models.add_argument("--rework", required=True)
     models.add_argument("--rework-effort", required=True)
     models.add_argument("--validator", required=True)
@@ -289,8 +295,14 @@ def main() -> int:
                 quick_reasoning_effort=args.quick_effort,
                 routine_model=args.routine,
                 routine_reasoning_effort=args.routine_effort,
+                standard_model=args.standard,
+                standard_reasoning_effort=args.standard_effort,
                 primary_model=args.primary,
                 primary_reasoning_effort=args.primary_effort,
+                deep_model=args.deep,
+                deep_reasoning_effort=args.deep_effort,
+                high_assurance_model=args.high_assurance,
+                high_assurance_reasoning_effort=args.high_assurance_effort,
                 rework_model=args.rework,
                 rework_reasoning_effort=args.rework_effort,
                 validator_model=args.validator,
@@ -311,7 +323,9 @@ def main() -> int:
             status = restart_when_idle()
             print(
                 "Models: "
-                f"quick={config.quick_model}, routine={config.routine_model}, primary={config.primary_model}, "
+                f"quick={config.quick_model}, routine={config.routine_model}, "
+                f"standard={config.standard_model}, primary-owner={config.primary_model}, "
+                f"deep={config.deep_model}, high-assurance={config.high_assurance_model}, "
                 f"rework={config.rework_model}, validator={config.validator_model}, "
                 f"feedback={config.feedback_model}, "
                 f"router={config.router_model}, "

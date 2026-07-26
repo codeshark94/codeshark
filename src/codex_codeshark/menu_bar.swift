@@ -2953,7 +2953,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 590),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2966,29 +2966,32 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Role Models")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 554, width: 588, height: 20)
+        title.frame = NSRect(x: 16, y: 684, width: 648, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "The persistent Primary owner chooses project scope and tier. Quick and Routine complete work in one session; review roles advise the owner only for Deep and High assurance.")
+        let detail = NSTextField(wrappingLabelWithString: "The Primary owner chooses project scope and tier. Each tier has its own execution model; review roles support Deep and High assurance only.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 512, width: 588, height: 28)
+        detail.frame = NSRect(x: 16, y: 642, width: 648, height: 28)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 170, y: 484, width: 245, height: 14)
+        modelHeader.frame = NSRect(x: 190, y: 614, width: 280, height: 14)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 425, y: 484, width: 179, height: 14)
+        effortHeader.frame = NSRect(x: 480, y: 614, width: 184, height: 14)
         content.addSubview(effortHeader)
 
         let roles = [
             ("Quick execution", "Quick execution", "gpt-5.4-mini", "low"),
             ("Routine execution", "Routine execution", "gpt-5.6-luna", "low"),
+            ("Standard primary", "Standard primary", "gpt-5.6-terra", "medium"),
+            ("Deep primary", "Deep primary", "gpt-5.6-terra", "high"),
+            ("High-assurance primary", "High-assurance primary", "gpt-5.6-sol", "high"),
             ("Primary owner", "Primary ownership", "gpt-5.6-terra", "high"),
             ("Planning", "Planning", "gpt-5.6-luna", "low"),
             ("Research", "Research", "gpt-5.6-luna", "medium"),
@@ -3002,16 +3005,19 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "Quick execution": "Quick",
             "Routine execution": "Routine",
             "Direct execution": "Routine",
+            "Standard primary": "Standard Primary",
+            "Deep primary": "Deep Primary",
+            "High-assurance primary": "High Assurance Primary",
             "Planning": "Planner",
             "Primary ownership": "Primary execution",
             "Independent review": "Validation",
             "Adversarial review": "Adversarial Review",
         ]
         for (index, role) in roles.enumerated() {
-            let y = 438 - (index * 48)
+            let y = 568 - (index * 48)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 12, weight: .medium)
-            label.frame = NSRect(x: 16, y: y + 18, width: 145, height: 16)
+            label.frame = NSRect(x: 16, y: y + 18, width: 164, height: 16)
             content.addSubview(label)
 
             let assignment = dashboard.snapshot.modelAssignments.first(where: {
@@ -3024,17 +3030,17 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             )
             recentUsage.font = .systemFont(ofSize: 9)
             recentUsage.textColor = .secondaryLabelColor
-            recentUsage.frame = NSRect(x: 16, y: y + 3, width: 145, height: 12)
+            recentUsage.frame = NSRect(x: 16, y: y + 3, width: 164, height: 12)
             content.addSubview(recentUsage)
             let modelPicker = modelPicker(
                 current,
                 role: role.1,
-                frame: NSRect(x: 170, y: y + 7, width: 245, height: 26)
+                frame: NSRect(x: 190, y: y + 7, width: 280, height: 26)
             )
             let effortPicker = reasoningPicker(
                 model: current,
                 current: currentEffort,
-                frame: NSRect(x: 425, y: y + 7, width: 179, height: 26)
+                frame: NSRect(x: 480, y: y + 7, width: 184, height: 26)
             )
             modelPicker.font = .systemFont(ofSize: 12)
             effortPicker.font = .systemFont(ofSize: 12)
@@ -3044,7 +3050,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             reasoningPickers[role.1] = effortPicker
         }
 
-        let separator = NSBox(frame: NSRect(x: 16, y: 52, width: 588, height: 1))
+        let separator = NSBox(frame: NSRect(x: 16, y: 52, width: 648, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
 
@@ -3056,7 +3062,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyModelRouting))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 520, y: 16, width: 84, height: 26)
+        apply.frame = NSRect(x: 580, y: 16, width: 84, height: 26)
         content.addSubview(apply)
 
         panel.contentView = content
@@ -3130,6 +3136,15 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let routinePicker = modelPickers["Routine execution"],
               let routine = selectedModel(routinePicker),
               let routineEffort = reasoningPickers["Routine execution"]?.titleOfSelectedItem,
+              let standardPicker = modelPickers["Standard primary"],
+              let standard = selectedModel(standardPicker),
+              let standardEffort = reasoningPickers["Standard primary"]?.titleOfSelectedItem,
+              let deepPicker = modelPickers["Deep primary"],
+              let deep = selectedModel(deepPicker),
+              let deepEffort = reasoningPickers["Deep primary"]?.titleOfSelectedItem,
+              let highAssurancePicker = modelPickers["High-assurance primary"],
+              let highAssurance = selectedModel(highAssurancePicker),
+              let highAssuranceEffort = reasoningPickers["High-assurance primary"]?.titleOfSelectedItem,
               let preflightPicker = modelPickers["Planning"],
               let preflight = selectedModel(preflightPicker),
               let preflightEffort = reasoningPickers["Planning"]?.titleOfSelectedItem,
@@ -3155,6 +3170,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--quick-effort", quickEffort,
             "--routine", routine,
             "--routine-effort", routineEffort,
+            "--standard", standard,
+            "--standard-effort", standardEffort,
             "--router", primary,
             "--router-effort", primaryEffort,
             "--triage", primary,
@@ -3165,6 +3182,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--research-effort", researchEffort,
             "--primary", primary,
             "--primary-effort", primaryEffort,
+            "--deep", deep,
+            "--deep-effort", deepEffort,
+            "--high-assurance", highAssurance,
+            "--high-assurance-effort", highAssuranceEffort,
             "--rework", primary,
             "--rework-effort", primaryEffort,
             "--validator", validator,
