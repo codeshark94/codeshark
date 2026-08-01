@@ -226,9 +226,9 @@ finalizer_reasoning_effort = "medium"
 
 ### Model usage estimates
 
-The menu-bar **Model Usage** panel uses the exact per-turn token breakdown emitted by Codex for Codeshark work. Its API text estimate uses the selected model's public standard-tier rates, including cache reads, GPT-5.6 cache writes, and the documented long-context premium for supported 1.05M-context models. Reasoning tokens are a subset of output tokens and are not charged twice.
+The menu-bar **Model Usage** panel uses the exact per-turn token breakdown emitted by Codex for Codeshark work. Its API-equivalent estimate uses the selected model's public OpenAI Standard-tier rates, including cache reads, GPT-5.6 cache writes, the documented long-context premium for supported 1.05M-context models, and recorded OpenAI web-search calls at the published per-call rate.
 
-Completed shell, file-change, MCP, web-search, and image-generation items are recorded separately for new turns. Codeshark does not invent a dollar amount when Codex does not emit an applicable billing line: tool-specific fees, regional-processing uplifts, external MCP/vendor charges, and ChatGPT/Codex plan quota debits remain explicitly unpriced. The estimate is therefore useful for comparing Codeshark's API-equivalent text work, not as an invoice or a measure of plan-limit consumption.
+Completed shell, file-change, MCP, web-search, and image-generation items are recorded separately for new turns. Codeshark does not invent a dollar amount when it lacks the billing inputs: local-shell use, MCP/vendor charges, image dimensions, container duration, regional-processing uplifts, OpenRouter/provider routing, and ChatGPT/Codex plan quota debits remain unpriced. The estimate is therefore useful for comparing direct OpenAI API-equivalent work, not as an invoice or a measure of plan-limit consumption.
 
 Keep read-only inspection roots separate:
 

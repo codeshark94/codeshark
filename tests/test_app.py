@@ -52,13 +52,16 @@ class FakeCodexRunner:
         *,
         triage_message: str | None = None,
         project_triage_message: str | None = None,
+        intake_message: str | None = None,
     ) -> None:
         self.model = "test-model"
         self.prompts = []
         self.triage_prompts = []
         self.project_triage_prompts = []
+        self.intake_prompts = []
         self.triage_message = triage_message
         self.project_triage_message = project_triage_message
+        self.intake_message = intake_message
         self.deleted_sessions = []
         self.delete_error = None
         self.steers = []
@@ -91,6 +94,14 @@ class FakeCodexRunner:
                 exit_code=0,
                 message=self.project_triage_message
                 or '{"decision": "projectless", "confidence": "low"}',
+                thread_id=None,
+                stderr="",
+            )
+        if prompt.startswith("[Codeshark conversation intake]"):
+            self.intake_prompts.append((prompt, thread_id, ephemeral, restricted, approved, full_access))
+            return RunResult(
+                exit_code=0,
+                message=self.intake_message or self._default_intake_message(prompt),
                 thread_id=None,
                 stderr="",
             )
@@ -132,6 +143,25 @@ class FakeCodexRunner:
         else:
             tier = "quick"
         return json.dumps({"tier": tier, "confidence": "high", "reason": "test"})
+
+    def _default_intake_message(self, prompt: str) -> str:
+        project = None
+        project_decision = "projectless"
+        if self.project_triage_message:
+            raw_project = json.loads(self.project_triage_message)
+            project_decision = raw_project.get("decision", project_decision)
+            project = raw_project.get("project")
+        raw_tier = json.loads(self.triage_message or self._default_triage_message(prompt))
+        decision = {
+            "project_decision": project_decision,
+            "tier": raw_tier["tier"],
+            "confidence": "high",
+        }
+        if project is not None:
+            decision["project"] = project
+        if "project_memories" in raw_tier:
+            decision["project_memories"] = raw_tier["project_memories"]
+        return json.dumps(decision)
 
     def cancel(self) -> bool:
         return False
@@ -1096,7 +1126,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["active_tasks"][0]["orchestration_tier"], "standard")
         self.assertEqual(
             payload["active_tasks"][0]["orchestration_route"],
-            ["Primary ownership", "Standard primary"],
+            ["Conversation lead", "Standard primary"],
         )
         self.assertEqual(payload["active_tasks"][0]["completed_stages"], ["primary"])
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
@@ -1583,8 +1613,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertEqual(len(runner.project_triage_prompts), 1)
-        self.assertTrue(runner.project_triage_prompts[0][2])
+        self.assertEqual(len(runner.intake_prompts), 1)
+        self.assertTrue(runner.intake_prompts[0][2])
         self.assertEqual(self.app.state.active_project(123), "FETM")
         self.assertIn("Project: FETM", runner.prompts[0][0])
         manifest = self.app.store.get_task_manifest(task.id)
@@ -1618,11 +1648,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             project_router_runner=router_runner,
         )
 
-        self.assertEqual(len(router_runner.project_triage_prompts), 1)
-        self.assertEqual(triage_runner.project_triage_prompts, [])
-        self.assertEqual(len(triage_runner.triage_prompts), 1)
-        self.assertEqual(primary_runner.project_triage_prompts, [])
-        self.assertEqual(primary_runner.triage_prompts, [])
+        self.assertEqual(router_runner.project_triage_prompts, [])
+        self.assertEqual(triage_runner.triage_prompts, [])
+        self.assertEqual(len(primary_runner.intake_prompts), 1)
+        self.assertEqual(primary_runner.intake_prompts[0][1], None)
+        self.assertTrue(primary_runner.intake_prompts[0][2])
         self.assertIn("Project: FETM", primary_runner.prompts[0][0])
 
     def test_standard_tier_uses_its_own_primary_runner(self) -> None:
@@ -1760,11 +1790,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn(
             "Known project gnw_transport_paper: memory: Figure revision status",
-            runner.project_triage_prompts[0][0],
+            runner.intake_prompts[0][0],
         )
         self.assertNotIn(
             "Confidential full project brief that belongs to execution.",
-            runner.project_triage_prompts[0][0],
+            runner.intake_prompts[0][0],
         )
         self.assertEqual(self.app.state.active_project(123), "gnw_transport_paper")
 
@@ -2123,7 +2153,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         app._execute_task(task)
 
-        self.assertEqual(len(runner.triage_prompts), 1)
+        self.assertEqual(len(runner.intake_prompts), 1)
         self.assertTrue(
             any("Journal manuscript editorial QA 논문 원고 검수" in prompt[0] for prompt in runner.prompts)
         )
@@ -2912,10 +2942,46 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(quick.prompts), 1)
         self.assertEqual(len(routine.prompts), 0)
         self.assertEqual(router.project_triage_prompts, [])
-        self.assertEqual(len(triage.triage_prompts), 1)
-        self.assertEqual(triage.triage_prompts[0][1], None)
-        self.assertTrue(triage.triage_prompts[0][2])
+        self.assertEqual(triage.triage_prompts, [])
+        self.assertEqual(len(quick.intake_prompts), 1)
+        self.assertEqual(quick.intake_prompts[0][1], None)
+        self.assertTrue(quick.intake_prompts[0][2])
         self.assertEqual(routine.triage_prompts, [])
+
+    def test_conversation_lead_combines_project_scope_and_quick_execution(self) -> None:
+        (self.config.workdir / "FETM").mkdir()
+        quick = FakeCodexRunner(
+            RunResult(exit_code=0, message="I continued the FETM work.", thread_id="fetm-thread", stderr=""),
+            intake_message=(
+                '{"project_decision": "existing", "project": "FETM", '
+                '"tier": "quick", "confidence": "high"}'
+            ),
+        )
+        routine = FakeCodexRunner()
+        router = FakeCodexRunner()
+        triage = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "Use the earlier transport measurements and continue from there.",
+            source="telegram",
+            ephemeral=False,
+        )
+
+        self.app._execute_task(
+            task,
+            runner=routine,
+            quick_runner=quick,
+            triage_runner=triage,
+            project_router_runner=router,
+        )
+
+        self.assertEqual(self.app.state.active_project(123), "FETM")
+        self.assertEqual(len(quick.intake_prompts), 1)
+        self.assertEqual(len(quick.prompts), 1)
+        self.assertIn("Project: FETM", quick.prompts[0][0])
+        self.assertEqual(router.project_triage_prompts, [])
+        self.assertEqual(triage.triage_prompts, [])
+        self.assertEqual(routine.prompts, [])
 
     def test_executor_receives_fresh_same_project_work_context(self) -> None:
         project = "gnw_transport_paper"
@@ -3032,7 +3098,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.app._execute_task(task, runner=runner)
 
-        prompt = runner.project_triage_prompts[0][0]
+        prompt = runner.intake_prompts[0][0]
         self.assertIn("[Project: FETM]", prompt)
         self.assertIn("Continue the FETM wall-hit simulation.", prompt)
         self.assertIn("The FETM convergence run is still active.", prompt)
@@ -3329,7 +3395,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = app.store.claim_next_task()
         app._execute_task(task)
 
-        self.assertTrue(runner.triage_prompts[0][5])
+        self.assertTrue(runner.intake_prompts[0][5])
         self.assertEqual(len(runner.prompts), 4)
         self.assertTrue(all(prompt[5] for prompt in runner.prompts))
         self.assertEqual(self.api.messages, [(123, "Validated result.")])

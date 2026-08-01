@@ -1647,7 +1647,7 @@ class AgentStore:
             prompt += (
                 "\n\n[Retry continuation]\n"
                 "Resume the interrupted task from its existing project session and workspace if available. "
-                "Do not rerun project routing, task triage, or any completed workflow stage. Inspect actual files, "
+                "Do not rerun conversation intake or any completed workflow stage. Inspect actual files, "
                 "recent artifacts, and completed changes before acting. Do not repeat completed work or external "
                 "side effects; finish the original requested outcome.\n"
                 "[/Retry continuation]"

@@ -1282,6 +1282,7 @@ private func workspaceDisplayPath(_ path: String) -> String {
 
 private func phaseTitle(_ phase: String) -> String {
     let labels = [
+        "ownership": "Conversation lead",
         "triage": "Task triage",
         "project-router": "Project routing",
         "preflight": "Plan",
@@ -1317,7 +1318,7 @@ private func orchestrationTierTitle(_ tier: String?) -> String {
 }
 
 private func orchestrationRouteText(_ route: [String]?) -> String {
-    guard let route, !route.isEmpty else { return "Awaiting task triage" }
+    guard let route, !route.isEmpty else { return "Awaiting conversation intake" }
     return route.joined(separator: " → ")
 }
 
@@ -1914,14 +1915,14 @@ private struct APIModelPrice {
 }
 
 private func apiModelPrice(for model: String) -> APIModelPrice? {
-    // Official OpenAI standard API list prices per 1M tokens. GPT-5.6 cache writes cost 1.25× input.
+    // Official OpenAI standard API list prices per 1M tokens.
     switch model {
     case "gpt-5.6-sol":
         return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: 6.25, output: 30.00, hasLongContextPremium: true)
     case "gpt-5.6-terra":
-        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: 3.125, output: 15.00, hasLongContextPremium: true)
+        return APIModelPrice(input: 2.00, cachedInput: 0.20, cacheWriteInput: 2.50, output: 12.00, hasLongContextPremium: true)
     case "gpt-5.6-luna":
-        return APIModelPrice(input: 1.00, cachedInput: 0.10, cacheWriteInput: 1.25, output: 6.00, hasLongContextPremium: true)
+        return APIModelPrice(input: 0.20, cachedInput: 0.02, cacheWriteInput: 0.25, output: 1.20, hasLongContextPremium: true)
     case "gpt-5.5":
         return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: nil, output: 30.00, hasLongContextPremium: true)
     case "gpt-5.4":
@@ -1946,7 +1947,8 @@ private func apiEquivalentCost(
     longContextInputTokens: Int,
     longContextCachedInputTokens: Int,
     longContextCacheWriteInputTokens: Int,
-    longContextOutputTokens: Int
+    longContextOutputTokens: Int,
+    webSearchCalls: Int
 ) -> Double? {
     guard let price = apiModelPrice(for: model) else { return nil }
     let cached = min(inputTokens, cachedInputTokens)
@@ -1957,7 +1959,9 @@ private func apiEquivalentCost(
         + Double(cached) * price.cachedInput / 1_000_000
         + Double(cacheWrites) * (price.cacheWriteInput ?? 0) / 1_000_000
         + Double(outputTokens) * price.output / 1_000_000
-    guard price.hasLongContextPremium else { return cost }
+    guard price.hasLongContextPremium else {
+        return cost + Double(max(0, webSearchCalls)) * 0.01
+    }
 
     let longInput = min(max(0, inputTokens), max(0, longContextInputTokens))
     let longCached = min(longInput, max(0, longContextCachedInputTokens))
@@ -1972,7 +1976,7 @@ private func apiEquivalentCost(
         + Double(longCached) * price.cachedInput / 1_000_000
         + Double(longCacheWrites) * (price.cacheWriteInput ?? 0) / 1_000_000
         + Double(longOutput) * price.output * 0.5 / 1_000_000
-    return cost
+    return cost + Double(max(0, webSearchCalls)) * 0.01
 }
 
 private func apiCostText(_ amount: Double) -> String {
@@ -1998,7 +2002,8 @@ private struct ProjectUsageGroup: Identifiable {
                 longContextInputTokens: $0.longContextInputTokens ?? 0,
                 longContextCachedInputTokens: $0.longContextCachedInputTokens ?? 0,
                 longContextCacheWriteInputTokens: $0.longContextCacheWriteInputTokens ?? 0,
-                longContextOutputTokens: $0.longContextOutputTokens ?? 0
+                longContextOutputTokens: $0.longContextOutputTokens ?? 0,
+                webSearchCalls: $0.webSearchCalls ?? 0
             )
         }
         return costs.isEmpty ? nil : costs.reduce(0, +)
@@ -2108,7 +2113,8 @@ struct ModelUsageView: View {
                 longContextInputTokens: group.longContextInputTokens,
                 longContextCachedInputTokens: group.longContextCachedInputTokens,
                 longContextCacheWriteInputTokens: group.longContextCacheWriteInputTokens,
-                longContextOutputTokens: group.longContextOutputTokens
+                longContextOutputTokens: group.longContextOutputTokens,
+                webSearchCalls: group.webSearchCalls
             ) ?? 0)
         }
     }
@@ -2215,7 +2221,7 @@ struct ModelUsageView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("API TEXT ESTIMATE")
+                    Text("API-EQUIVALENT")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(apiCostText(displayedAPICost))
@@ -2226,7 +2232,7 @@ struct ModelUsageView: View {
             .padding(.vertical, 8)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
 
-            Text("Estimated from recorded token usage and standard API rates.")
+            Text("OpenAI Standard rates for recorded tokens + $0.01 per recorded web search. Local shell, MCP, image, and provider-specific fees are excluded.")
             .font(.caption2)
             .foregroundStyle(.secondary)
 
@@ -2969,7 +2975,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         title.frame = NSRect(x: 16, y: 684, width: 648, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "The Primary owner chooses project scope and tier. Each tier has its own execution model; review roles support Deep and High assurance only.")
+        let detail = NSTextField(wrappingLabelWithString: "The Quick model reads conversation context and chooses project scope and tier. Quick is the default one-agent path; review roles support Deep and High assurance only.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
         detail.frame = NSRect(x: 16, y: 642, width: 648, height: 28)
@@ -2987,7 +2993,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         content.addSubview(effortHeader)
 
         let roles = [
-            ("Quick execution", "Quick execution", "gpt-5.4-mini", "low"),
+            ("Quick / conversation lead", "Quick execution", "gpt-5.4-mini", "low"),
             ("Routine execution", "Routine execution", "gpt-5.6-luna", "low"),
             ("Standard primary", "Standard primary", "gpt-5.6-terra", "medium"),
             ("Deep primary", "Deep primary", "gpt-5.6-terra", "high"),
