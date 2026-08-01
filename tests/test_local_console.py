@@ -5,7 +5,6 @@ from pathlib import Path
 from codex_codeshark.automation import AgentStore
 from codex_codeshark.config import Config
 from codex_codeshark.local_console import (
-    LOCAL_CONSOLE_CHAT_ID,
     LOCAL_CONSOLE_SOURCE,
     local_history,
     submit_local_request,
@@ -36,7 +35,7 @@ class LocalConsoleTests(unittest.TestCase):
             )
 
             task = AgentStore(root / "runtime" / "agent.db").get_task(submission.task_id)
-            self.assertEqual(task.chat_id, LOCAL_CONSOLE_CHAT_ID)
+            self.assertEqual(task.chat_id, config.administrator_user_id)
             self.assertEqual(task.source, LOCAL_CONSOLE_SOURCE)
             self.assertTrue(task.approved)
             self.assertIn("Summarize this file.", task.prompt)

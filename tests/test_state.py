@@ -63,6 +63,31 @@ class StateStoreTests(unittest.TestCase):
             self.assertFalse(store.migrate_legacy_session(123))
             self.assertEqual(StateStore(path).snapshot().last_update_id, 42)
 
+    def test_migrates_legacy_local_console_context_without_touching_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+            store.set_active_project(0, "Research")
+            store.set_session_thread_id(0, "local-research", "Research", now=200.0)
+            store.set_session_thread_id(123, "telegram-research", "Research", now=100.0)
+            store.set_session_thread_id(-100123, "group-research", "Research", now=300.0)
+            store.mark_session_interrupted(0, "Research")
+
+            self.assertTrue(store.migrate_local_console_context(123))
+
+            self.assertEqual(store.active_project(123), "Research")
+            self.assertEqual(
+                store.session_snapshot(123, "Research").codex_thread_id,
+                "local-research",
+            )
+            self.assertTrue(store.session_interrupted(123, "Research"))
+            self.assertEqual(
+                store.session_snapshot(-100123, "Research").codex_thread_id,
+                "group-research",
+            )
+            self.assertEqual(store.active_project(0), "General")
+            self.assertFalse(store.migrate_local_console_context(123))
+
     def test_keeps_temporary_sessions_separate_by_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = StateStore(Path(directory) / "state.json")

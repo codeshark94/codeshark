@@ -93,6 +93,7 @@ class TaskManifest:
     checks: tuple[str, ...]
     delivery_state: str
     updated_at: float
+    dossier: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -467,6 +468,7 @@ class AgentStore:
                     acceptance_json TEXT NOT NULL DEFAULT '[]',
                     artifacts_json TEXT NOT NULL DEFAULT '[]',
                     checks_json TEXT NOT NULL DEFAULT '[]',
+                    dossier_json TEXT NOT NULL DEFAULT '[]',
                     delivery_state TEXT NOT NULL DEFAULT 'not-requested',
                     updated_at REAL NOT NULL
                 );
@@ -578,6 +580,14 @@ class AgentStore:
                 connection.execute(
                     "ALTER TABLE schedules ADD COLUMN approved INTEGER NOT NULL DEFAULT 0"
                 )
+            manifest_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(task_manifests)").fetchall()
+            }
+            if "dossier_json" not in manifest_columns:
+                connection.execute(
+                    "ALTER TABLE task_manifests ADD COLUMN dossier_json TEXT NOT NULL DEFAULT '[]'"
+                )
             model_run_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(model_runs)").fetchall()
@@ -621,6 +631,21 @@ class AgentStore:
                 "UPDATE tasks SET status = 'queued', started_at = NULL "
                 "WHERE status = 'running' AND approved = 0"
             )
+
+    def migrate_legacy_local_console_tasks(self, administrator_chat_id: int) -> int:
+        """Move queued legacy local-console tasks onto the private admin queue."""
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tasks
+                SET chat_id = ?
+                WHERE chat_id = 0
+                  AND source = 'local'
+                  AND status IN ('queued', 'awaiting_approval')
+                """,
+                (administrator_chat_id,),
+            )
+        return max(0, cursor.rowcount)
 
     @staticmethod
     def _task(row: sqlite3.Row | None) -> TaskRecord | None:
@@ -822,6 +847,7 @@ class AgentStore:
             checks=tuple(json.loads(row["checks_json"])),
             delivery_state=row["delivery_state"],
             updated_at=row["updated_at"],
+            dossier=tuple(json.loads(row["dossier_json"])),
         )
 
     def upsert_task_manifest(
@@ -834,6 +860,7 @@ class AgentStore:
         acceptance: tuple[str, ...] = (),
         artifacts: tuple[str, ...] = (),
         checks: tuple[str, ...] = (),
+        dossier: tuple[str, ...] | None = None,
         delivery_state: str = "not-requested",
     ) -> None:
         now = time.time()
@@ -842,13 +869,17 @@ class AgentStore:
                 """
                 INSERT INTO task_manifests
                     (task_id, project, tier, phase, acceptance_json, artifacts_json,
-                     checks_json, delivery_state, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     checks_json, dossier_json, delivery_state, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, '[]'), ?, ?)
                 ON CONFLICT(task_id) DO UPDATE SET
                     phase = excluded.phase,
                     acceptance_json = excluded.acceptance_json,
                     artifacts_json = excluded.artifacts_json,
                     checks_json = excluded.checks_json,
+                    dossier_json = CASE
+                        WHEN ? IS NULL THEN task_manifests.dossier_json
+                        ELSE excluded.dossier_json
+                    END,
                     delivery_state = excluded.delivery_state,
                     updated_at = excluded.updated_at
                 """,
@@ -860,9 +891,34 @@ class AgentStore:
                     json.dumps(acceptance),
                     json.dumps(artifacts),
                     json.dumps(checks),
+                    json.dumps(dossier) if dossier is not None else None,
                     delivery_state,
                     now,
+                    json.dumps(dossier) if dossier is not None else None,
                 ),
+            )
+
+    def append_task_dossier_note(self, task_id: str, phase: str, note: str) -> None:
+        """Record a bounded specialist or execution handoff for later stages."""
+        normalized_phase = " ".join(phase.split())[:48]
+        normalized_note = " ".join(note.split())[:1_200]
+        if not normalized_phase or not normalized_note:
+            return
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT dossier_json FROM task_manifests WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if row is None:
+                return
+            try:
+                existing = json.loads(row["dossier_json"])
+            except (TypeError, ValueError):
+                existing = []
+            dossier = [item for item in existing if isinstance(item, str)]
+            dossier.append(f"{normalized_phase}: {normalized_note}")
+            connection.execute(
+                "UPDATE task_manifests SET dossier_json = ?, updated_at = ? WHERE task_id = ?",
+                (json.dumps(dossier[-12:]), time.time(), task_id),
             )
 
     def mark_task_manifest_phase(self, task_id: str, phase: str) -> None:

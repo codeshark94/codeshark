@@ -11,6 +11,8 @@ from .projects import normalize_project_name
 from .secure_io import atomic_write_bytes, read_private_bytes
 from .state import StateStore
 
+# Kept for migration compatibility with local-console tasks created before the
+# local UI shared the paired administrator's private project sessions.
 LOCAL_CONSOLE_CHAT_ID = 0
 LOCAL_CONSOLE_SOURCE = "local"
 
@@ -61,9 +63,13 @@ def submit_local_request(
     store = AgentStore(config.state_path.parent / "agent.db")
     if store.pending_count() >= config.queue_size:
         raise RuntimeError("the task queue is full")
-    project = normalize_project_name(state.active_project(LOCAL_CONSOLE_CHAT_ID))
+    # The local UI and the paired administrator's private Telegram chat are two
+    # interfaces to one private workspace.  Use the administrator identity as
+    # the task/session key; groups continue to use their own chat IDs.
+    administrator_id = config.administrator_user_id
+    project = normalize_project_name(state.active_project(administrator_id))
     task = store.enqueue_task(
-        LOCAL_CONSOLE_CHAT_ID,
+        administrator_id,
         f"[[CODESHARK_PROJECT: {project}]]\n{request}",
         source=LOCAL_CONSOLE_SOURCE,
         ephemeral=False,

@@ -33,6 +33,45 @@ class RiskPolicyTests(unittest.TestCase):
 
 
 class AgentStoreTests(unittest.TestCase):
+    def test_task_dossier_persists_when_manifest_phase_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.upsert_task_manifest(
+                "task-dossier",
+                project="Research",
+                tier="deep",
+                phase="routing",
+                dossier=("Objective: inspect the result", "Project: Research"),
+            )
+            store.append_task_dossier_note(
+                "task-dossier", "preflight handoff", "Check the source and output."
+            )
+            store.upsert_task_manifest(
+                "task-dossier",
+                project="Research",
+                tier="deep",
+                phase="primary",
+            )
+
+            manifest = store.get_task_manifest("task-dossier")
+
+            self.assertIsNotNone(manifest)
+            self.assertEqual(manifest.phase, "primary")
+            self.assertEqual(manifest.dossier[:2], ("Objective: inspect the result", "Project: Research"))
+            self.assertIn("preflight handoff: Check the source and output.", manifest.dossier)
+
+    def test_migrates_only_queued_legacy_local_console_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            local = store.enqueue_task(0, "local request", source="local", ephemeral=False)
+            group = store.enqueue_task(-100123, "group request", source="telegram-group", ephemeral=False)
+
+            moved = store.migrate_legacy_local_console_tasks(123)
+
+            self.assertEqual(moved, 1)
+            self.assertEqual(store.get_task(local.id).chat_id, 123)
+            self.assertEqual(store.get_task(group.id).chat_id, -100123)
+
     def test_latest_failure_hides_after_a_later_successful_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")

@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from dataclasses import replace
@@ -1590,7 +1591,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIsNotNone(manifest)
         self.assertEqual(manifest.project, "FETM")
 
-    def test_primary_owner_chooses_project_and_tier(self) -> None:
+    def test_configured_router_and_triage_choose_project_and_tier(self) -> None:
         (self.config.workdir / "FETM").mkdir()
         router_runner = FakeCodexRunner(
             project_triage_message='{"decision": "existing", "project": "FETM", "confidence": "high"}'
@@ -1617,11 +1618,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             project_router_runner=router_runner,
         )
 
-        self.assertEqual(router_runner.project_triage_prompts, [])
+        self.assertEqual(len(router_runner.project_triage_prompts), 1)
         self.assertEqual(triage_runner.project_triage_prompts, [])
-        self.assertEqual(triage_runner.triage_prompts, [])
-        self.assertEqual(len(primary_runner.project_triage_prompts), 1)
-        self.assertEqual(len(primary_runner.triage_prompts), 1)
+        self.assertEqual(len(triage_runner.triage_prompts), 1)
+        self.assertEqual(primary_runner.project_triage_prompts, [])
+        self.assertEqual(primary_runner.triage_prompts, [])
         self.assertIn("Project: FETM", primary_runner.prompts[0][0])
 
     def test_standard_tier_uses_its_own_primary_runner(self) -> None:
@@ -2739,7 +2740,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_cross_validation_runs_primary_validator_and_reconciliation_sessions(self) -> None:
         app = AgentApp(
-            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=True,
+                deep_uses_research=False,
+                high_assurance_uses_research=False,
+            ),
+            self.api,
         )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
@@ -2904,8 +2912,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(quick.prompts), 1)
         self.assertEqual(len(routine.prompts), 0)
         self.assertEqual(router.project_triage_prompts, [])
-        self.assertEqual(triage.triage_prompts, [])
-        self.assertEqual(len(routine.triage_prompts), 1)
+        self.assertEqual(len(triage.triage_prompts), 1)
+        self.assertEqual(triage.triage_prompts[0][1], None)
+        self.assertTrue(triage.triage_prompts[0][2])
+        self.assertEqual(routine.triage_prompts, [])
 
     def test_executor_receives_fresh_same_project_work_context(self) -> None:
         project = "gnw_transport_paper"
@@ -2970,8 +2980,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._workflow_plan(task, "Revise the current figure caption.", runner, project)
 
         prompt, thread_id, ephemeral, *_ = runner.triage_prompts[0]
-        self.assertEqual(thread_id, "thread-project")
-        self.assertFalse(ephemeral)
+        self.assertEqual(thread_id, None)
+        self.assertTrue(ephemeral)
         self.assertIn("Active project: gnw_transport_paper", prompt)
         self.assertIn("Persistent project session: available", prompt)
         self.assertIn("Use concise public academic terminology.", prompt)
@@ -3142,11 +3152,72 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(feedback.prompts), 2)
         self.assertIn("feedback verifier", feedback.prompts[0][0])
         self.assertIn("feedback verifier", feedback.prompts[1][0])
-        self.assertEqual(len(primary.prompts), 4)
+        self.assertEqual(len(primary.prompts), 3)
         self.assertIn("Internal planning brief", primary.prompts[0][0])
-        self.assertIn("finalization phase", primary.prompts[-1][0])
-        self.assertEqual(len(finalizer.prompts), 0)
+        self.assertIn("reconciliation phase", primary.prompts[-1][0])
+        self.assertEqual(len(finalizer.prompts), 1)
+        self.assertIn("finalization phase", finalizer.prompts[0][0])
         self.assertEqual(self.api.messages, [(123, "Verified migration is complete.")])
+
+    def test_deep_specialists_run_in_parallel_before_primary_execution(self) -> None:
+        class SpecialistRunner(FakeCodexRunner):
+            def __init__(self, result: RunResult, started: threading.Event, peer: threading.Event):
+                super().__init__(result)
+                self.started = started
+                self.peer = peer
+                self.saw_peer = False
+
+            def run(self, *args, **kwargs) -> RunResult:
+                self.started.set()
+                self.saw_peer = self.peer.wait(timeout=0.5)
+                return super().run(*args, **kwargs)
+
+        preflight_started = threading.Event()
+        research_started = threading.Event()
+        preflight = SpecialistRunner(
+            RunResult(0, "Inspect the current source and constraints.", "preflight", ""),
+            preflight_started,
+            research_started,
+        )
+        research = SpecialistRunner(
+            RunResult(0, "Independently inspect the relevant evidence.", "research", ""),
+            research_started,
+            preflight_started,
+        )
+        primary = FakeCodexRunner(RunResult(0, "Working result is ready.", "primary", ""))
+        validator = FakeCodexRunner(RunResult(0, "VERDICT: PASS", "validator", ""))
+        finalizer = FakeCodexRunner(RunResult(0, "Validated result.", "primary", ""))
+
+        result = self.app._run_cross_validation_workflow(
+            primary,
+            primary,
+            validator,
+            validator,
+            preflight,
+            research,
+            finalizer,
+            "Complete the requested task.",
+            "primary-thread",
+            request="Inspect the source and validate the result.",
+            task_context="",
+            plan=WorkflowPlan(
+                "deep",
+                uses_preflight=True,
+                uses_validator=True,
+                uses_research=True,
+                uses_finalizer=True,
+            ),
+            approved=False,
+            full_access=False,
+            file_delivery_enabled=False,
+            automatic_file_delivery=False,
+            task_id="parallel-specialists",
+            capacity_recovery_runner=primary,
+        )
+
+        self.assertTrue(preflight.saw_peer)
+        self.assertTrue(research.saw_peer)
+        self.assertEqual(result.message, "Validated result.")
 
     def test_rework_cycles_can_skip_adversarial_review(self) -> None:
         primary = FakeCodexRunner()
@@ -3210,6 +3281,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 ),
             ]
         )
+        self.app.config = replace(self.app.config, deep_uses_research=False)
         self.app.runner = runner
 
         self.app._handle_update(
@@ -3232,7 +3304,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_full_access_admin_uses_full_access_for_owner_and_support_phases(self) -> None:
         app = AgentApp(
-            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=True,
+                deep_uses_research=False,
+            ),
+            self.api,
         )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
@@ -3258,7 +3336,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_cross_validation_retries_with_a_fresh_validator_session(self) -> None:
         app = AgentApp(
-            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=True,
+                deep_uses_research=False,
+                high_assurance_uses_research=False,
+            ),
+            self.api,
         )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
@@ -3313,7 +3398,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_cross_validation_failure_returns_primary_recovery_not_validator_output(self) -> None:
         app = AgentApp(
-            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+            replace(
+                self.config,
+                admin_full_access=True,
+                admin_auto_approve_actions=True,
+                deep_uses_research=False,
+                high_assurance_uses_research=False,
+            ),
+            self.api,
         )
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(

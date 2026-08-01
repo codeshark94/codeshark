@@ -211,6 +211,70 @@ class StateStore:
             self._write()
             return True
 
+    def migrate_local_console_context(self, administrator_chat_id: int) -> bool:
+        """Merge the legacy local-console context into the private admin context.
+
+        Local console tasks historically used chat ID ``0`` while direct
+        Telegram tasks used the paired administrator ID.  The newest session
+        for each project wins, which preserves the most recent continuation
+        without ever mixing a group session into the administrator context.
+        """
+        legacy_key = "0"
+        administrator_key = str(administrator_chat_id)
+        if legacy_key == administrator_key:
+            return False
+
+        def newest(left: SessionState, right: SessionState) -> SessionState:
+            return max(
+                (left, right),
+                key=lambda session: (
+                    session.last_active_at,
+                    session.session_turn_count,
+                    bool(session.codex_thread_id),
+                ),
+            )
+
+        with self._lock:
+            changed = False
+            legacy_active_project = self._state.active_projects.pop(legacy_key, None)
+            if legacy_active_project is not None:
+                if administrator_key not in self._state.active_projects:
+                    self._state.active_projects[administrator_key] = legacy_active_project
+                changed = True
+
+            legacy_session = self._state.chat_sessions.pop(legacy_key, None)
+            if legacy_session is not None:
+                current = self._state.chat_sessions.get(administrator_key)
+                self._state.chat_sessions[administrator_key] = (
+                    legacy_session
+                    if current is None
+                    else newest(current, legacy_session)
+                )
+                changed = True
+
+            legacy_projects = self._state.project_sessions.pop(legacy_key, {})
+            if legacy_projects:
+                administrator_projects = self._state.project_sessions.setdefault(
+                    administrator_key, {}
+                )
+                for project, session in legacy_projects.items():
+                    current = administrator_projects.get(project)
+                    administrator_projects[project] = (
+                        session if current is None else newest(current, session)
+                    )
+                changed = True
+
+            legacy_interrupted = self._state.interrupted_projects.pop(legacy_key, set())
+            if legacy_interrupted:
+                self._state.interrupted_projects.setdefault(administrator_key, set()).update(
+                    legacy_interrupted
+                )
+                changed = True
+
+            if changed:
+                self._write()
+            return changed
+
     def active_project(self, chat_id: int) -> str:
         with self._lock:
             return self._state.active_projects.get(str(chat_id), DEFAULT_PROJECT)

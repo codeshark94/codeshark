@@ -122,7 +122,7 @@ class Config:
     standard_uses_finalizer: bool = False
     standard_uses_adversarial_review: bool = False
     deep_uses_preflight: bool = True
-    deep_uses_research: bool = False
+    deep_uses_research: bool = True
     deep_uses_validator: bool = True
     deep_feedback_iterations: int = 1
     deep_uses_finalizer: bool = True
@@ -167,6 +167,15 @@ class Config:
     group_codex_home: Path = GROUP_RUNTIME_ROOT / "codex-home"
     agent_repository_root: Path = PROJECT_ROOT
 
+    @property
+    def administrator_user_id(self) -> int:
+        """Return the single paired administrator identity.
+
+        Configuration validation requires exactly one administrator, so this is
+        the canonical private-context key for both Telegram and the local UI.
+        """
+        return next(iter(self.allowed_user_ids))
+
 
 def _require_int(data: dict[str, Any], key: str, default: int) -> int:
     value = data.get(key, default)
@@ -201,7 +210,7 @@ _DEFAULT_ORCHESTRATION_PROFILES = {
     "quick": OrchestrationProfile(False, False, False, 0, False),
     "routine": OrchestrationProfile(False, False, False, 0, False),
     "standard": OrchestrationProfile(False, False, False, 0, False),
-    "deep": OrchestrationProfile(True, False, True, 1, True, True),
+    "deep": OrchestrationProfile(True, True, True, 1, True, True),
     "high_assurance": OrchestrationProfile(True, True, True, 2, True, True),
 }
 
@@ -1419,7 +1428,7 @@ def write_local_config(
             "standard_uses_finalizer = false",
             "standard_uses_adversarial_review = false",
             "deep_uses_preflight = true",
-            "deep_uses_research = false",
+            "deep_uses_research = true",
             "deep_uses_validator = true",
             "deep_feedback_iterations = 1",
             "deep_uses_finalizer = true",
