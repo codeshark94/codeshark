@@ -81,7 +81,8 @@ HELP_TEXT = """Codex-codeshark
 
 Plain text: submit a task or steer active private work
 /status: show the active task, queue, and session
-/model_usage: show recorded model activity for the last 5 hours, 7 days, and lifetime
+/model_usage: show recorded model activity for the current measurement window
+/reset_model_usage: start a fresh model-usage measurement
 /project [NAME]: show or switch the active project (default: General)
 /new, /clear_temp: delete this project's temporary session and start fresh
 /name NAME: set Codeshark's self-introduction name
@@ -811,29 +812,30 @@ class AgentApp:
                         "updated_at": int(manifest.updated_at),
                     }
                 )
-            model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
-            weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
-            lifetime_model_usage = self.store.model_run_summaries()
+            measurement_started_at = self.store.usage_measurement_started_at()
+            recent_since = max(measurement_started_at, now - 5 * 60 * 60)
+            weekly_since = max(measurement_started_at, now - 7 * 24 * 60 * 60)
+            model_usage = self.store.model_run_summaries(since=recent_since)
+            weekly_model_usage = self.store.model_run_summaries(since=weekly_since)
+            lifetime_model_usage = self.store.model_run_summaries(since=measurement_started_at)
             project_usage = [
                 summary
-                for summary in self.store.project_model_usage(since=now - 5 * 60 * 60)
+                for summary in self.store.project_model_usage(since=recent_since)
                 if summary.project in registered_project_names
             ]
             weekly_project_usage = [
                 summary
-                for summary in self.store.project_model_usage(
-                    since=now - 7 * 24 * 60 * 60
-                )
+                for summary in self.store.project_model_usage(since=weekly_since)
                 if summary.project in registered_project_names
             ]
             lifetime_project_usage = [
                 summary
-                for summary in self.store.project_model_usage()
+                for summary in self.store.project_model_usage(since=measurement_started_at)
                 if summary.project in registered_project_names
             ]
             weekly_role_usage = {
                 item.role: item
-                for item in self.store.model_role_usage(since=now - 7 * 24 * 60 * 60)
+                for item in self.store.model_role_usage(since=weekly_since)
             }
             profiles = orchestration_profiles(self.config)
 
@@ -1221,6 +1223,7 @@ class AgentApp:
                             project_usage_payload(summary)
                             for summary in lifetime_project_usage
                         ],
+                        "usage_measurement_started_at": int(measurement_started_at),
                         "account_usage": self._account_usage_payload(),
                         "activity_log": [
                             {
@@ -1548,6 +1551,8 @@ class AgentApp:
             self._send_message(chat_id, self._status_text(chat_id))
         elif command == "/model_usage":
             self._send_chunks(chat_id, self._model_usage_text())
+        elif command == "/reset_model_usage":
+            self._reset_model_usage(chat_id)
         elif command == "/project":
             self._set_project(chat_id, argument)
         elif command in {"/new", "/clear_temp"}:
@@ -5858,10 +5863,11 @@ class AgentApp:
 
     def _model_usage_text(self) -> str:
         now = time.time()
+        measurement_started_at = self.store.usage_measurement_started_at()
         windows = (
-            ("Last 5 hours", now - 5 * 60 * 60),
-            ("Last 7 days", now - 7 * 24 * 60 * 60),
-            ("Lifetime", None),
+            ("Last 5 hours", max(measurement_started_at, now - 5 * 60 * 60)),
+            ("Last 7 days", max(measurement_started_at, now - 7 * 24 * 60 * 60)),
+            ("Since measurement started", measurement_started_at),
         )
         lines = [
             "Codex usage telemetry",
@@ -5916,6 +5922,18 @@ class AgentApp:
                     f"{summary.completed}/{summary.runs} completed, {elapsed_minutes:.1f} min"
                 )
         return "\n".join(lines)
+
+    def _reset_model_usage(self, chat_id: int) -> None:
+        started_at = self.store.reset_usage_measurement()
+        with self._status_lock:
+            active_task_count = len(self._active_tasks)
+        self._write_menu_status(active_task_count)
+        started = datetime.fromtimestamp(started_at).strftime("%Y-%m-%d %H:%M")
+        self._send_message(
+            chat_id,
+            "Started a fresh Codeshark model-usage measurement at " + started + ". "
+            "Historical run audit data is retained but excluded from the new measurement.",
+        )
 
     def _memories_text(self, chat_id: int) -> str:
         project = self.state.active_project(chat_id)

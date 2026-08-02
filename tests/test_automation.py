@@ -309,6 +309,26 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(usage[0].reasoning_output_tokens, 15)
             self.assertEqual(lifetime_usage[0].total_tokens, 160)
 
+    def test_usage_measurement_reset_preserves_the_run_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.record_model_run(
+                task_id="task-1",
+                phase="primary",
+                model="gpt-5.6-luna",
+                reasoning_effort="low",
+                started_at=100.0,
+                finished_at=110.0,
+                exit_code=0,
+                cancelled=False,
+                timed_out=False,
+            )
+
+            self.assertEqual(store.reset_usage_measurement(started_at=120.0), 120.0)
+            self.assertEqual(store.usage_measurement_started_at(), 120.0)
+            self.assertEqual(len(store.model_run_summaries()), 1)
+            self.assertEqual(store.model_run_summaries(since=120.0), [])
+
     def test_tracks_long_context_and_observed_tool_items(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")

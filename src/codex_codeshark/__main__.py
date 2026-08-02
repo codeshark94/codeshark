@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("restart", help="restart the background service")
     commands.add_parser("restart-when-idle", help=argparse.SUPPRESS)
     commands.add_parser("refresh-menu", help="rebuild and restart only the menu bar")
+    commands.add_parser(
+        "reset-model-usage", help="start a fresh Codeshark model-usage measurement"
+    )
     commands.add_parser("apply-pending-restart", help=argparse.SUPPRESS)
     commands.add_parser("service-status", help="show the background service status")
     security = commands.add_parser("set-security", help="set Codeshark execution security settings")
@@ -163,6 +166,12 @@ def main() -> int:
         if args.command == "refresh-menu":
             refresh_menu_bar()
             print("Menu bar: refreshed")
+            return 0
+        if args.command == "reset-model-usage":
+            config = load_config()
+            store = AgentStore(config.state_path.parent / "agent.db")
+            started_at = store.reset_usage_measurement()
+            print(f"Model usage measurement started: {int(started_at)}")
             return 0
         if args.command == "apply-pending-restart":
             status = wait_for_deferred_restart()

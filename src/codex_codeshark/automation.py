@@ -513,6 +513,10 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS model_runs_recent
                     ON model_runs(finished_at DESC);
+                CREATE TABLE IF NOT EXISTS usage_measurement (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    started_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS guardrail_candidates (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_task_id TEXT NOT NULL,
@@ -616,6 +620,10 @@ class AgentStore:
                         connection.execute(
                             f"ALTER TABLE model_runs ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0"
                         )
+            connection.execute(
+                "INSERT OR IGNORE INTO usage_measurement (singleton, started_at) VALUES (1, ?)",
+                (time.time(),),
+            )
             self._prune_tasks(connection)
             self._prune_schedules(connection)
             self._prune_deliveries(connection)
@@ -1053,6 +1061,23 @@ class AgentStore:
                     max(0, image_generation_calls),
                 ),
             )
+
+    def usage_measurement_started_at(self) -> float:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT started_at FROM usage_measurement WHERE singleton = 1"
+            ).fetchone()
+        return float(row["started_at"]) if row is not None else time.time()
+
+    def reset_usage_measurement(self, *, started_at: float | None = None) -> float:
+        """Start a new usage measurement without deleting historical run audit data."""
+        reset_at = time.time() if started_at is None else started_at
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO usage_measurement (singleton, started_at) VALUES (1, ?)",
+                (reset_at,),
+            )
+        return reset_at
 
     def model_role_usage(self, *, since: float) -> list[ModelRoleUsage]:
         with self._connect() as connection:

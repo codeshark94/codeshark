@@ -2057,8 +2057,33 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("exact tokens", text)
         self.assertIn("gpt-5.6-luna (medium), routine", text)
         self.assertIn("160 tokens from 1/1 turns", text)
-        self.assertIn("Lifetime:", text)
+        self.assertIn("Since measurement started:", text)
         self.assertIn("Live account quota", text)
+
+    def test_reset_model_usage_excludes_prior_runs_from_the_dashboard(self) -> None:
+        finished_at = time.time() - 1
+        self.app.store.record_model_run(
+            task_id="old-task",
+            phase="routine",
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+            started_at=finished_at - 10,
+            finished_at=finished_at,
+            exit_code=0,
+            cancelled=False,
+            timed_out=False,
+            total_tokens=100,
+            token_usage_recorded=True,
+        )
+
+        started_at = self.app.store.reset_usage_measurement()
+        self.app._write_menu_status(0)
+
+        payload = json.loads(
+            (self.config.state_path.parent / "menu-status.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(payload["usage_measurement_started_at"], int(started_at))
+        self.assertEqual(payload["model_usage_lifetime"], [])
 
     def test_existing_figure_layout_request_loads_the_layout_skill(self) -> None:
         runner = FakeCodexRunner()

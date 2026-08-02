@@ -597,6 +597,7 @@ struct DashboardSnapshot: Decodable {
     let projectUsage5h: [DashboardProjectUsage]
     let projectUsage7d: [DashboardProjectUsage]
     let projectUsageLifetime: [DashboardProjectUsage]
+    let usageMeasurementStartedAt: Int?
     let accountUsage: DashboardAccountUsage?
     let orchestration: DashboardOrchestration?
     let security: DashboardSecurity?
@@ -621,6 +622,7 @@ struct DashboardSnapshot: Decodable {
         projectUsage5h: [],
         projectUsage7d: [],
         projectUsageLifetime: [],
+        usageMeasurementStartedAt: nil,
         accountUsage: nil,
         orchestration: nil,
         security: nil
@@ -646,6 +648,7 @@ struct DashboardSnapshot: Decodable {
         case projectUsage5h = "project_usage_5h"
         case projectUsage7d = "project_usage_7d"
         case projectUsageLifetime = "project_usage_lifetime"
+        case usageMeasurementStartedAt = "usage_measurement_started_at"
         case accountUsage = "account_usage"
         case orchestration
         case security
@@ -671,6 +674,7 @@ struct DashboardSnapshot: Decodable {
         projectUsage5h: [DashboardProjectUsage],
         projectUsage7d: [DashboardProjectUsage],
         projectUsageLifetime: [DashboardProjectUsage],
+        usageMeasurementStartedAt: Int?,
         accountUsage: DashboardAccountUsage?,
         orchestration: DashboardOrchestration?,
         security: DashboardSecurity?
@@ -694,6 +698,7 @@ struct DashboardSnapshot: Decodable {
         self.projectUsage5h = projectUsage5h
         self.projectUsage7d = projectUsage7d
         self.projectUsageLifetime = projectUsageLifetime
+        self.usageMeasurementStartedAt = usageMeasurementStartedAt
         self.accountUsage = accountUsage
         self.orchestration = orchestration
         self.security = security
@@ -720,6 +725,7 @@ struct DashboardSnapshot: Decodable {
         projectUsage5h = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage5h) ?? []
         projectUsage7d = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsage7d) ?? []
         projectUsageLifetime = try container.decodeIfPresent([DashboardProjectUsage].self, forKey: .projectUsageLifetime) ?? []
+        usageMeasurementStartedAt = try container.decodeIfPresent(Int.self, forKey: .usageMeasurementStartedAt)
         accountUsage = try container.decodeIfPresent(DashboardAccountUsage.self, forKey: .accountUsage)
         orchestration = try container.decodeIfPresent(DashboardOrchestration.self, forKey: .orchestration)
         security = try container.decodeIfPresent(DashboardSecurity.self, forKey: .security)
@@ -2044,6 +2050,12 @@ struct ModelUsageView: View {
         }
     }
 
+    private var measurementStartedText: String? {
+        guard let startedAt = model.snapshot.usageMeasurementStartedAt else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(startedAt))
+            .formatted(date: .abbreviated, time: .shortened)
+    }
+
     private var projectEntries: [DashboardProjectUsage] {
         switch period {
         case 0:
@@ -2242,7 +2254,7 @@ struct ModelUsageView: View {
                 Picker("Period", selection: $period) {
                     Text("5 hours").tag(0)
                     Text("7 days").tag(1)
-                    Text("Lifetime").tag(2)
+                    Text("Since reset").tag(2)
                 }
                 Picker("Breakdown", selection: $breakdown) {
                     Text("Models").tag(0)
@@ -2251,6 +2263,12 @@ struct ModelUsageView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+
+            if let measurementStartedText {
+                Text("Measurement started \(measurementStartedText)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
