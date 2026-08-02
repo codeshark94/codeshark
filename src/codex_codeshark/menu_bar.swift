@@ -2102,6 +2102,14 @@ struct ModelUsageView: View {
         groups.reduce(0) { $0 + $1.totalTokens }
     }
 
+    private var measuredRuns: Int {
+        groups.reduce(0) { $0 + $1.measuredRuns }
+    }
+
+    private var runs: Int {
+        groups.reduce(0) { $0 + $1.runs }
+    }
+
     private var estimatedAPICost: Double {
         groups.reduce(0) { total, group in
             total + (apiEquivalentCost(
@@ -2129,6 +2137,14 @@ struct ModelUsageView: View {
         projectGroups.reduce(0) { $0 + $1.totalTokens }
     }
 
+    private var projectMeasuredRuns: Int {
+        projectGroups.reduce(0) { $0 + $1.measuredRuns }
+    }
+
+    private var projectRuns: Int {
+        projectGroups.reduce(0) { $0 + $1.runs }
+    }
+
     private var projectEstimatedAPICost: Double {
         projectGroups.reduce(0) { $0 + ($1.estimatedAPICost ?? 0) }
     }
@@ -2141,9 +2157,34 @@ struct ModelUsageView: View {
         breakdown == 0 ? estimatedAPICost : projectEstimatedAPICost
     }
 
+    private var displayedMeasuredRuns: Int {
+        breakdown == 0 ? measuredRuns : projectMeasuredRuns
+    }
+
+    private var displayedRuns: Int {
+        breakdown == 0 ? runs : projectRuns
+    }
+
     private var unpricedModels: [String] {
         let source = breakdown == 0 ? entries.map(\.model) : projectEntries.map(\.model)
         return Array(Set(source.filter { apiModelPrice(for: $0) == nil })).sorted()
+    }
+
+    private var apiCostIsComplete: Bool {
+        displayedRuns > 0 && displayedMeasuredRuns == displayedRuns && unpricedModels.isEmpty
+    }
+
+    private var pricingCoverageText: String {
+        guard displayedRuns > 0 else {
+            return "No completed model turns in this period."
+        }
+        let coverage = "Detailed token data: \(displayedMeasuredRuns)/\(displayedRuns) completed turns."
+        guard !apiCostIsComplete else { return coverage }
+        var note = "Observed lower bound — \(coverage)"
+        if !unpricedModels.isEmpty {
+            note += " Unpriced models: \(unpricedModels.joined(separator: ", "))."
+        }
+        return note
     }
 
     private var visibleQuotaBuckets: [DashboardUsageBucket] {
@@ -2221,7 +2262,7 @@ struct ModelUsageView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("API-EQUIVALENT")
+                    Text(apiCostIsComplete ? "API-EQUIVALENT" : "OBSERVED API COST")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(apiCostText(displayedAPICost))
@@ -2232,9 +2273,19 @@ struct ModelUsageView: View {
             .padding(.vertical, 8)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
 
-            Text("OpenAI Standard rates for recorded tokens + $0.01 per recorded web search. Local shell, MCP, image, and provider-specific fees are excluded.")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            Group {
+                if apiCostIsComplete {
+                    Text(pricingCoverageText)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(pricingCoverageText)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .font(.caption)
+            Text("OpenAI Standard rates for recorded tokens + $0.01 per recorded web search. This is not a provider invoice; local shell, MCP, image, and provider-specific fees are excluded.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             if !unpricedModels.isEmpty {
                 Text("No public standard API rate: \(unpricedModels.joined(separator: ", ")).")
